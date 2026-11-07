@@ -140,7 +140,7 @@ class MujocoSim:
             bin_yaw=bin_yaw,
             bin_inner_half=BIN_INNER_HALF,
             box_on_bin_floor=any({c.geom1, c.geom2} == {self._box_geom, self._bin_floor} for c in d.contact[: d.ncon]),
-            box_at_rest=settled_long_enough and max(recent) < AT_REST_SPEED,
+            box_at_rest=settled_long_enough and max(recent, default=0.0) < AT_REST_SPEED,
             robot_fallen=self._fallen,
             joint_limit_violation=self._limit_violated,
             penetration=self._penetrated,
@@ -168,10 +168,9 @@ class MujocoSim:
                 work_y = self.work_y + sign * call.params.get("distance_cm", DEFAULT_REACH_CM) / 100
                 if abs(work_y) > REACH_LIMIT + 1e-9:
                     return f"{call.skill}: past the {REACH_LIMIT * 100:.0f} cm reach limit"
-                previous, self.work_y = self.work_y, work_y
-                error = self._move_hands(self._hand_point(), half, 0.6)
-                if error:
-                    self.work_y = previous
+                error = self._move_hands(self._hand_point(work_y=work_y), half, 0.6)
+                if error is None:
+                    self.work_y = work_y
                 return error
             case "turn_left" | "turn_right":
                 sign = 1.0 if call.skill == "turn_left" else -1.0
@@ -183,11 +182,15 @@ class MujocoSim:
                 move(self.model, self.data, goal, max(0.4, abs(waist - self.waist) / TURN_SPEED), self._tick)
                 self.waist = waist
             case "hug":
-                self.closed = True
-                return self._move_hands(self._hand_point(), CLOSED_HALF, 0.8)
+                error = self._move_hands(self._hand_point(closed=True), CLOSED_HALF, 0.8)
+                if error is None:
+                    self.closed = True
+                return error
             case "lift":
-                self.lifted = True
-                return self._move_hands(self._hand_point(), half, 1.0)
+                error = self._move_hands(self._hand_point(lifted=True), half, 1.0)
+                if error is None:
+                    self.lifted = True
+                return error
             case "place":
                 height = self._hand_point()[2]
                 goals, ctrl = [], self.data.ctrl.copy()
@@ -206,9 +209,14 @@ class MujocoSim:
                 move(self.model, self.data, self.data.ctrl.copy(), SETTLE_S, self._tick)
         return None
 
-    def _hand_point(self) -> tuple[float, float, float]:
-        z = (HUG_Z if self.closed else READY_Z) + (LIFT_DZ if self.lifted else 0.0)
-        return BOX_X, self.work_y, z
+    def _hand_point(
+        self, *, work_y: float | None = None, closed: bool | None = None, lifted: bool | None = None
+    ) -> tuple[float, float, float]:
+        """Where the hands go for the current state, or for the state a skill is about to commit."""
+        closed = self.closed if closed is None else closed
+        lifted = self.lifted if lifted is None else lifted
+        z = (HUG_Z if closed else READY_Z) + (LIFT_DZ if lifted else 0.0)
+        return BOX_X, self.work_y if work_y is None else work_y, z
 
     def _plan_hands(
         self, point: tuple[float, float, float], half: float, ctrl: np.ndarray

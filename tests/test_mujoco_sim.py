@@ -15,7 +15,7 @@ try:
     from isaacs_mom.sim.mujoco.preview import OraclePolicy
 
     SIM = MujocoSim()
-except Exception as e:  # noqa: BLE001  # no GL context (e.g. no osmesa) shows up as many exception types
+except Exception as e:  # a missing GL context (e.g. no osmesa) surfaces as several exception types
     pytest.skip(f"MuJoCo cannot render here: {e}", allow_module_level=True)
 
 SEED = 1  # a layout the scripted policy completes; the box starts 9 cm left of centre
