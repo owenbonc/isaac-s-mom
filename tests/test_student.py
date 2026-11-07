@@ -188,3 +188,32 @@ def test_trainer_without_adapter_weights_leaves_no_checkpoint(tmp_path: Path) ->
     with pytest.raises(RuntimeError, match="adapter_model.safetensors"):
         finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=tmp_path / "ckpts", trainer=trainer)
     assert not (tmp_path / "ckpts").exists()
+
+
+def test_rerunning_a_round_replaces_the_old_checkpoint(tmp_path: Path) -> None:
+    rows = [example(tmp_path, SkillTarget(skill="retract"))]
+    checkpoints = tmp_path / "ckpts"
+
+    def first(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+        return {**ADAPTER, "stale.bin": b"old"}
+
+    def second(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+        return {"adapter_config.json": b"{}", "adapter_model.safetensors": b"new"}
+
+    finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=checkpoints, trainer=first)
+    finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=checkpoints, trainer=second)
+    out = checkpoints / "ckpt-r1"
+    assert not (out / "stale.bin").exists()
+    assert (out / "adapter_model.safetensors").read_bytes() == b"new"
+    assert not (checkpoints / "ckpt-r1.tmp").exists()
+
+
+def test_nested_trainer_file_name_is_rejected_before_anything_is_written(tmp_path: Path) -> None:
+    rows = [example(tmp_path, SkillTarget(skill="retract"))]
+
+    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+        return {**ADAPTER, "sub/x.bin": b"x"}
+
+    with pytest.raises(RuntimeError, match="not plain"):
+        finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=tmp_path / "ckpts", trainer=trainer)
+    assert not (tmp_path / "ckpts").exists()

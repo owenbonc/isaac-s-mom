@@ -5,6 +5,7 @@ Every round retrains from the base model on the cumulative set, so a checkpoint 
 
 import json
 import logging
+import shutil
 import time
 from collections.abc import Callable
 from pathlib import Path
@@ -59,11 +60,16 @@ def finetune(
     missing = [name for name in ADAPTER_FILES if name not in files]
     if missing:
         raise RuntimeError(f"trainer returned no {', '.join(missing)}")
+    for name in files:
+        if Path(name).name != name or name in {".", ".."}:
+            raise RuntimeError(f"trainer returned a file name that is not plain: {name!r}")
     checkpoint = checkpoint_id(round_)
     out = checkpoint_dir / checkpoint
-    out.mkdir(parents=True, exist_ok=True)
+    staging = checkpoint_dir / f"{checkpoint}.tmp"
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
     for name, data in files.items():
-        (out / name).write_bytes(data)
+        (staging / name).write_bytes(data)
     meta = {
         "checkpoint": checkpoint,
         "previous": base_checkpoint,
@@ -73,6 +79,8 @@ def finetune(
         "frames": len(images),
         "seconds": round(time.monotonic() - started, 1),
     }
-    (out / "meta.json").write_text(json.dumps(meta, indent=2))
+    (staging / "meta.json").write_text(json.dumps(meta, indent=2))
+    shutil.rmtree(out, ignore_errors=True)
+    staging.replace(out)
     log.info("fine-tuned %s on %d examples in %.0f s", checkpoint, len(examples), meta["seconds"])
     return checkpoint
