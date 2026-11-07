@@ -18,7 +18,7 @@ from isaacs_mom.teacher.argon import Argon, stub_generate
 
 
 def run_id(text: str) -> str:
-    """Checked up front, because a bad id would only fail after a paid fine-tune."""
+    """Checked up front, because a bad id would only fail after a round's fine-tune."""
     if not valid_run_id(text):
         raise argparse.ArgumentTypeError(
             f"{text!r}: use ASCII letters, digits, '.', '_' or '-', not starting or ending with '.'"
