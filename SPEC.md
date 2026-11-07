@@ -31,7 +31,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - The demo video is recorded from the rendered frames (head camera next to a third-person camera), not screen capture.
 
 ### 3.2 Student (workstream 4)
-- SmolVLM2-500M-Video-Instruct, local (Mac MPS or the 4070 Ti laptop). `predict_skill(obs, instruction, feedback) -> SkillCall`, output parsed as JSON and checked against the whitelist; an unparseable answer becomes `reobserve` and is logged.
+- SmolVLM2-500M-Video-Instruct, local (the team's Windows NVIDIA machines with CUDA 12.8 torch, or Mac MPS; CPU torch on Linux and CI). `predict_skill(obs, instruction, feedback) -> SkillCall`, output parsed as JSON and checked against the whitelist; an unparseable answer becomes `reobserve` and is logged.
 - Two consecutive `reobserve` replies from the model end the student's episode (`act` returns `None`); an unparseable reply's fallback `reobserve` does not count.
 - Fine-tuning: LoRA on Modal A10G (`student/finetune_modal.py`), on training examples (§4.3). Each round produces a checkpoint id `<run_id>/ckpt-r<round>`, stored in `runs/<run_id>/checkpoints/ckpt-r<round>/` (gitignored); `ckpt-r0` is the base model.
 
