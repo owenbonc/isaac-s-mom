@@ -223,3 +223,20 @@ def test_a_simulator_crash_is_a_failed_replay_not_a_lost_run(tmp_path: Path) -> 
     assert (report.replayed, report.reproduced) == (1, 0)
     assert report.failures[0].reason == "replay raised FatalError: simulation unstable"
     assert _load(path).replay_valid is False
+
+
+def test_a_save_failure_keeps_the_divergence_it_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1615)
+    first = path.parent / _load(path).steps[0].actions
+    np.save(first, np.zeros_like(np.load(first)))
+
+    def read_only(path: Path, manifest: EpisodeManifest) -> None:
+        raise PermissionError("read-only folder")
+
+    monkeypatch.setattr(sys.modules["isaacs_mom.validator.replay"], "write_manifest", read_only)
+
+    report = replay_accepted(FakeSim(), tmp_path)
+
+    assert report.failures[0].reason == (
+        "step 0: executed actions differ; could not save the replay result: read-only folder"
+    )
