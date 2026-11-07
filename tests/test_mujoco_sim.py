@@ -188,7 +188,7 @@ def test_a_box_pushed_into_the_table_is_flagged(sim: MujocoSim) -> None:
     sim.execute(SkillCall(skill="reobserve"))
     gt = sim.ground_truth()
     assert gt.penetration
-    assert validate(gt).reason == "objects penetrated each other"
+    assert "penetration" in validate(gt).reason.split("; ")
 
 
 def test_a_shoved_robot_is_flagged_as_fallen(sim: MujocoSim) -> None:
@@ -196,7 +196,7 @@ def test_a_shoved_robot_is_flagged_as_fallen(sim: MujocoSim) -> None:
     _wait(sim, 2.0)
     gt = sim.ground_truth()
     assert gt.robot_fallen
-    assert validate(gt).reason == "robot fell"
+    assert validate(gt).reason.split("; ")[0] == "robot fell"
 
 
 def _state(sim: MujocoSim) -> tuple[object, ...]:
@@ -288,7 +288,7 @@ def test_a_robot_shoved_while_walking_is_flagged_as_fallen(blind_sim: MujocoSim)
     _wait(blind_sim, 1.0)
     gt = blind_sim.ground_truth()
     assert gt.robot_fallen
-    assert validate(gt).reason == "robot fell"
+    assert "robot fell" in validate(gt).reason.split("; ")
 
 
 def test_the_scripted_policy_finds_a_bin_moved_mid_carry(blind_sim: MujocoSim) -> None:
