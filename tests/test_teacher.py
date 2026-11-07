@@ -402,3 +402,19 @@ def test_the_key_is_read_from_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyP
     env.write_text(f"# comment\n{line}\n")
     assert env_value("GEMINI_API_KEY", env) == "abc"
     assert env_value("GEMINI_API_KEY", tmp_path / "missing") is None
+
+
+def test_the_documented_fake_run_needs_no_key_and_asking_for_argon_without_one_stops_at_once(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    from isaacs_mom.orchestrator import cli
+
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(argon_module, "ENV_PATH", tmp_path / "no.env")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--rounds", "0", "--run-id", "doc"])
+    cli.main()
+    assert "(stub teacher)" in capsys.readouterr().out
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--teacher", "argon", "--rounds", "0"])
+    with pytest.raises(MissingKey):
+        cli.main()

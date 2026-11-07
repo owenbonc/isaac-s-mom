@@ -1,8 +1,8 @@
 # Workstreams: what each owner builds
 
-Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everything else changes only through a PR that says why. The foundation ships each module as a working stand-in with its final signature, so `uv run mom run --sim fake --teacher stub` runs end to end today, without a key. Replace the stand-in, keep the signature, and keep that command working.
+Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everything else changes only through a PR that says why. The foundation ships each module as a working stand-in with its final signature, so `uv run mom run --sim fake` runs end to end today. Replace the stand-in, keep the signature, and keep that command working.
 
-Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run --sim fake --teacher stub --rounds 1`. Agents in a worktree run `scripts/agent-setup.sh origin/phase-1` instead.
+Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run --sim fake --rounds 1`. Agents in a worktree run `scripts/agent-setup.sh origin/phase-1` instead.
 
 ## 1. Simulation and robot — `isaacs_mom/sim/mujoco/`
 - `MujocoSim` (`sim.py`) implements `TruthSim` (`isaacs_mom/sim/base.py`, SPEC §3.1, §4.1) over `scene.py`, with arm IK and motion in `control.py`.
