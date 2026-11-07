@@ -1,3 +1,4 @@
+import math
 from collections.abc import Callable
 from pathlib import Path
 
@@ -11,8 +12,8 @@ from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.validator import replay
 
 
-class GreedyPusher:
-    """Test-only: lines up behind the block using ground truth, then pushes. Real policies never see ground truth."""
+class GreedyHugger:
+    """Test-only: lines up, hugs, lifts, turns to the bin and places, using ground truth real policies never see."""
 
     controller: Controller = "teacher"
     checkpoint: str | None = None
@@ -22,16 +23,20 @@ class GreedyPusher:
 
     def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
         gt = self.sim.ground_truth()
-        dy = gt.block_xy[1] - obs.joint_state[1]
-        if abs(dy) > 0.01:
-            return SkillCall(
-                skill="approach_right" if dy > 0 else "approach_left", params={"distance_cm": abs(dy) * 100}
-            )
-        gap = gt.target_xy[0] - gt.block_xy[0]
-        if gap > 0.01:
-            behind = gt.block_xy[0] - 0.025 - obs.joint_state[0]
-            return SkillCall(skill="push_forward", params={"distance_cm": min((behind + gap) * 100, 20)})
-        return None
+        work_y, waist, closed, lifted = obs.joint_state
+        if gt.box_on_bin_floor:
+            return None
+        if not closed:
+            dy = gt.box_xyz[1] - work_y
+            if abs(dy) > 0.01:
+                return SkillCall(skill="reach_left" if dy > 0 else "reach_right", params={"distance_cm": abs(dy) * 100})
+            return SkillCall(skill="hug")
+        if not lifted:
+            return SkillCall(skill="lift")
+        turn = math.degrees(math.atan2(gt.bin_xy[1], gt.bin_xy[0]) - waist)
+        if abs(turn) > 2:
+            return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
+        return SkillCall(skill="place")
 
 
 class ReobserveOnce:
@@ -52,7 +57,7 @@ def _record(tmp_path: Path, make_policy: Callable[[FakeSim], Policy], seed: int,
         seed=seed,
         split="dev",
         round_=0,
-        instruction="push",
+        instruction="hug",
         perturb_at=perturb_at,
     )
     return tmp_path / "episodes" / manifest.episode_id / "manifest.json"
@@ -63,7 +68,7 @@ def _load(path: Path) -> EpisodeManifest:
 
 
 def test_replay_reproduces_an_accepted_episode_and_marks_the_manifest(tmp_path: Path) -> None:
-    path = _record(tmp_path, GreedyPusher, seed=1600)
+    path = _record(tmp_path, GreedyHugger, seed=1600)
     assert _load(path).validation.accepted  # type: ignore[union-attr]
     assert replay(FakeSim(), path)
     assert _load(path).replay_valid is True
@@ -76,7 +81,7 @@ def test_replay_reproduces_a_rejected_episode(tmp_path: Path) -> None:
 
 
 def test_replay_applies_the_recorded_mid_run_perturbation(tmp_path: Path) -> None:
-    path = _record(tmp_path, GreedyPusher, seed=1602, perturb_at=1)
+    path = _record(tmp_path, GreedyHugger, seed=1602, perturb_at=1)
     manifest = _load(path)
     assert [p.before_step for p in manifest.perturbations] == [1]
     assert replay(FakeSim(), path)
@@ -87,7 +92,7 @@ def test_replay_applies_the_recorded_mid_run_perturbation(tmp_path: Path) -> Non
 
 
 def test_replay_rejects_tampered_actions(tmp_path: Path) -> None:
-    path = _record(tmp_path, GreedyPusher, seed=1603)
+    path = _record(tmp_path, GreedyHugger, seed=1603)
     first = path.parent / _load(path).steps[0].actions
     np.save(first, np.zeros_like(np.load(first)))
     assert not replay(FakeSim(), path)
@@ -109,7 +114,7 @@ def test_replay_of_a_zero_step_episode_reproduces(tmp_path: Path) -> None:
 
 
 def test_replay_without_validation_is_false(tmp_path: Path) -> None:
-    path = _record(tmp_path, GreedyPusher, seed=1605)
+    path = _record(tmp_path, GreedyHugger, seed=1605)
     manifest = _load(path)
     manifest.validation = None
     path.write_text(manifest.model_dump_json())
