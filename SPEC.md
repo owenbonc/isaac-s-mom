@@ -49,7 +49,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 ### 3.5 Orchestrator, dashboard, demo (workstream 5)
 - One command, `uv run mom run`, executes the loop (§3.6) and writes events.
 - Dashboard (FastAPI plus one HTML page, server-sent events): live head camera, the current controller (student checkpoint or teacher), each decision with its reasoning, validator verdicts, the success-rate table per round, and where each model runs with its measured latency.
-  - Provenance (rule 6): a run on FakeSim is labelled placeholder; a run is live while events are arriving or a fine-tune is pending, recorded otherwise. Model and host names come from configuration and are labelled as configuration, not as measured data. A stream reconnect rebuilds the view from the start, never on top of what is shown.
+  - Provenance (rule 6): a run on FakeSim is labelled placeholder; a run is live while events are arriving (the last within 20 s) or a fine-tune started less than 30 minutes ago has not completed, recorded otherwise, so a run that dies mid-fine-tune stops claiming to be live. Model and host names come from configuration and are labelled as configuration, not as measured data. A stream reconnect rebuilds the view from the start, never on top of what is shown.
   - Each panel shows one episode at a time: its frames, decisions, diagnosis and verdict, never another episode's.
   - Presenter controls: Space pauses and resumes the view (events buffer while paused); ← and → move between this run's episodes; P jumps to the shown episode's perturbation. The decision log follows new rows only when it is already scrolled to the bottom.
   - Readable from the back of a room on a 1280×720 projector: no functional text below 16 px.
