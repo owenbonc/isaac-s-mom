@@ -1,6 +1,5 @@
 """The teach -> fine-tune loop (SPEC §3.6)."""
 
-from collections.abc import Callable
 from pathlib import Path
 
 from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult
@@ -12,8 +11,6 @@ from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator.training import build_training_set
-
-ArgonFactory = Callable[[EventLog], Argon]
 
 INSTRUCTION = "Hug the orange box, lift it, and put it in the green bin."
 TARGET_RATE = 0.8
@@ -50,10 +47,9 @@ def run_loop(
     max_rounds: int = MAX_ROUNDS,
     demos: int = DEMOS_PER_ROUND,
     dev_trials: int = DEV_TRIALS,
-    make_argon: ArgonFactory = Argon,
+    argon: Argon,
 ) -> list[EvaluationResult]:
     events = EventLog(run_dir, run_id)
-    argon = make_argon(events)  # one budget for the whole run (SPEC §2 rule 5)
     checkpoint = BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):

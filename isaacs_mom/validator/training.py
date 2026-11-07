@@ -3,6 +3,7 @@ from pathlib import Path
 
 from isaacs_mom.contracts import EpisodeManifest, SkillTarget, TrainingExample, TrainingSetSummary
 from isaacs_mom.seeds import assert_not_heldout
+from isaacs_mom.validator.recorder import write_atomically
 from isaacs_mom.validator.rules import failure_categories
 
 
@@ -41,16 +42,17 @@ def build_training_set(run_dir: Path, round_: int) -> Path:
     ]
     for episode_dir, manifest in manifests:
         lines += [e.model_dump_json() for e in training_examples(episode_dir, manifest)]
-    out.write_text("".join(line + "\n" for line in lines))
-    out.with_suffix(".summary.json").write_text(
-        _summarise(round_, [m for _, m in manifests], len(lines)).model_dump_json(indent=2)
+    write_atomically(out, "".join(line + "\n" for line in lines))
+    write_atomically(
+        out.with_suffix(".summary.json"),
+        _summarise(round_, [m for _, m in manifests], len(lines)).model_dump_json(indent=2),
     )
     return out
 
 
 def _summarise(round_: int, manifests: list[EpisodeManifest], examples: int) -> TrainingSetSummary:
-    # A demonstration is a dev episode the teacher drove at least one step of.
-    demos = [m for m in manifests if m.split == "dev" and any(s.controller == "teacher" for s in m.steps)]
+    # A demonstration is a dev episode the teacher drove, from its first step or after a takeover.
+    demos = [m for m in manifests if m.split == "dev" and (m.driver == "teacher" or _teacher_stepped(m))]
     verdicts = [m.validation for m in demos if m.validation is not None]
     rejected = [v for v in verdicts if not v.accepted]
     return TrainingSetSummary(
@@ -61,7 +63,11 @@ def _summarise(round_: int, manifests: list[EpisodeManifest], examples: int) -> 
         rejected=len(rejected),
         unfinished=len(demos) - len(verdicts),
         rejected_by=dict(Counter(c for v in rejected for c in failure_categories(v.reason) or ["other"])),
-        # A teacher that stops before its first step leaves no teacher step, so count these rather than drop them.
+        # Dev episodes with no step at all, whoever drove them, so a policy that stopped at once stays visible.
         empty_dev_episodes=sum(1 for m in manifests if m.split == "dev" and not m.steps),
         examples=examples,
     )
+
+
+def _teacher_stepped(manifest: EpisodeManifest) -> bool:
+    return any(s.controller == "teacher" for s in manifest.steps)

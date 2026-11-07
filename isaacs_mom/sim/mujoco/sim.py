@@ -86,6 +86,7 @@ class MujocoSim:
         self._box_qadr = self.model.jnt_qposadr[self.model.joint("box_free").id]
         self._box_dadr = self.model.jnt_dofadr[self.model.joint("box_free").id]
         self._bin = self.model.body("bin").mocapid[0]
+        self._waist_qadr = self.model.jnt_qposadr[self.model.joint("waist_yaw_joint").id]
         self._box_geom = self.model.geom("box").id
         self._bin_floor = self.model.geom("bin_floor").id
         self._table_top = self.model.geom("table_top").id
@@ -146,7 +147,10 @@ class MujocoSim:
     def ground_truth(self) -> GroundTruth:
         d = self.data
         bin_yaw = 2 * float(np.arctan2(d.mocap_quat[self._bin][3], d.mocap_quat[self._bin][0]))
+        pelvis = d.xmat[self.robot.pelvis].reshape(3, 3)
         return GroundTruth(
+            robot_xy=(float(d.xpos[self.robot.pelvis][0]), float(d.xpos[self.robot.pelvis][1])),
+            robot_yaw=float(np.arctan2(pelvis[1, 0], pelvis[0, 0]) + d.qpos[self._waist_qadr]),
             box_xyz=(float(d.xpos[self._box][0]), float(d.xpos[self._box][1]), float(d.xpos[self._box][2])),
             bin_xy=(float(d.mocap_pos[self._bin][0]), float(d.mocap_pos[self._bin][1])),
             bin_yaw=bin_yaw,

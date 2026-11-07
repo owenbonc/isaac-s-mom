@@ -80,7 +80,8 @@ class Perturbation(BaseModel):
 class GroundTruth(BaseModel):
     """Simulator facts for the validator and orchestrator only (SPEC §2 rule 1). The bin is square, `bin_inner_half`
     wide either side of its centre and turned by `bin_yaw`; `box_on_bin_floor` means touching the floor inside its
-    walls."""
+    walls. `robot_xy` is the pelvis on the floor and `robot_yaw` the torso heading (pelvis heading plus waist twist),
+    the frame the head camera and the skills share."""
 
     box_xyz: tuple[float, float, float]
     bin_xy: tuple[float, float]
@@ -91,6 +92,8 @@ class GroundTruth(BaseModel):
     robot_fallen: bool
     joint_limit_violation: bool
     penetration: bool
+    robot_xy: tuple[float, float]
+    robot_yaw: float
 
 
 class Validation(BaseModel):
@@ -138,6 +141,8 @@ class EpisodeManifest(BaseModel):
     instruction: str
     sim_version: str
     robot_config: str
+    # Who drove the episode from its first step, so one refused before any step is still attributed.
+    driver: Controller | None = None
     steps: list[StepRecord] = Field(default_factory=list)
     perturbations: list[PerturbationRecord] = Field(default_factory=list)
     takeover_step: int | None = None

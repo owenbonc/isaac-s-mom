@@ -66,6 +66,7 @@ def run_episode(
         instruction=instruction,
         sim_version=sim.sim_version,
         robot_config=sim.robot_config,
+        driver=policy.controller,
     )
     events.emit(
         "episode_started",

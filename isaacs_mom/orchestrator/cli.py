@@ -49,16 +49,14 @@ def main() -> None:
         serve(args.run, args.port)
         return
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
-    argons: list[Argon] = []
-
-    def make_argon(events: EventLog) -> Argon:
-        argons.append(Argon(events, generate=stub_generate if teacher == "stub" else None))
-        return argons[-1]
-
+    run_dir = Path("runs") / args.run_id
+    # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
+    argon = Argon(EventLog(run_dir, args.run_id), generate=stub_generate if teacher == "stub" else None)
+    if teacher == "argon":
+        argon.check()  # the stub has no key or model to check, so it spends nothing
     if args.command == "demo":
         from isaacs_mom.orchestrator.demo import run_demo
 
-        run_dir = Path("runs") / args.run_id
         manifest = run_demo(
             make_sim(args.sim),
             ckpt=args.ckpt,
@@ -67,15 +65,13 @@ def main() -> None:
             out=args.out,
             run_dir=run_dir,
             run_id=args.run_id,
-            make_argon=make_argon,
+            argon=argon,
         )
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
-
-    run_dir = Path("runs") / args.run_id
-    results = run_loop(make_sim(args.sim), run_dir, args.run_id, max_rounds=args.rounds, make_argon=make_argon)
+    results = run_loop(make_sim(args.sim), run_dir, args.run_id, max_rounds=args.rounds, argon=argon)
     for r in results:
         print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")
-    print(argons[0].summary() + (" (stub teacher)" if teacher == "stub" else ""))
+    print(argon.summary() + (" (stub teacher)" if teacher == "stub" else ""))
     print(f"run saved to {run_dir}")

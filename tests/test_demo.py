@@ -20,10 +20,6 @@ def jpeg(colour: tuple[int, int, int], size: tuple[int, int]) -> bytes:
     return out.getvalue()
 
 
-def done_argon(events: EventLog) -> Argon:
-    return Argon(events, generate=stub_generate)  # no network in tests
-
-
 def frame_count(path: Path) -> int:
     return sum(1 for _ in iio.imiter(path))
 
@@ -56,7 +52,7 @@ def test_demo_records_every_step_and_the_perturbation(tmp_path: Path) -> None:
         out=out,
         run_dir=run_dir,
         run_id="demo",
-        make_argon=done_argon,
+        argon=Argon(EventLog(run_dir, "demo"), generate=stub_generate),  # no network in tests
     )
     assert frame_count(out) == len(manifest.steps) > 3
     events = [Event.model_validate_json(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
@@ -76,6 +72,6 @@ def test_demo_refuses_a_heldout_seed(tmp_path: Path) -> None:
             out=tmp_path / "d.mp4",
             run_dir=tmp_path,
             run_id="d",
-            make_argon=done_argon,
+            argon=Argon(EventLog(tmp_path, "d"), generate=stub_generate),  # no network in tests
         )
     assert not (tmp_path / "d.mp4").exists()

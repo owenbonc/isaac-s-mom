@@ -149,10 +149,8 @@ def test_episode_started_names_the_simulator_so_the_page_can_label_fakesim_place
 
 
 def test_each_teacher_demonstration_names_the_failed_episode_whose_diagnosis_it_acts_on(tmp_path: Path) -> None:
-    def done_argon(events: EventLog) -> Argon:
-        return Argon(events, generate=stub_generate)  # no network in tests
-
-    run_loop(FakeSim(), tmp_path, "r1", max_rounds=1, demos=3, dev_trials=2, make_argon=done_argon)
+    argon = Argon(EventLog(tmp_path, "r1"), generate=stub_generate)  # no network in tests
+    run_loop(FakeSim(), tmp_path, "r1", max_rounds=1, demos=3, dev_trials=2, argon=argon)
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
     starts = {e["data"]["episode_id"]: e["data"] for e in events if e["type"] == "episode_started"}
     diagnosed = [e["data"]["episode_id"] for e in events if e["type"] == "diagnosis"]

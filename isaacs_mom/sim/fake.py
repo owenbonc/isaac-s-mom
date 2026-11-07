@@ -88,6 +88,8 @@ class FakeSim:
 
     def ground_truth(self) -> GroundTruth:
         return GroundTruth(
+            robot_xy=(0.0, 0.0),  # the robot stands at the origin; only its waist turns
+            robot_yaw=self.waist,
             box_xyz=(float(self.box[0]), float(self.box[1]), self.box_z),
             bin_xy=(float(self.bin[0]), float(self.bin[1])),
             bin_yaw=self.bin_yaw,
