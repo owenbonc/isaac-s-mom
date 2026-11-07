@@ -89,6 +89,17 @@ def test_median_latency_carries_its_sample_size_per_controller() -> None:
     assert out["summary"]["finetune"] is None
 
 
+def test_latency_medians_count_only_decisions_that_chose_a_skill() -> None:
+    stop = ("decision", {"controller": "teacher", "step": 2, "skill": None, "reason": "done", "latency_ms": 0.0})
+    out = fold(
+        ("episode_started", {"episode_id": "e"}),
+        decision(0, controller="teacher", latency=800.0),
+        decision(1, controller="teacher", latency=1200.0),
+        stop,
+    )
+    assert out["summary"]["teacher"] == {"median": 1000.0, "n": 2}
+
+
 def test_missing_or_bad_latency_is_not_counted() -> None:
     out = fold(("episode_started", {"episode_id": "e"}), decision(0, latency=None), decision(1, latency="fast"))
     assert out["summary"]["student"] is None
@@ -188,11 +199,14 @@ def test_a_diagnosis_stays_with_the_episode_it_diagnoses() -> None:
     assert b["diagnosis"] is None
 
 
-def provenance(events: list[dict], now: float, episode: int | None = None, paused: bool = False) -> str:
+def provenance(
+    events: list[dict], now: float, episode: int | None = None, paused: bool = False, lost: bool = False
+) -> str:
     script = f"""
     const v = S.view();
     for (const e of events) S.reduce(v.live, e);
     if ({"true" if paused else "false"}) S.keydown(v, {{ key: " " }}, {now});
+    if ({"true" if lost else "false"}) S.disconnect(v);
     return S.provenance(v, {now}, {"null" if episode is None else f"S.shown(v).episodes[{episode}]"});
     """
     return run(script, events)
@@ -213,6 +227,33 @@ def test_a_real_run_is_live_while_events_arrive_or_a_finetune_is_pending_and_rec
     assert provenance(events, now=5.0, episode=1) == "live"
     pending = stream(started("a"), ("finetune_started", {"round": 1}))
     assert provenance(pending, now=500.0) == "live"
+
+
+def test_an_episode_with_a_verdict_is_recorded_even_while_its_run_is_live() -> None:
+    events = stream(started("a"), started("b"), verdict(False))  # "b" judged at t=2
+    assert provenance(events, now=5.0, episode=1) == "recorded"
+    assert provenance(events, now=5.0) == "live"  # the run itself still is
+    pending = stream(started("a"), verdict(True), ("finetune_started", {"round": 1}))
+    assert provenance(pending, now=500.0, episode=0) == "recorded"
+    assert provenance(pending, now=500.0, episode=0, paused=True) == "recorded"
+
+
+def test_nothing_is_live_while_the_event_stream_is_disconnected() -> None:
+    events = stream(started("a"), started("b"))
+    assert provenance(events, now=5.0, lost=True) == "recorded"
+    assert provenance(events, now=5.0, episode=1, lost=True) == "recorded"
+    pending = stream(started("a"), ("finetune_started", {"round": 1}))
+    assert provenance(pending, now=500.0, lost=True) == "recorded"
+    assert provenance(pending, now=500.0, paused=True, lost=True) == "recorded"
+    script = """
+    const v = S.view();
+    for (const e of events) S.reduce(v.live, e);
+    S.disconnect(v);
+    S.reconnect(v);
+    for (const e of events) S.reduce(v.live, e);
+    return S.provenance(v, 5);
+    """
+    assert run(script, events) == "live"
 
 
 def test_a_run_stops_being_live_20_s_after_its_last_event() -> None:
@@ -260,8 +301,11 @@ def test_each_frame_keeps_the_controller_that_saw_it_after_a_takeover() -> None:
 
 VIEW = """
 const v = S.view();
-let now = 0;  // follows the stream, so the run is live unless a test moves it on
-const feed = (n) => { for (const e of events.splice(0, n)) S.reduce(v.live, e); now = v.live.lastT + 1; };
+let now = 0;
+// Each event arrives a second after it was written, as from a live run.
+const feed = (n) => { for (const e of events.splice(0, n)) { now = e.t + 1; S.receive(v, e, now); } };
+// The page opens on a run that finished a minute ago: every event arrives at once.
+const open = () => { now = events[events.length - 1].t + 60; for (const e of events.splice(0)) S.receive(v, e, now); };
 const press = (key) => S.keydown(v, { key }, now);
 const look = () => {
   const ep = S.episode(v, now);
@@ -470,34 +514,69 @@ STORY = [
 
 
 def test_a_finished_run_opens_on_its_latest_accepted_demonstration_that_acted_on_a_diagnosis() -> None:
-    out = presenter("feed(events.length); now += 60; return look().episode;", stream(*STORY))
+    out = presenter("open(); return look().episode;", stream(*STORY))
     assert out == "demo-2"
 
 
 def test_the_story_skips_a_demonstration_whose_diagnosis_is_not_in_the_run() -> None:
     events = stream(*STORY[:-3], *demo("orphan", "not-in-this-run", accepted=True), *STORY[-3:])
-    assert presenter("feed(events.length); now += 60; return look().episode;", events) == "demo-2"
+    assert presenter("open(); return look().episode;", events) == "demo-2"
 
 
 def test_a_finished_run_without_such_a_demonstration_opens_on_its_latest_episode() -> None:
     events = stream(*[e for e in STORY if e[0] != "episode_started" or e[1]["episode_id"] not in {"demo-1", "demo-2"}])
-    assert presenter("feed(events.length); now += 60; return look().episode;", events) == "heldout"
+    assert presenter("open(); return look().episode;", events) == "heldout"
 
 
-def test_a_live_run_follows_its_latest_episode_and_a_paused_view_stays_put_when_the_run_ends() -> None:
+def test_a_view_following_a_live_run_stays_on_the_episode_it_showed_when_the_run_stops() -> None:
+    out = presenter(
+        """
+        const all = [...events];
+        feed(events.length);
+        const live = look().episode;
+        now += 21;
+        const stopped = look().episode;
+        S.reconnect(v);
+        for (const e of all) S.receive(v, e, now);
+        return [live, stopped, look().episode];
+        """,
+        stream(*STORY),
+    )
+    assert out == ["heldout", "heldout", "heldout"]
+
+
+def test_a_paused_view_of_a_live_run_stays_put_when_the_run_ends_and_after_resuming() -> None:
     out = presenter(
         """
         feed(events.length);
-        const live = look().episode;
         press(" ");
         now += 60;
         const paused = look().episode;
         press(" ");
-        return [live, paused, look().episode];
+        return [paused, look().episode];
         """,
         stream(*STORY),
     )
-    assert out == ["heldout", "heldout", "demo-2"]
+    assert out == ["heldout", "heldout"]
+
+
+def test_while_the_student_fine_tunes_a_following_view_shows_the_time_since_it_started() -> None:
+    events = stream(started("a"), verdict(True), started("b"), verdict(False), ("finetune_started", {"round": 1}))
+    out = presenter(
+        """
+        feed(events.length);
+        const tuning = S.finetuning(v, now + 90);
+        press("ArrowLeft");
+        const pinned = S.finetuning(v, now);
+        press("End");
+        const back = S.finetuning(v, now);
+        S.receive(v, { t: now, run_id: "r", type: "finetune_completed", data: { round: 1 } }, now);
+        return [tuning, pinned, back, S.finetuning(v, now)];
+        """,
+        events,
+    )
+    # finetune_started was written at t=4 and arrived at t=5
+    assert out == [91, None, 1, None]
 
 
 def trial(episode_id: str, diagnosed: bool = False, moved: bool = False) -> list[tuple[str, dict]]:

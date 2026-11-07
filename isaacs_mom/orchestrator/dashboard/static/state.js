@@ -20,11 +20,16 @@
 
   // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing and when
   // it was paused; `selected` pins an episode (null follows the run: its latest episode while live, its story once
-  // finished); `compare` is the box or bin move P shows, with the selection to return to when P is pressed again.
-  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null });
+  // finished); `compare` is the box or bin move P shows, with the selection to return to when P is pressed again;
+  // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down.
+  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
+    v.lost = false;
+  }
+  function disconnect(v) {
+    v.lost = true;
   }
 
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -82,7 +87,7 @@
         const controller = controllerOf(d.controller);
         const latency = num(d.latency_ms);
         const skill = d.skill && typeof d.skill === "object" ? d.skill : null;
-        ep.rows.push({
+        const row = {
           kind: "decision",
           step: num(d.step),
           controller,
@@ -94,10 +99,12 @@
           latency,
           ok: null,
           error: null,
-        });
+        };
+        ep.rows.push(row);
         ep.controller = controller;
-        ep.checkpoint = text(d.checkpoint) || null;
-        if (latency !== null && controller) s.latency[controller].push(latency);
+        ep.checkpoint = row.checkpoint;
+        // Medians time the decisions that chose a skill; a stop carries no measured call.
+        if (latency !== null && controller && row.skill) s.latency[controller].push(latency);
         break;
       }
       case "action_executed": {
@@ -154,13 +161,13 @@
     now - s.lastT < FRESH_SECONDS || (s.finetune.pending !== null && now - s.finetune.pending.t < FINETUNE_SECONDS);
 
   // Rule 6 for what the view shows: placeholder unless every shown episode ran on a real simulator; live while the
-  // run is, paused instead of live while the presenter holds the view, recorded otherwise. Pass an episode for a
-  // panel that shows one: only the run's current episode can be live.
+  // run is and its stream is connected, paused instead of live while the presenter holds the view, recorded
+  // otherwise. Pass an episode for a panel that shows one: only the run's current, unjudged episode can be live.
   function provenance(v, now, ep = null) {
     const s = shown(v);
     const episodes = ep ? [ep] : s.episodes;
     if (!episodes.length || !episodes.every((e) => isReal(e.sim))) return "placeholder";
-    if (!running(v.live, now) || (ep && ep !== current(s))) return "recorded";
+    if (v.lost || !running(v.live, now) || (ep && (ep !== current(s) || ep.verdict !== null))) return "recorded";
     return v.frozen ? "paused" : "live";
   }
 
@@ -210,6 +217,12 @@
     };
   }
 
+  // One event from the stream, arriving at `now`.
+  function receive(v, event, now) {
+    reduce(v.live, event);
+    if (running(v.live, now)) v.followed = true;
+  }
+
   // Presenter controls (SPEC §3.5). Events keep folding into `live` while paused; resuming shows them all.
   const shown = (v) => (v.frozen ? v.frozen.state : v.live);
   function togglePause(v, now) {
@@ -222,10 +235,19 @@
   // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
   const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || current(s);
 
+  // A view that followed the run live stays on its last episode once it stops; a page opened on a finished run
+  // lands on the story.
   function episode(v, now) {
     const s = shown(v);
     const pinned = v.selected !== null && s.episodes.find((e) => e.id === v.selected);
-    return pinned || (following(v, now) ? current(s) : story(s));
+    return pinned || (following(v, now) || v.followed ? current(s) : story(s));
+  }
+
+  // The fine-tune a following view shows on the stage (SPEC §3.5): the seconds since it started, or null.
+  function finetuning(v, now) {
+    const pending = shown(v).finetune.pending;
+    if (!pending || v.selected !== null || !following(v, now)) return null;
+    return (v.frozen ? v.frozen.at : now) - pending.t;
   }
 
   const teacherDrove = (ep) => ep.rows.some((r) => r.kind === "takeover" || r.controller === "teacher");
@@ -279,7 +301,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, move, actedOn, median, shown, following, accepted, teacherDrove, episode, target, keydown };
+  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, following, accepted, teacherDrove, episode, finetuning, target, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

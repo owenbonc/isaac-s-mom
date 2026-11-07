@@ -1,6 +1,5 @@
 // Renders MomState over the /events stream. Every value from an event is escaped; nothing is shown that an event did not carry.
 const view = MomState.view();
-let connection = "open";
 let renderQueued = false;
 let renderedRows = 0;
 let renderedEpisode = null;
@@ -62,6 +61,11 @@ const verdictChip = (v) => `<span class="verdict ${isAccepted(v) ? "good" : "bad
 const MOVED = { move_box: "Box moved", move_bin: "Bin moved" };
 // Durations read at a glance from the back of the room: ms under a second, then seconds, then minutes.
 const duration = (v) => (v < 1000 ? `${v >= 100 ? Math.round(v) : v.toFixed(1)} ms` : v < 120000 ? `${(v / 1000).toFixed(1)} s` : `${(v / 60000).toFixed(1)} min`);
+// A running clock in whole seconds: "45 s", "2 min 05 s".
+const elapsed = (seconds) => {
+  const whole = Math.max(0, Math.floor(seconds));
+  return whole < 60 ? `${whole} s` : `${Math.floor(whole / 60)} min ${String(whole % 60).padStart(2, "0")} s`;
+};
 const pct = (k, n) => (n ? Math.round((100 * k) / n) + "%" : "n/a");
 const stat = (s) => (s ? `${duration(s.median)} <span class="note">n=${s.n}</span>` : '<span class="ph-text">no data</span>');
 
@@ -82,10 +86,9 @@ function announce(text) {
 }
 
 function renderControl() {
-  const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
   const el = $("control");
-  if (s.finetune.pending && view.selected === null && MomState.following(view, now())) {
+  if (MomState.finetuning(view, now()) !== null) {
     el.className = "control";
     el.innerHTML = `<span class="what">Fine-tuning the student</span><span class="note">No robot is moving. The held-out test of the new checkpoint starts when it is ready.</span>`;
     announce("Fine-tuning the student.");
@@ -112,6 +115,14 @@ function renderControl() {
 }
 
 function renderCamera() {
+  // While the student fine-tunes no robot moves, so the stage shows the wait instead of the last episode's frame.
+  const tuning = MomState.finetuning(view, now());
+  if (tuning !== null) {
+    $("chip-camera").innerHTML = panelChip(true);
+    $("stage").innerHTML = `<div class="tuning"><p class="what">Fine-tuning the student</p><p class="fig">${elapsed(tuning)}</p><p class="note">since the fine-tune started</p></div>`;
+    $("strip").innerHTML = "";
+    return;
+  }
   const ep = MomState.episode(view, now());
   const frames = MomState.filmstrip(ep, view.compare && view.compare.step);
   $("chip-camera").innerHTML = panelChip(frames.length > 0, ep);
@@ -176,7 +187,7 @@ function logRow(row) {
 
 function decisionRow(row, after, done) {
   const outcome = !row.skill ? "" : row.ok === null ? (done ? "" : '<span class="lat">running</span>') : row.ok ? `<span class="ok">${CHECK}<span class="sr">executed</span></span>` : '<span class="no">failed</span>';
-  const latency = row.latency === null ? "" : `<span class="lat">${duration(row.latency)}</span>`;
+  const latency = row.latency === null || !row.skill ? "" : `<span class="lat">${duration(row.latency)}</span>`;
   const reason = row.reason ? `<div class="reason" title="${esc(row.reason)}">${esc(row.reason)}</div>` : "";
   const error = row.error ? `<div class="err">${esc(row.error)}</div>` : "";
   const mark = after ? '<div class="after">First decision after the move</div>' : "";
@@ -196,7 +207,7 @@ function renderEpisode() {
   const ep = MomState.episode(view, now());
   const at = s.episodes.indexOf(ep);
   // The connection note sits beside the rail, which gives way, so the keys above never wrap.
-  const lost = connection === "lost" ? ' <span class="lost">· connection lost, retrying</span>' : "";
+  const lost = view.lost ? ' <span class="lost">· connection lost, retrying</span>' : "";
   $("episode-line").innerHTML = (ep ? `Episode ${at + 1} of ${s.episodes.length}` : "") + lost;
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) < 0;
   $("b-p").disabled = !view.compare && (!ep || ep.perturbedStep === null);
@@ -349,23 +360,22 @@ document.querySelector(".presenter").addEventListener("click", (e) => {
 const source = new EventSource("/events");
 // The server replays the whole run on every connection, so the view starts over instead of adding to what is shown.
 source.onopen = () => {
-  connection = "open";
   MomState.reconnect(view);
   renderedRows = 0;
   renderedEpisode = null;
   schedule();
 };
 source.onerror = () => {
-  connection = "lost";
+  MomState.disconnect(view);
   schedule();
 };
 source.onmessage = (message) => {
   try {
-    MomState.reduce(view.live, JSON.parse(message.data));
+    MomState.receive(view, JSON.parse(message.data), now());
   } catch (error) {
     console.error("bad event", error);
   }
   schedule();
 };
-setInterval(schedule, 2000);
+setInterval(schedule, 1000); // live and recorded change with time, and the fine-tune clock ticks
 schedule();
