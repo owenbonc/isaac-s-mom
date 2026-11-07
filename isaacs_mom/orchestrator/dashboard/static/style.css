@@ -67,6 +67,7 @@ kbd{font-family:inherit;font-weight:600;padding:0 .3rem;border:1px solid current
 main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.95fr);gap:.8rem;padding:.8rem}
 .col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .side{display:flex;flex-direction:column;gap:.8rem;min-height:0;overflow-y:auto}
+.side[data-more]{mask-image:linear-gradient(to bottom,#000 calc(100% - 3rem),transparent)}
 .side .panel{flex:none}
 
 footer.models{flex:none;display:flex;align-items:center;gap:.3rem 1rem;padding:.45rem 1.1rem;background:var(--panel);border-top:1px solid var(--rule);white-space:nowrap;overflow:hidden}
@@ -148,7 +149,7 @@ ol.log .skill{font-family:var(--mono);font-weight:600;overflow-wrap:anywhere}
 ol.log li.student .skill{color:var(--student)}
 ol.log li.teacher .skill{color:var(--teacher)}
 ol.log .reason{grid-column:2;text-wrap:pretty;overflow-wrap:anywhere}
-ol.log .reason.clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;max-height:calc(3 * 1.4em)}
+.clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 ol.log .right{display:flex;gap:.6rem;align-items:baseline;white-space:nowrap}
 ol.log .ok{color:var(--ok);display:inline-flex}
 ol.log .ok svg{width:1em;height:1em}
@@ -165,17 +166,12 @@ ol.log li.event.moved{background:var(--ink);color:var(--panel)}
 ol.log li.event.moved .n{color:var(--panel)}
 ol.log li.focus{box-shadow:inset 0 0 0 3px var(--ink),inset 0 0 0 5px var(--panel)}
 ol.log .after{grid-column:2;font-weight:700;color:var(--ink)}
-.gain{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .6rem;margin-bottom:.6rem}
+.gain{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .6rem}
 .fig{font-size:var(--step-4);font-weight:700;line-height:1.05;letter-spacing:-.01em}
 ol.log li.fresh{animation:in .16s var(--ease-out)}
 @keyframes in{from{opacity:0;transform:translateY(4px)}}
 ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 
-table{border-collapse:collapse;width:100%;overflow-wrap:normal}
-th{text-align:left;font-weight:600;color:var(--muted);padding:.2rem .5rem .2rem 0;border-bottom:1px solid var(--rule)}
-td{padding:.28rem .5rem .28rem 0;border-bottom:1px solid var(--rule);vertical-align:baseline}
-tr:last-child td{border-bottom:0}
-td.num,th.num{text-align:right;padding-right:0;padding-left:.75rem}
 .stack>*+*{margin-top:.4rem}
 .acting-on{margin:0;font-weight:700;color:var(--teacher)}
 .cited-row{display:grid;grid-template-columns:minmax(0,8rem) minmax(0,1fr);gap:.7rem;align-items:start}

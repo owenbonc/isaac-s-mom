@@ -68,7 +68,6 @@ const elapsed = (seconds) => {
   const whole = Math.max(0, Math.floor(seconds));
   return whole < 60 ? `${whole} s` : `${Math.floor(whole / 60)} min ${String(whole % 60).padStart(2, "0")} s`;
 };
-const pct = (k, n) => (n ? Math.round((100 * k) / n) + "%" : "n/a");
 const stat = (s) => (s ? `${duration(s.median)} <span class="note">n=${s.n}</span>` : '<span class="ph-text">no data</span>');
 
 function renderHeader() {
@@ -265,8 +264,8 @@ function renderRounds() {
     const spoken = both ? `${first.successes} of ${first.n}, then ${last.successes} of ${last.n}` : `${first.successes} of ${first.n}`;
     const n = first.n === last.n ? `n=${last.n}${both ? " each" : ""}` : `n=${first.n} and n=${last.n}`;
     const span = both ? `${esc(first.checkpoint)} → ${esc(last.checkpoint)}` : esc(first.checkpoint);
-    const table = `<table><thead><tr><th>Checkpoint</th><th class="num">Successes</th><th class="num">Rate</th></tr></thead><tbody>${rounds.map((r) => `<tr><td class="mono">${esc(r.checkpoint)}</td><td class="num">${r.successes}/${r.n}</td><td class="num">${pct(r.successes, r.n)}</td></tr>`).join("")}</tbody></table>`;
-    body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note mono">${span}</span></div>${table}`;
+    // The first and the latest checkpoint only: the change is the claim, and every round between is in the run's files.
+    body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note mono">${span}</span></div>`;
   }
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip(rounds.length > 0)}</header><div class="body">${body}</div>`;
 }
@@ -286,7 +285,9 @@ function renderModels() {
 
 const evidenceText = (d) => (d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : "");
 const confidenceText = (d) => (d.confidence === null ? "" : `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>`);
-const diagnosisText = (d) => `<div>${esc(d.hypothesis)}</div>${evidenceText(d)}${confidenceText(d)}`;
+// Clamped to three lines, so the evidence under it always shows.
+const hypothesisText = (d) => `<div class="clamped" title="${esc(d.hypothesis)}">${esc(d.hypothesis)}</div>`;
+const diagnosisText = (d) => `${hypothesisText(d)}${evidenceText(d)}${confidenceText(d)}`;
 
 // A teacher demonstration shows the diagnosis it acts on, named by the diagnosed episode, with that episode's last frame.
 function actingOnBody(a) {
@@ -299,7 +300,7 @@ function actingOnBody(a) {
   const last = shot && a.frame.step !== null ? `<div class="note">Its last frame, step ${esc(a.frame.step)}</div>` : "";
   // The frame and who is acted on lead, so a long hypothesis never pushes the evidence out of view.
   const lead = shot ? `<div class="cited-row">${shot}<div class="stack">${head}${last}${confidenceText(a.diagnosis)}</div></div>` : head + confidenceText(a.diagnosis);
-  return `<div class="body stack">${lead}<div>${esc(a.diagnosis.hypothesis)}</div>${evidenceText(a.diagnosis)}</div>`;
+  return `<div class="body stack">${lead}${hypothesisText(a.diagnosis)}${evidenceText(a.diagnosis)}</div>`;
 }
 
 function renderDiagnosis() {
@@ -330,6 +331,13 @@ function render() {
   const ep = MomState.episode(view, now());
   if (ep && ep.id !== renderedSide) $("side").scrollTop = 0;
   renderedSide = ep && ep.id;
+  fadeSide();
+}
+
+// The side column fades at its foot while more of it lies below.
+function fadeSide() {
+  const side = $("side");
+  side.toggleAttribute("data-more", side.scrollHeight - side.scrollTop - side.clientHeight > 1);
 }
 
 function schedule() {
@@ -338,6 +346,7 @@ function schedule() {
   requestAnimationFrame(render);
 }
 
+$("side").addEventListener("scroll", fadeSide);
 $("log").addEventListener("scroll", (e) => {
   const log = e.currentTarget;
   logFollowing = log.scrollHeight - log.scrollTop - log.clientHeight < 8;
