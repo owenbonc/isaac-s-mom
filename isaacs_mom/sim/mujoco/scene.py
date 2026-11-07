@@ -12,6 +12,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF, TaskConfig
 from isaacs_mom.sim.mujoco.walk import configure_legs
 
 G1_XML = Path(__file__).parent / "assets" / "unitree_g1" / "g1.xml"
@@ -35,41 +36,44 @@ STAND_POSE = {
 TABLE_TOP_Z = 0.72
 TABLE_CENTER = (0.40, 0.0)
 TABLE_HALF = (0.2, 0.25)
-BOX_HALF = (0.125, 0.15, 0.125)  # x depth, y width, z height
-BOX_MASS = 0.8
 BOX_X = TABLE_CENTER[0] - 0.06
-BIN_INNER_HALF = 0.22  # wider than the box's 39 cm diagonal, so a tumbling box can't wedge across it
 BIN_WALL = 0.02
 BIN_FLOOR_Z = 0.30
 BIN_RIM_Z = 0.50  # below the hanging hands, so the arms clear it at rest
-BIN_DIST = (1.0, 1.4)  # metres from the robot
-BIN_BEARING = (np.deg2rad(75), np.deg2rad(285))  # anywhere but ahead, where the table is
 TABLE_CLEARANCE = 0.45  # metres between the table top and the bin's walls, so the robot can walk between them
+# Where the robot stands once it has backed away from the table with the box, and how far the bin must be from there,
+# so it can always back off and turn before it walks.
+BACKED_OFF_XY = (-0.30, 0.0)
+BACKED_OFF_CLEARANCE = 0.60
+LAYOUT_TRIES = 1000  # a task whose bin can't be placed within this many draws is misconfigured
 HEAD_SIZE = (320, 240)
 THIRD_SIZE = (640, 480)
 
 
 @dataclass(frozen=True)
 class Layout:
-    """Where the box and bin start. A pure function of the seed (SPEC §3.1)."""
+    """Where the box and bin start. A pure function of the seed and the task (SPEC §3.1)."""
 
     box_xy: tuple[float, float]
     bin_xy: tuple[float, float]
     bin_yaw: float  # the bin faces where the robot stood, so a box carried straight at it fits
 
 
-def box_xy(rng: np.random.Generator) -> tuple[float, float]:
-    return float(BOX_X + rng.uniform(-0.02, 0.02)), float(rng.uniform(-0.1, 0.1))
+def box_xy(rng: np.random.Generator, task: TaskConfig) -> tuple[float, float]:
+    return float(BOX_X + rng.uniform(-0.02, 0.02)), float(rng.uniform(-task.box_offset_m, task.box_offset_m))
 
 
-def bin_pose(rng: np.random.Generator, around: tuple[float, float] = (0.0, 0.0)) -> tuple[tuple[float, float], float]:
-    """A bin 1.0-1.4 m from `around`, facing it, off to the side or behind, and clear of the table."""
-    while True:
-        bearing = rng.uniform(*BIN_BEARING)
-        dist = rng.uniform(*BIN_DIST)
+def bin_pose(
+    rng: np.random.Generator, task: TaskConfig, around: tuple[float, float] = (0.0, 0.0)
+) -> tuple[tuple[float, float], float]:
+    """A bin the task's distance from `around`, facing it, at one of the task's bearings, and clear of the table."""
+    for _ in range(LAYOUT_TRIES):
+        bearing = np.deg2rad(rng.uniform(*task.bin_bearing_deg))
+        dist = rng.uniform(*task.bin_distance_m)
         xy = (around[0] + dist * np.cos(bearing), around[1] + dist * np.sin(bearing))
         if table_clearance(xy) > BIN_INNER_HALF + BIN_WALL + TABLE_CLEARANCE:
             return (float(xy[0]), float(xy[1])), float(bearing)
+    raise ValueError(f"task {task.name!r}: no bin pose clears the table in {LAYOUT_TRIES} draws")
 
 
 def table_clearance(xy: tuple[float, float]) -> float:
@@ -79,11 +83,14 @@ def table_clearance(xy: tuple[float, float]) -> float:
     return float(np.hypot(dx, dy))
 
 
-def layout(seed: int) -> Layout:
+def layout(seed: int, task: TaskConfig) -> Layout:
     rng = np.random.default_rng(seed)
-    box = box_xy(rng)
-    bin_xy, bin_yaw = bin_pose(rng)
-    return Layout(box_xy=box, bin_xy=bin_xy, bin_yaw=bin_yaw)
+    box = box_xy(rng, task)
+    for _ in range(LAYOUT_TRIES):
+        bin_xy, bin_yaw = bin_pose(rng, task)
+        if np.hypot(bin_xy[0] - BACKED_OFF_XY[0], bin_xy[1] - BACKED_OFF_XY[1]) > BACKED_OFF_CLEARANCE:
+            return Layout(box_xy=box, bin_xy=bin_xy, bin_yaw=bin_yaw)
+    raise ValueError(f"task {task.name!r}: no bin pose leaves room to back off from the table in {LAYOUT_TRIES} draws")
 
 
 def _look_at(pos: np.ndarray, target: np.ndarray) -> list[float]:
@@ -130,7 +137,7 @@ def _add_head_camera(spec: mujoco.MjSpec) -> None:
     )
 
 
-def _add_world(spec: mujoco.MjSpec) -> None:
+def _add_world(spec: mujoco.MjSpec, task: TaskConfig) -> None:
     spec.visual.headlight.ambient = [0.3, 0.3, 0.3]
     spec.visual.headlight.diffuse = [0.5, 0.5, 0.5]
     spec.visual.headlight.specular = [0.1, 0.1, 0.1]
@@ -215,13 +222,13 @@ def _add_world(spec: mujoco.MjSpec) -> None:
     ]:
         bin_body.add_geom(name=name, type=mujoco.mjtGeom.mjGEOM_BOX, size=size, pos=pos, rgba=green)
 
-    box = world.add_body(name="box", pos=[BOX_X, 0.0, TABLE_TOP_Z + BOX_HALF[2]])
+    box = world.add_body(name="box", pos=[BOX_X, 0.0, TABLE_TOP_Z + task.box_half[2]])
     box.add_freejoint(name="box_free")
     box.add_geom(
         name="box",
         type=mujoco.mjtGeom.mjGEOM_BOX,
-        size=list(BOX_HALF),
-        mass=BOX_MASS,
+        size=list(task.box_half),
+        mass=task.box_mass_kg,
         rgba=[0.80, 0.33, 0.18, 1],
         friction=[1.5, 0.02, 0.002],
         condim=4,
@@ -232,7 +239,7 @@ def _add_world(spec: mujoco.MjSpec) -> None:
     world.add_camera(name="third_person", pos=eye, xyaxes=_look_at(eye, target), fovy=55.0)
 
 
-def build_model() -> mujoco.MjModel:
+def build_model(task: TaskConfig) -> mujoco.MjModel:
     spec = mujoco.MjSpec.from_file(str(G1_XML))
     # Menagerie's "stand" keyframe has no room for the scene's extra joints.
     for key in list(spec.keys):
@@ -242,7 +249,7 @@ def build_model() -> mujoco.MjModel:
     _grip_feet(spec)
     _add_hands(spec)
     _add_head_camera(spec)
-    _add_world(spec)
+    _add_world(spec, task)
     return spec.compile()
 
 

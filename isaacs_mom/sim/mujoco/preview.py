@@ -19,6 +19,7 @@ from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCal
 from isaacs_mom.orchestrator.episode import MAX_STEPS, PERTURB_SEED_OFFSET
 from isaacs_mom.sim.mujoco.scene import TABLE_TOP_Z, table_clearance
 from isaacs_mom.sim.mujoco.sim import MujocoSim
+from isaacs_mom.sim.mujoco.task import TASKS
 from isaacs_mom.sim.mujoco.walk import wrap
 from isaacs_mom.validator import validate
 
@@ -145,8 +146,9 @@ def main() -> None:
     parser.add_argument("--move-bin-at", type=int, help="move the bin before this step of the scripted episode")
     parser.add_argument("--eval", type=int, help="score the scripted policy over this many seeds")
     parser.add_argument("--viewer", action="store_true")
+    parser.add_argument("--task", choices=sorted(TASKS), default="across_room")
     args = parser.parse_args()
-    sim = MujocoSim()
+    sim = MujocoSim(TASKS[args.task])
     sim.reset(args.seed)
     if args.viewer:
         import mujoco.viewer

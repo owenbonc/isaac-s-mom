@@ -6,14 +6,17 @@ from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
 
 
-def make_sim(name: str) -> TruthSim:
+def make_sim(name: str, task: str) -> TruthSim:
     if name == "fake":
         from isaacs_mom.sim.fake import FakeSim
 
         return FakeSim()
     from isaacs_mom.sim.mujoco import MujocoSim
+    from isaacs_mom.sim.mujoco.task import TASKS
 
-    return MujocoSim()
+    if task not in TASKS:
+        raise SystemExit(f"unknown task {task!r}; choose from {', '.join(sorted(TASKS))}")
+    return MujocoSim(TASKS[task])
 
 
 def main() -> None:
@@ -23,10 +26,12 @@ def main() -> None:
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--rounds", type=int, default=3)
     run.add_argument("--run-id", default=time.strftime("run-%Y%m%d-%H%M%S"))
+    # Imported lazily with the sim, so `--sim fake` never loads MuJoCo; FakeSim is the default task only.
+    run.add_argument("--task", default="across_room", help="MuJoCo task preset (isaacs_mom/sim/mujoco/task.py)")
     args = parser.parse_args()
 
     run_dir = Path("runs") / args.run_id
-    results = run_loop(make_sim(args.sim), run_dir, args.run_id, max_rounds=args.rounds)
+    results = run_loop(make_sim(args.sim, args.task), run_dir, args.run_id, max_rounds=args.rounds)
     for r in results:
         print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")
     print(f"run saved to {run_dir}")

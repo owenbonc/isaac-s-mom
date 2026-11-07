@@ -16,6 +16,7 @@ from isaacs_mom.orchestrator.loop import INSTRUCTION
 from isaacs_mom.seeds import assert_not_heldout
 from isaacs_mom.sim.mujoco.preview import OraclePolicy
 from isaacs_mom.sim.mujoco.sim import MujocoSim
+from isaacs_mom.sim.mujoco.task import TASKS, TaskConfig
 from isaacs_mom.validator.training import training_examples
 
 FIRST_SEED = 9000  # clear of the held-out seeds and of the dev seeds the loop uses
@@ -34,9 +35,9 @@ Every other episode has the box moved before step 1, so some frames show the arm
 """
 
 
-def export(out: Path, episodes: int) -> tuple[int, int]:
+def export(out: Path, episodes: int, task: TaskConfig) -> tuple[int, int]:
     """Episodes on fresh dev seeds; returns (accepted episodes, labelled frames)."""
-    sim = MujocoSim()
+    sim = MujocoSim(task)
     events = EventLog(out, "frames")
     accepted, lines = 0, []
     for i in range(episodes):
@@ -65,9 +66,10 @@ def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--episodes", type=int, default=40)
     parser.add_argument("--out", type=Path, default=Path("runs/frames"))
+    parser.add_argument("--task", choices=sorted(TASKS), default="across_room")
     args = parser.parse_args()
     shutil.rmtree(args.out, ignore_errors=True)
-    accepted, frames = export(args.out, args.episodes)
+    accepted, frames = export(args.out, args.episodes, TASKS[args.task])
     archive = shutil.make_archive(str(args.out), "zip", args.out)
     print(f"{frames} labelled frames from {accepted}/{args.episodes} accepted episodes in {args.out} and {archive}")
 

@@ -21,8 +21,6 @@ from PIL import Image
 from isaacs_mom.contracts import ExecResult, GroundTruth, Observation, Perturbation, SkillCall
 from isaacs_mom.sim.mujoco.control import IK_TOLERANCE, Robot, move
 from isaacs_mom.sim.mujoco.scene import (
-    BIN_INNER_HALF,
-    BOX_HALF,
     BOX_X,
     HEAD_SIZE,
     TABLE_CENTER,
@@ -35,14 +33,16 @@ from isaacs_mom.sim.mujoco.scene import (
     layout,
     stand_qpos,
 )
+from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF, DEFAULT_TASK, TaskConfig
 from isaacs_mom.sim.mujoco.walk import Walker, wrap
 
-READY_Z = 0.90  # open hands wait beside the box, below its top
-HUG_Z = 0.85
+# The hands work relative to the box: they hug at its mid-height, wait 5 cm above that, close 1.5 cm inside its sides,
+# open 18 cm outside them (clear of a box 12 cm off-centre as the robot sways) and let go 7 cm outside them.
+READY_ABOVE_HUG = 0.05
+SQUEEZE = 0.015
+OPEN_CLEARANCE = 0.18
+RELEASE_CLEARANCE = 0.07
 LIFT_DZ = 0.07  # clears the table; any higher and the box hides the bin from the head camera
-OPEN_HALF = 0.33  # hand offset from the working point when open: clear of a box 12 cm off-centre as the robot sways
-CLOSED_HALF = 0.135  # squeezes the 30 cm box by 1.5 cm a side
-RELEASE_HALF = 0.22  # 4 cm clear of the box, and still within reach with the arms stretched out
 PLACE_X = 0.40  # the hands push the box this far ahead of the pelvis before letting go
 PLACE_Z = 0.84  # the box drops ~40 cm to the bin floor from here
 REACH_LIMIT = 0.12
@@ -90,11 +90,17 @@ def _clearance(xy: np.ndarray, centre: np.ndarray, half: np.ndarray, yaw: float)
 
 
 class MujocoSim:
-    sim_version = f"mujoco-{mujoco.__version__}"
     robot_config = "unitree_g1_29dof_walking"
 
-    def __init__(self) -> None:
-        self.model = build_model()
+    def __init__(self, task: TaskConfig = DEFAULT_TASK) -> None:
+        self.task = task
+        # The task is part of the version, so a manifest only replays on the scene it was recorded in.
+        self.sim_version = f"mujoco-{mujoco.__version__} task={task.name}"
+        width = task.box_half[1]
+        self._open_half, self._closed_half = width + OPEN_CLEARANCE, width - SQUEEZE
+        self._release_half = width + RELEASE_CLEARANCE
+        self._hug_z = TABLE_TOP_Z + task.box_half[2]
+        self.model = build_model(task)
         self.data = mujoco.MjData(self.model)
         self._stand = stand_qpos(self.model)
         stepping = self._stand.copy()
@@ -130,7 +136,7 @@ class MujocoSim:
         m, d = self.model, self.data
         mujoco.mj_resetData(m, d)
         d.qpos[:] = self._stand
-        scene = layout(seed)
+        scene = layout(seed, self.task)
         self._put_box(scene.box_xy)
         self._put_bin(scene.bin_xy, scene.bin_yaw)
         d.ctrl[:] = d.qpos[self.robot.actuated_qadr]
@@ -146,8 +152,8 @@ class MujocoSim:
         self._actions: list[list[float]] = []
         self._times: list[float] = []
         self._hold(0.5)
-        self._move_hands((0.18, self.work_y, 0.95), OPEN_HALF, 1.0)
-        self._move_hands(self._hand_point(), OPEN_HALF, 0.8)
+        self._move_hands((0.18, self.work_y, 0.95), self._open_half, 1.0)
+        self._move_hands(self._hand_point(), self._open_half, 0.8)
         self.episode_id = f"ep-{seed}-{uuid.uuid4().hex[:6]}"
         self.step = 0
         return self.episode_id
@@ -189,13 +195,13 @@ class MujocoSim:
             # Somewhere new on the table clear of the robot's arms; the same seed always picks the same spot.
             start = self.data.qpos[self._box_qadr : self._box_qadr + 7].copy()
             for _ in range(BOX_MOVE_TRIES):
-                self._put_box(box_xy(rng))
+                self._put_box(box_xy(rng, self.task))
                 mujoco.mj_forward(self.model, self.data)
                 if not self._box_touches_robot():
                     return
             self.data.qpos[self._box_qadr : self._box_qadr + 7] = start
         else:
-            self._put_bin(*bin_pose(rng, around=self.pose()[:2]))
+            self._put_bin(*bin_pose(rng, self.task, around=self.pose()[:2]))
         mujoco.mj_forward(self.model, self.data)
 
     def render_third_person(self) -> bytes:
@@ -216,7 +222,7 @@ class MujocoSim:
         return _jpeg(renderer.render())
 
     def _run(self, call: SkillCall) -> str | None:
-        half = CLOSED_HALF if self.closed else OPEN_HALF
+        half = self._closed_half if self.closed else self._open_half
         match call.skill:
             case "reobserve":
                 self._hold(0.2)
@@ -244,7 +250,7 @@ class MujocoSim:
                 return self._walk_to(self.goal_xy, wrap(self.goal_yaw + sign * angle), angle / TURN_RATE, call.skill)
             case "hug":
                 point = self._hand_point(closed=True)
-                (goal, grip), error = self._plan_hands(point, CLOSED_HALF, self.data.ctrl, level=False)
+                (goal, grip), error = self._plan_hands(point, self._closed_half, self.data.ctrl, level=False)
                 if error:
                     return error
                 move(self.model, self.data, goal, 0.8, self._tick, self._drive)
@@ -261,7 +267,7 @@ class MujocoSim:
                     [
                         ((PLACE_X, 0.0, height), half, 0.6, True),
                         ((PLACE_X, 0.0, PLACE_Z), half, 0.6, False),
-                        ((PLACE_X - 0.03, 0.0, PLACE_Z + 0.04), RELEASE_HALF, 0.5, False),
+                        ((PLACE_X - 0.03, 0.0, PLACE_Z + 0.04), self._release_half, 0.5, False),
                     ]
                 )
                 if error:
@@ -281,7 +287,7 @@ class MujocoSim:
         """Where the hands go for the current state, or for the state a skill is about to commit."""
         closed = self.closed if closed is None else closed
         lifted = self.lifted if lifted is None else lifted
-        z = (HUG_Z if closed else READY_Z) + (LIFT_DZ if lifted else 0.0)
+        z = self._hug_z + (0.0 if closed else READY_ABOVE_HUG) + (LIFT_DZ if lifted else 0.0)
         return BOX_X, self.work_y if work_y is None else work_y, z
 
     def _plan_hands(
@@ -398,7 +404,7 @@ class MujocoSim:
 
     def _put_box(self, xy: tuple[float, float]) -> None:
         a = self._box_qadr
-        self.data.qpos[a : a + 7] = [*xy, TABLE_TOP_Z + BOX_HALF[2], 1.0, 0.0, 0.0, 0.0]
+        self.data.qpos[a : a + 7] = [*xy, TABLE_TOP_Z + self.task.box_half[2], 1.0, 0.0, 0.0, 0.0]
         self.data.qvel[self._box_dadr : self._box_dadr + 6] = 0.0
 
     def _put_bin(self, xy: tuple[float, float], yaw: float) -> None:
