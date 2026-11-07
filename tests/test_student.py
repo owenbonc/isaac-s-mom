@@ -43,7 +43,7 @@ def test_a_reply_without_a_whitelisted_skill_call_is_unparseable(text: str) -> N
         parse_reply(text)
 
 
-@pytest.mark.parametrize("distance", ["NaN", '"nan"', "Infinity", "-Infinity"])
+@pytest.mark.parametrize("distance", ["NaN", '"nan"', "Infinity", "-Infinity", '"inf"', '"Infinity"', "1e999"])
 def test_a_non_finite_distance_is_unparseable(distance: str) -> None:
     with pytest.raises(UnparseableReply):
         parse_reply(f'{{"skill": "reach_left", "params": {{"distance_cm": {distance}}}}}')

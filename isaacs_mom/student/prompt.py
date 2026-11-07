@@ -1,7 +1,6 @@
 """The student's prompt and reply format, shared by local inference and Modal training (SPEC §3.2)."""
 
 import json
-import math
 
 from pydantic import ValidationError
 
@@ -46,8 +45,5 @@ def parse_reply(text: str) -> SkillCall:
             target = SkillTarget.model_validate(value)
         except ValidationError as error:
             raise UnparseableReply(str(error)) from error
-        # The raw values, because validation clamps an infinite distance to a finite one.
-        if not all(math.isfinite(float(v)) for v in value.get("params", {}).values()):
-            raise UnparseableReply(f"non-finite skill params: {value['params']}")
         return SkillCall(skill=target.skill, params=target.params)
     raise UnparseableReply("no JSON object in reply")
