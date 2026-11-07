@@ -1,7 +1,4 @@
-"""Fine-tuning, local side (SPEC §3.2): package a training set, train on Modal, store the run's ckpt-r<round>.
-
-Every round retrains from the base model on the cumulative set, so a checkpoint depends only on its training set.
-"""
+"""Fine-tuning, local side (SPEC §3.2): package a training set, train on Modal, store the run's ckpt-r<round>."""
 
 import json
 import logging
@@ -28,7 +25,7 @@ def modal_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> d
 
 
 def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]:
-    """Training lines as prompt-ready examples, each distinct frame shipped once under a short key."""
+    """Frames ship as bytes under short keys, because the training container cannot read local paths."""
     keys: dict[str, str] = {}
     images: dict[str, bytes] = {}
     examples: list[dict[str, str]] = []
@@ -49,7 +46,7 @@ def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]
 
 
 def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, trainer: Trainer = modal_trainer) -> str:
-    """Train from the base model into the training set's run; with nothing to train on, keep previous_checkpoint."""
+    """Retrains from the base model on the cumulative set, so a checkpoint depends only on its training set."""
     examples, images = package(training_set)
     if not examples:
         log.warning("%s has no accepted teacher steps; keeping %s", training_set, previous_checkpoint)

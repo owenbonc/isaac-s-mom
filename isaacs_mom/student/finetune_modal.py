@@ -1,4 +1,4 @@
-"""LoRA fine-tuning of SmolVLM2 on a Modal A10G (SPEC §3.2), called by tuning.modal_trainer."""
+"""LoRA fine-tuning of SmolVLM2 on a Modal A10G (SPEC §3.2)."""
 
 from importlib.metadata import version
 
@@ -14,10 +14,11 @@ LORA_DROPOUT = 0.05
 LORA_TARGETS = r".*text_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|down_proj)"
 ACCURACY_SAMPLE = 64
 SEED = 0
+IGNORE_INDEX = -100
 
 
 def _pinned(package: str) -> str:
-    # The container must process frames and prompts exactly as the local student does.
+    # Training must preprocess frames and prompts exactly as inference does.
     return f"{package}=={version(package).split('+')[0]}"
 
 
@@ -69,7 +70,7 @@ def train(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str,
         prompt_len = processor(text=[prompt], images=frame, return_tensors="pt")["input_ids"].shape[1]
         inputs = processor(text=[full], images=frame, return_tensors="pt").to("cuda", dtype=torch.bfloat16)
         labels = inputs["input_ids"].clone()
-        labels[:, :prompt_len] = -100  # learn only the reply, not the prompt or the image tokens
+        labels[:, :prompt_len] = IGNORE_INDEX  # learn only the reply, not the prompt or the image tokens
         inputs["labels"] = labels
         return inputs
 
@@ -80,8 +81,9 @@ def train(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str,
         random.shuffle(order)
         total = 0.0
         for i, index in enumerate(order, 1):
+            group_size = min(GRAD_ACCUM, len(order) - (i - 1) // GRAD_ACCUM * GRAD_ACCUM)
             loss = model(**batch(examples[index])).loss
-            (loss / GRAD_ACCUM).backward()
+            (loss / group_size).backward()
             total += loss.item()
             if i % GRAD_ACCUM == 0 or i == len(order):
                 optimizer.step()

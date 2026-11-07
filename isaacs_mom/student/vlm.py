@@ -61,7 +61,7 @@ def reply(model: Any, processor: Any, device: str, jpeg: bytes, instruction: str
 
 @lru_cache(maxsize=1)
 def generator(adapter: Path | None) -> Callable[[bytes, str, str], str]:
-    """The loop builds a StudentPolicy per episode; this keeps one loaded model for the current checkpoint."""
+    """Cached, because a policy is built per episode and loading the model takes seconds."""
     device = pick_device()
     model = load_model(adapter, device)
     log.info("student model %s on %s, adapter %s", MODEL_ID, device, adapter)
