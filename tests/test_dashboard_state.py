@@ -184,7 +184,7 @@ def provenance(events: list[dict], now: float, episode: int | None = None, pause
     script = f"""
     const v = S.view();
     for (const e of events) S.reduce(v.live, e);
-    if ({"true" if paused else "false"}) S.keydown(v, {{ key: " " }});
+    if ({"true" if paused else "false"}) S.keydown(v, {{ key: " " }}, {now});
     return S.provenance(v, {now}, {"null" if episode is None else f"S.shown(v).episodes[{episode}]"});
     """
     return run(script, events)
@@ -252,10 +252,11 @@ def test_each_frame_keeps_the_controller_that_saw_it_after_a_takeover() -> None:
 
 VIEW = """
 const v = S.view();
-const feed = (n) => { for (const e of events.splice(0, n)) S.reduce(v.live, e); };
-const press = (key) => S.keydown(v, { key });
+let now = 0;  // follows the stream, so the run is live unless a test moves it on
+const feed = (n) => { for (const e of events.splice(0, n)) S.reduce(v.live, e); now = v.live.lastT + 1; };
+const press = (key) => S.keydown(v, { key }, now);
 const look = () => {
-  const ep = S.episode(v);
+  const ep = S.episode(v, now);
   return { shown: S.shown(v).eventCount, held: S.held(v), episode: ep && ep.id, focus: v.compare && v.compare.step };
 };
 """
@@ -323,7 +324,7 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
         feed(events.length - 1);
         press("p");
         const jumped = look();
-        const strip = S.filmstrip(S.episode(v), v.compare.step).map((f) => [f.step, f.moved, f.now]);
+        const strip = S.filmstrip(S.episode(v, now), v.compare.step).map((f) => [f.step, f.moved, f.now]);
         feed(1);
         const pinned = look();
         press("P");
@@ -378,13 +379,13 @@ def test_space_pauses_from_any_focus_claims_the_key_and_acts_once_while_held() -
         """
         feed(events.length);
         const button = { tagName: "BUTTON" };  // a focused presenter button sends the key too
-        const claimed = S.keydown(v, { key: " ", target: button });
+        const claimed = S.keydown(v, { key: " ", target: button }, now);
         const paused = Boolean(v.frozen);
-        const held = S.keydown(v, { key: " ", repeat: true, target: button });
+        const held = S.keydown(v, { key: " ", repeat: true, target: button }, now);
         const stillPaused = Boolean(v.frozen);
-        const ctrl = S.keydown(v, { key: " ", ctrlKey: true });
-        const other = S.keydown(v, { key: "q" });
-        S.keydown(v, { key: " " });
+        const ctrl = S.keydown(v, { key: " ", ctrlKey: true }, now);
+        const other = S.keydown(v, { key: "q" }, now);
+        press(" ");
         return { claimed, paused, held, stillPaused, ctrl, other, resumed: !v.frozen };
         """,
         stream(started("a")),
@@ -430,3 +431,56 @@ def test_a_teacher_demonstration_finds_the_diagnosis_and_last_frame_of_the_episo
         {"id": "not-in-this-run", "number": None, "hypothesis": None, "frame": None},
         None,
     ]
+
+
+def verdict(accepted: bool) -> tuple[str, dict]:
+    return "validation", {"task_success": accepted, "physics_valid": True, "reason": "ok" if accepted else "far"}
+
+
+def demo(episode_id: str, acting_on: str | None, accepted: bool) -> list[tuple[str, dict]]:
+    return [
+        ("episode_started", {**started(episode_id)[1], "acting_on": acting_on}),
+        decision(0, controller="teacher"),
+        verdict(accepted),
+    ]
+
+
+STORY = [
+    started("trial"),
+    decision(0),
+    verdict(False),
+    ("diagnosis", {"episode_id": "trial", "hypothesis": "h", "evidence": "", "confidence": 0.5, "lesson": ""}),
+    *demo("demo-1", "trial", accepted=True),
+    *demo("demo-2", "trial", accepted=True),
+    *demo("demo-3", "trial", accepted=False),
+    *demo("takeover", None, accepted=True),
+    started("heldout"),
+    decision(0),
+    verdict(False),
+]
+
+
+def test_a_finished_run_opens_on_its_latest_accepted_demonstration_that_acted_on_a_diagnosis() -> None:
+    out = presenter("feed(events.length); now += 60; return look().episode;", stream(*STORY))
+    assert out == "demo-2"
+
+
+def test_a_finished_run_without_such_a_demonstration_opens_on_its_latest_episode() -> None:
+    events = stream(*[e for e in STORY if e[0] != "episode_started" or e[1]["episode_id"] not in {"demo-1", "demo-2"}])
+    assert presenter("feed(events.length); now += 60; return look().episode;", events) == "heldout"
+
+
+def test_a_live_run_follows_its_latest_episode_and_a_paused_view_stays_put_when_the_run_ends() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        const live = look().episode;
+        press(" ");
+        now += 60;
+        const paused = look().episode;
+        press(" ");
+        return [live, paused, look().episode];
+        """,
+        stream(*STORY),
+    )
+    assert out == ["heldout", "heldout", "demo-2"]

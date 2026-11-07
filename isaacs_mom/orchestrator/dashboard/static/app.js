@@ -62,9 +62,9 @@ function renderHeader() {
 
 function renderControl() {
   const s = MomState.shown(view);
-  const ep = MomState.episode(view);
+  const ep = MomState.episode(view, now());
   const el = $("control");
-  if (s.finetune.pending && view.selected === null) {
+  if (s.finetune.pending && view.selected === null && MomState.following(view, now())) {
     el.className = "control";
     el.innerHTML = `<span class="what">Fine-tuning the student, round ${esc(s.finetune.pending.round ?? "")}</span><span class="note">No robot is moving. Held-out evaluation starts when the new checkpoint is ready.</span>`;
     return;
@@ -86,7 +86,7 @@ function renderControl() {
 }
 
 function renderCamera() {
-  const ep = MomState.episode(view);
+  const ep = MomState.episode(view, now());
   const frames = MomState.filmstrip(ep, view.compare && view.compare.step);
   $("chip-camera").innerHTML = panelChip(frames.length > 0, ep);
   if (!frames.length) {
@@ -142,7 +142,7 @@ function verdictRow(ep) {
 
 function renderEpisode() {
   const s = MomState.shown(view);
-  const ep = MomState.episode(view);
+  const ep = MomState.episode(view, now());
   const at = s.episodes.indexOf(ep);
   $("episode-line").innerHTML = ep
     ? `<b>Episode ${at + 1} of ${s.episodes.length}${view.selected === null ? "" : ", pinned"}.</b> ${esc(SCENES[ep.split] || "Scene")}, seed ${esc(ep.seed ?? "")}, round ${esc(ep.round ?? "")} <span class="mono">${esc(ep.id)}</span>`
@@ -156,7 +156,7 @@ function renderEpisode() {
 }
 
 function renderLog() {
-  const ep = MomState.episode(view);
+  const ep = MomState.episode(view, now());
   const list = $("log");
   $("chip-log").innerHTML = panelChip(ep !== null, ep);
   if (!ep) {
@@ -181,7 +181,7 @@ function renderLog() {
 }
 
 function renderVerdict() {
-  const ep = MomState.episode(view);
+  const ep = MomState.episode(view, now());
   const v = ep && ep.verdict;
   const body = v
     ? `<div class="stack"><span class="verdict ${v.task && v.physics ? "good" : "bad"}">${v.task && v.physics ? CHECK + "Accepted" : X + "Rejected"}</span><div>${esc(v.reason)}</div><div class="note">Task ${v.task ? "succeeded" : "not met"}. Physics ${v.physics ? "valid" : "violated"}.</div></div>`
@@ -231,7 +231,7 @@ function actingOnBody(a) {
 
 function renderDiagnosis() {
   const s = MomState.shown(view);
-  const ep = MomState.episode(view);
+  const ep = MomState.episode(view, now());
   const acting = MomState.actedOn(s, ep);
   const d = ep && ep.diagnosis;
   const body = acting
@@ -273,7 +273,7 @@ document.addEventListener(
 
 // Presenter controls (SPEC §3.5): the same actions from the keyboard, whatever has focus, and from the buttons that label them.
 document.addEventListener("keydown", (e) => {
-  if (!MomState.keydown(view, e)) return;
+  if (!MomState.keydown(view, e, now())) return;
   e.preventDefault(); // also keeps a focused button from taking Space as a click
   schedule();
 });
@@ -282,7 +282,7 @@ document.addEventListener("keyup", (e) => e.key === " " && e.preventDefault());
 document.querySelector(".presenter").addEventListener("click", (e) => {
   const button = e.target.closest("button[data-key]");
   if (!button) return;
-  MomState.keydown(view, { key: button.dataset.key });
+  MomState.keydown(view, { key: button.dataset.key }, now());
   schedule();
 });
 

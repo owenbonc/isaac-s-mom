@@ -19,9 +19,9 @@
     };
   }
 
-  // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing;
-  // `selected` pins an episode (null follows the latest); `compare` is the block move P shows ({ step, back }),
-  // with the selection to return to when P is pressed again.
+  // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing and when
+  // it was paused; `selected` pins an episode (null follows the run: its latest episode while live, its story once
+  // finished); `compare` is the block move P shows, with the selection to return to when P is pressed again.
   const view = () => ({ live: initial(), frozen: null, selected: null, compare: null });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
@@ -203,51 +203,63 @@
   }
 
   // Presenter controls (SPEC §3.5). Events keep folding into `live` while paused; resuming shows them all.
-  const shown = (v) => v.frozen || v.live;
-  const held = (v) => (v.frozen ? Math.max(0, v.live.eventCount - v.frozen.eventCount) : 0);
-  function togglePause(v) {
-    v.frozen = v.frozen ? null : structuredClone(v.live);
+  const shown = (v) => (v.frozen ? v.frozen.state : v.live);
+  const held = (v) => (v.frozen ? Math.max(0, v.live.eventCount - v.frozen.state.eventCount) : 0);
+  function togglePause(v, now) {
+    v.frozen = v.frozen ? null : { state: structuredClone(v.live), at: now };
   }
+  // A paused view judges the run as it was when paused, so it stays put if the run ends meanwhile.
+  const following = (v, now) => running(v.live, v.frozen ? v.frozen.at : now);
 
-  function episode(v) {
+  const accepted = (ep) => ep.verdict !== null && ep.verdict.task && ep.verdict.physics;
+  // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration that acted on a diagnosis.
+  const story = (s) => s.episodes.findLast((e) => e.actingOn && accepted(e)) || current(s);
+
+  function episode(v, now) {
     const s = shown(v);
-    return (v.selected !== null && s.episodes.find((e) => e.id === v.selected)) || current(s);
+    const pinned = v.selected !== null && s.episodes.find((e) => e.id === v.selected);
+    return pinned || (following(v, now) ? current(s) : story(s));
   }
 
-  // Moving onto the run's last episode follows the run again.
-  function move(v, delta) {
+  // Moving onto a live run's last episode follows the run again.
+  function move(v, delta, now) {
     const episodes = shown(v).episodes;
-    const at = episodes.indexOf(episode(v));
+    const at = episodes.indexOf(episode(v, now));
     if (at < 0) return;
     const next = Math.min(episodes.length - 1, Math.max(0, at + delta));
-    v.selected = next === episodes.length - 1 ? null : episodes[next].id;
+    v.selected = next === episodes.length - 1 && following(v, now) ? null : episodes[next].id;
     v.compare = null;
   }
 
   // Shows the shown episode's block move; pressing again returns to the selection from before.
-  function compareMove(v) {
+  function compareMove(v, now) {
     if (v.compare) {
       v.selected = v.compare.back;
       v.compare = null;
       return;
     }
-    const ep = episode(v);
+    const ep = episode(v, now);
     if (!ep || ep.perturbedStep === null) return;
     v.compare = { step: ep.perturbedStep, back: v.selected };
     v.selected = ep.id;
   }
 
-  const KEYS = { " ": togglePause, ArrowLeft: (v) => move(v, -1), ArrowRight: (v) => move(v, 1), p: compareMove };
+  const KEYS = {
+    " ": togglePause,
+    ArrowLeft: (v, now) => move(v, -1, now),
+    ArrowRight: (v, now) => move(v, 1, now),
+    p: compareMove,
+  };
   // Presenter keys (SPEC §3.5), whatever has focus. True when the key is the dashboard's, so the page claims it
   // (a focused button must not also take Space as a click); a held key acts once.
-  function keydown(v, e) {
+  function keydown(v, e, now) {
     const action = KEYS[e.key.length === 1 ? e.key.toLowerCase() : e.key];
     if (!action || e.metaKey || e.ctrlKey || e.altKey) return false;
-    if (!e.repeat) action(v);
+    if (!e.repeat) action(v, now);
     return true;
   }
 
-  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, actedOn, median, shown, held, episode, keydown };
+  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, actedOn, median, shown, held, following, episode, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
