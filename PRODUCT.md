@@ -18,7 +18,7 @@ Isaac's Mom: an Argon teacher agent watches a weak robot student fail in simulat
 The numbers are not asserted, they are derived: every figure comes from saved run files and carries its sample size, and each panel says whether it is live, recorded or placeholder.
 
 ## Operating Context
-Pitch room: a projector or laptop, viewed at a distance, often in ambient light. One continuous take with a mid-run perturbation (the block is moved; the robot learns of it only through its camera). Data arrives as server-sent events from `runs/<id>/events.jsonl`.
+Pitch room: a projector or laptop, viewed at a distance, often in ambient light. One continuous take with a mid-run perturbation (the box or the bin is moved; the robot learns of it only through its camera). Data arrives as server-sent events from `runs/<id>/events.jsonl`.
 
 ## Capabilities and Constraints
 Event types and fields are fixed by `isaacs_mom/contracts.py`. The head camera is 320x240. Decision events carry a skill call and no free-text reasoning yet; model latencies are not in the events yet (shown as placeholder until they are). Held-out evaluation is always n=20.

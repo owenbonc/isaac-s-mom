@@ -40,7 +40,7 @@ def fold(*events: tuple[str, dict]) -> dict:
 
 
 def decision(step: int, controller: str = "student", latency: object = 100.0, reason: str = "why") -> tuple[str, dict]:
-    skill = {"skill": "push_forward", "params": {}}
+    skill = {"skill": "hug", "params": {}}
     return "decision", {
         "controller": controller,
         "checkpoint": "ckpt-r0",
@@ -61,6 +61,19 @@ def test_an_action_attaches_to_its_decision_and_keeps_a_long_reason() -> None:
     (row,) = out["ep"]["rows"]
     assert (row["reason"], row["ok"], row["error"]) == (reason, False, "joint limit")
     assert out["ep"]["frames"][0]["url"] == "/frames/a.jpg"
+
+
+def test_a_decision_keeps_its_reach_distance_or_turn_angle() -> None:
+    turn = (
+        "decision",
+        {"controller": "student", "step": 0, "skill": {"skill": "turn_left", "params": {"angle_deg": 30}}},
+    )
+    reach = (
+        "decision",
+        {"controller": "student", "step": 1, "skill": {"skill": "reach_left", "params": {"distance_cm": 5}}},
+    )
+    rows = fold(started("a"), turn, reach)["ep"]["rows"]
+    assert [(r["skill"], r["distance"], r["angle"]) for r in rows] == [("turn_left", None, 30), ("reach_left", 5, None)]
 
 
 def test_median_latency_carries_its_sample_size_per_controller() -> None:
@@ -90,7 +103,7 @@ def test_the_first_frame_after_the_perturbation_is_flagged() -> None:
         decision(0),
         executed(0),
         decision(1),
-        ("perturbation", {"kind": "move_block", "step": 2}),
+        ("perturbation", {"kind": "move_box", "step": 2}),
         decision(2),
         executed(1),
         executed(2),
@@ -315,7 +328,7 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
     events = stream(
         started("a"),
         *[x for step in range(6) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))],
-        ("perturbation", {"kind": "move_block", "step": 2}),
+        ("perturbation", {"kind": "move_box", "step": 2}),
         started("b"),
     )
     events.insert(5, events.pop(-2))  # the perturbation arrives before decision 2
@@ -345,7 +358,7 @@ def test_p_pressed_again_returns_to_a_pinned_episode() -> None:
         started("b"),
         decision(0),
         executed(0),
-        ("perturbation", {"kind": "move_block", "step": 1}),
+        ("perturbation", {"kind": "move_box", "step": 1}),
         decision(1),
         executed(1),
         started("c"),

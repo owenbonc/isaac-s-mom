@@ -50,13 +50,14 @@ class _ThirdPersonCapture:
 def _captions(manifest: EpisodeManifest, perturb_at: int) -> list[str]:
     verdict = manifest.validation
     final = ("accepted" if verdict.accepted else f"rejected: {verdict.reason}") if verdict else "pending"
+    moved = manifest.perturbations[0].perturbation.kind.removeprefix("move_") if manifest.perturbations else "scene"
     captions = []
     for i, step in enumerate(manifest.steps):
         who = f"{step.controller} {step.checkpoint}" if step.checkpoint else step.controller
-        distance = step.skill_call.params.get("distance_cm")
-        skill = step.skill_call.skill + (f" {distance:g} cm" if distance is not None else "")
+        amounts = [f"{v:g} cm" if k == "distance_cm" else f"{v:g}°" for k, v in step.skill_call.params.items()]
+        skill = " ".join([step.skill_call.skill, *amounts])
         state = "validator: " + (final if i == len(manifest.steps) - 1 else "pending")
-        perturbed = "block moved   " if i >= perturb_at else ""
+        perturbed = f"{moved} moved   " if i >= perturb_at else ""
         captions.append(f"{who}   {skill}   {perturbed}{state}")
     return captions
 

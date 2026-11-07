@@ -21,7 +21,7 @@
 
   // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing and when
   // it was paused; `selected` pins an episode (null follows the run: its latest episode while live, its story once
-  // finished); `compare` is the block move P shows, with the selection to return to when P is pressed again.
+  // finished); `compare` is the box or bin move P shows, with the selection to return to when P is pressed again.
   const view = () => ({ live: initial(), frozen: null, selected: null, compare: null });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
@@ -90,6 +90,7 @@
           checkpoint: text(d.checkpoint) || null,
           skill: skill ? text(skill.skill) || null : null,
           distance: skill && skill.params ? num(skill.params.distance_cm) : null,
+          angle: skill && skill.params ? num(skill.params.angle_deg) : null,
           reason: text(d.reason),
           latency,
           ok: null,
@@ -177,7 +178,7 @@
   }
 
   // The head-camera frames to show around the stage frame (`now`): the latest, or the first at or after `focus`.
-  // The first frame after the block moved is flagged.
+  // The first frame after the box or bin moved is flagged.
   function filmstrip(ep, focus = null) {
     if (!ep || !ep.frames.length) return [];
     const frames = ep.frames;
@@ -231,7 +232,7 @@
     v.compare = null;
   }
 
-  // Shows the shown episode's block move; pressing again returns to the selection from before.
+  // Shows the shown episode's box or bin move; pressing again returns to the selection from before.
   function compareMove(v, now) {
     if (v.compare) {
       v.selected = v.compare.back;

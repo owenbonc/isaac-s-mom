@@ -87,7 +87,7 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minm
 .strip li.moved .st{background:var(--ink);color:var(--panel);border-radius:2px;padding:0 .3rem}
 .caption{margin:.5rem 0 0;padding:.35rem .6rem;border-radius:3px;font-weight:600}
 .caption.moved{background:var(--ink);color:var(--panel)}
-/* The block move is the take's peak: the frame that first shows it stays outlined in ink, and flashes once on arrival. */
+/* The box or bin move is the take's peak: the frame that first shows it stays outlined in ink, and flashes once on arrival. */
 .shot.moved{outline:.3rem solid var(--ink);outline-offset:.15rem}
 /* Rare (a few times a take) and aimed at the back of the room, so it runs longer than UI feedback would. */
 @media (prefers-reduced-motion:no-preference){

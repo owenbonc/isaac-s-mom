@@ -40,9 +40,10 @@ const tag = (controller, checkpoint) => {
   const who = { student: "Student", teacher: "Teacher (Argon)" }[controller] || "Unknown controller";
   return `<span class="tag ${controller || "unknown"}">${who}${checkpoint ? ` <span class="mono">${esc(checkpoint)}</span>` : ""}</span>`;
 };
-const skillText = (row) => (row.skill ? esc(row.skill) + (row.distance === null ? "" : ` ${+row.distance.toFixed(1)} cm`) : '<span class="stop">Stopped, no skill chosen</span>');
+const amount = (row) => (row.distance !== null ? ` ${+row.distance.toFixed(1)} cm` : row.angle !== null ? ` ${Math.round(row.angle)}°` : "");
+const skillText = (row) => (row.skill ? esc(row.skill) + amount(row) : '<span class="stop">Stopped, no skill chosen</span>');
 const SCENES = { dev: "Development scene", heldout: "Held-out test scene" };
-const MOVED = { move_block: "Block moved", move_target: "Target zone moved" };
+const MOVED = { move_box: "Box moved", move_bin: "Bin moved" };
 // Durations read at a glance from the back of the room: ms under a second, then seconds, then minutes.
 const duration = (v) => (v < 1000 ? `${v >= 100 ? Math.round(v) : v.toFixed(1)} ms` : v < 120000 ? `${(v / 1000).toFixed(1)} s` : `${(v / 60000).toFixed(1)} min`);
 const pct = (k, n) => (n ? Math.round((100 * k) / n) + "%" : "n/a");
@@ -100,9 +101,9 @@ function renderCamera() {
   const moved = last.moved ? `<p class="caption moved">${esc(MOVED[ep.rows.findLast((r) => r.kind === "perturbation").what] || "Scene changed")} just before this frame. This is the first frame that shows it.</p>` : "";
   $("stage").innerHTML = `<div class="frame"><div class="shot${last.moved ? " moved" : ""}"${last.url ? "" : " data-missing"}>${shot}<div class="over">${tag(last.controller, last.checkpoint)}${seen ? `<span class="step">${seen}</span>` : ""}</div></div></div>${moved}`;
   $("strip").innerHTML = frames
-    .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (block moved before this frame)</span>' : ""}</span></li>`)
+    .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (the scene moved before this frame)</span>' : ""}</span></li>`)
     .join("");
-  // Flash once when the first frame after the block move reaches the stage; added outside the HTML so later
+  // Flash once when the first frame after the move reaches the stage; added outside the HTML so later
   // identical writes are skipped and the animation runs to its end.
   const key = `${ep.id}@${last.step}`;
   if (last.moved && key !== flashedFrame) {
