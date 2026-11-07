@@ -67,7 +67,7 @@ function renderHeader() {
   const s = MomState.shown(view);
   const kind = MomState.provenance(view, now());
   const status = s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)} · ${simName(s)}`);
-  $("status").innerHTML = status + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
+  $("status").innerHTML = status;
   const robot = s.episodes.length && s.episodes[s.episodes.length - 1].sim;
   $("run-meta").innerHTML = s.eventCount
     ? `Run <b class="mono">${esc(s.runId)}</b>${robot ? `, robot <span class="mono">${esc(robot.robot)}</span>` : ""}: ${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}, ${s.eventCount} events.`
@@ -192,7 +192,9 @@ function renderEpisode() {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
   const at = s.episodes.indexOf(ep);
-  $("episode-line").innerHTML = ep ? `Episode ${at + 1} of ${s.episodes.length}` : "";
+  // The connection note sits beside the rail, which gives way, so the keys above never wrap.
+  const lost = connection === "lost" ? ' <span class="lost">· connection lost, retrying</span>' : "";
+  $("episode-line").innerHTML = (ep ? `Episode ${at + 1} of ${s.episodes.length}` : "") + lost;
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) < 0;
   $("b-p").disabled = !view.compare && (!ep || ep.perturbedStep === null);
   $("b-p").setAttribute("aria-pressed", String(view.compare !== null));
