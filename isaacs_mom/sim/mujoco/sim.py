@@ -12,6 +12,7 @@ import io
 import uuid
 from collections import deque
 from collections.abc import Callable
+from typing import NamedTuple
 
 import mujoco
 import numpy as np
@@ -57,6 +58,12 @@ AT_REST_SPEED_M_S = 0.02
 AT_REST_SPIN_RAD_S = 0.2
 AT_REST_WINDOW_S = 1.0
 JOINT_LIMIT_TOL_RAD = 0.02
+
+
+class BoxSample(NamedTuple):
+    time_s: float
+    speed_m_s: float
+    spin_rad_s: float
 
 
 def _jpeg(pixels: np.ndarray) -> bytes:
@@ -110,7 +117,7 @@ class MujocoSim:
         self.waist = 0.0
         self.closed = False
         self.lifted = False
-        self._speeds: deque[tuple[float, float, float]] = deque()  # sim time, box speed, box spin
+        self._speeds: deque[BoxSample] = deque()
         self._fallen = self._limit_violated = self._penetrated = False
         self._actions: list[list[float]] = []
         self._times: list[float] = []
@@ -154,9 +161,7 @@ class MujocoSim:
     def perturb(self, perturbation: Perturbation) -> bool:
         rng = np.random.default_rng(perturbation.seed)
         if perturbation.kind == "move_box":
-            touching = self._touching(self.data, {self._box_geom})
-            # A box in the hands, the bin or on the floor stays put: moving it would undo the robot's work.
-            if self._table_top not in touching or touching & self._hand_pads:
+            if not self._box_loose_on_table():
                 return False
             x, y = box_xy(rng)
             # Land between the open hands, never inside one; the box is too wide to rest anywhere clear of closed ones.
@@ -271,13 +276,19 @@ class MujocoSim:
         """For the last AT_REST_WINDOW_S of sim time the box has moved slower than AT_REST_SPEED_M_S and turned
         slower than AT_REST_SPIN_RAD_S."""
         now = self.data.time
-        if not self._speeds or self._speeds[0][0] > now - AT_REST_WINDOW_S:
+        if not self._speeds or self._speeds[0].time_s > now - AT_REST_WINDOW_S:
             return False
         return all(
-            speed < AT_REST_SPEED_M_S and spin < AT_REST_SPIN_RAD_S
-            for t, speed, spin in self._speeds
-            if t >= now - AT_REST_WINDOW_S
+            s.speed_m_s < AT_REST_SPEED_M_S and s.spin_rad_s < AT_REST_SPIN_RAD_S
+            for s in self._speeds
+            if s.time_s >= now - AT_REST_WINDOW_S
         )
+
+    def _box_loose_on_table(self) -> bool:
+        """Resting on the table top and not held. Hands closed on it hold it; a missed hug or an open hand against
+        it doesn't, as in FakeSim, where `held` means a hug that caught the box."""
+        touching = self._touching(self.data, {self._box_geom})
+        return self._table_top in touching and not (self.closed and touching & self._hand_pads)
 
     def _touching(self, data: mujoco.MjData, geoms: set[int]) -> set[int]:
         """The geoms in contact with any of `geoms`, other than those."""
@@ -289,8 +300,10 @@ class MujocoSim:
         self._actions.append([float(v) for v in d.ctrl])
         self._times.append(float(d.time))
         box_vel = d.qvel[self._box_dadr : self._box_dadr + 6]
-        self._speeds.append((float(d.time), float(np.linalg.norm(box_vel[:3])), float(np.linalg.norm(box_vel[3:]))))
-        while self._speeds and self._speeds[0][0] < d.time - 2 * AT_REST_WINDOW_S:
+        self._speeds.append(
+            BoxSample(float(d.time), float(np.linalg.norm(box_vel[:3])), float(np.linalg.norm(box_vel[3:])))
+        )
+        while self._speeds and self._speeds[0].time_s < d.time - 2 * AT_REST_WINDOW_S:
             self._speeds.popleft()
         if self.on_tick:
             self.on_tick()
