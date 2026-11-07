@@ -130,17 +130,17 @@ function renderControl() {
   const took = ep.rows.find((r) => r.kind === "takeover");
   const done = finished(ep);
   const words = MomState.verdictWords(ep);
-  // The controller tag is the sentence's subject; a judged take's verdict already says when the teacher took over.
+  // The controller tag is the sentence's subject.
   const detail = took
-    ? ep.demo && words
-      ? ""
-      : `took over when the student stopped${took.step === null ? "" : " at step " + esc(took.step)}.`
+    ? `took over when the student stopped${took.step === null ? "" : " at step " + esc(took.step)}.`
     : ep.controller === "student"
       ? `${done ? "chose" : "is choosing"} each skill from the head-camera frame.`
       : `${done ? "demonstrated" : "is demonstrating"} from the head-camera frame.`;
+  // A judged take's verdict already says when the teacher took over.
+  const sentence = ep.demo && took && words ? "" : `<span class="note">${detail}</span>`;
   const [kind, where] = kindOf(ep);
   el.className = "control " + ep.controller;
-  el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}${detail ? `<span class="note">${detail}</span>` : ""}${words ? verdictChip(ep) : ""}`;
+  el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}${sentence}${words ? verdictChip(ep) : ""}`;
   return `${WHO[ep.controller]} ${done ? "was" : "is"} in control.${words ? ` Verdict: ${words}.` : ""}`;
 }
 
@@ -290,8 +290,8 @@ function renderLog() {
   if (!fromStart) [...list.children].slice(renderedRows).forEach((li) => li.classList.add("fresh"));
   if (logFollowing) {
     // Until the verdict, the foot never pushes the stage frame's row (its reason) above the log's top.
-    const shown = !ep.verdict && stage && list.children[ep.rows.findIndex((r) => r.kind === "decision" && r.step === stage.step && r.skill)];
-    list.scrollTop = shown ? shown.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop : list.scrollHeight;
+    const stageRow = !ep.verdict && stage && list.children[ep.rows.findIndex((r) => r.kind === "decision" && r.step === stage.step && r.skill)];
+    list.scrollTop = stageRow ? stageRow.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop : list.scrollHeight;
     logAnchor = list.scrollTop;
   }
   // M and P park the log with the move row a third of the way down, and it stays parked until the reader scrolls.

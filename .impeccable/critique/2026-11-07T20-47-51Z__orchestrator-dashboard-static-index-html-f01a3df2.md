@@ -10,6 +10,7 @@ target_fingerprint: "sha256:ed8e9423f61c8e6f346267e370dc5fd7b79eff8a90298e8fb8e1
 target_path: /Users/owenyan/isaac-s-mom/.claude/worktrees/agent-a4b1bd315ceff52fa/isaacs_mom/orchestrator/dashboard/static/index.html
 timestamp: 2026-11-07T20-47-51Z
 slug: orchestrator-dashboard-static-index-html-f01a3df2
+closed: true
 ---
 Method: dual-agent (A: Opus design review · B: Sonnet detector + overlay), plus an Opus audit with break-ui and review-animations, and live replays of the run as a real-sim run. Target: the live dashboard, `runs/shot` at 2a029d5 (fix round 3, layout B, phase-1 #12/#14/#15 merged).
 
