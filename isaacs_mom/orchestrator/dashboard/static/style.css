@@ -24,7 +24,7 @@ h2{font-size:var(--step-1)}
 .ph-text{color:var(--ph)}
 
 header.bar{flex:none;background:var(--panel);border-bottom:1px solid var(--rule)}
-.bar .top{display:flex;align-items:center;gap:.4rem 1rem;padding:.45rem 1.1rem .3rem;flex-wrap:wrap}
+.bar .top{display:flex;align-items:center;gap:.4rem .75rem;padding:.45rem 1.1rem .3rem;flex-wrap:wrap}
 header.bar h1{font-size:var(--step-2)}
 .bar .where{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem 1rem;padding:0 1.1rem .4rem}
 #episode-line{margin:0;font-weight:600;white-space:nowrap}
@@ -54,8 +54,9 @@ header.bar h1{font-size:var(--step-2)}
 .control .what{font-weight:700}
 .control .note{color:var(--ink)}
 
-/* Key hints that are also buttons: the key cap carries the border, so the row reads as a legend. */
-.presenter{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .5rem;margin-left:auto}
+/* Key hints that are also buttons: the key cap carries the border, so the row reads as a legend. Its gaps leave room
+   on one line at 80rem for the paused key's "Resume · 999 new". */
+.presenter{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .4rem;margin-left:auto}
 .presenter .pair{display:inline-flex;align-items:center;gap:.3rem}
 .presenter button{font:inherit;color:var(--ink);background:none;border:0;border-radius:4px;padding:.15rem .3rem;display:inline-flex;align-items:center;gap:.35rem;cursor:pointer}
 .presenter .pair button{padding:.15rem .1rem}
