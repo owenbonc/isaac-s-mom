@@ -2,7 +2,7 @@ from pathlib import Path
 
 import pytest
 
-from isaacs_mom.contracts import SKILLS, SkillCall
+from isaacs_mom.contracts import SKILLS, SkillCall, SkillTarget
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, resolve_adapter
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
 
@@ -44,6 +44,10 @@ def test_reply_distance_is_clamped_to_the_skill_limit() -> None:
 def test_training_target_round_trips_through_the_parser() -> None:
     call = SkillCall(skill="approach_left", params={"distance_cm": 7.26})
     assert parse_reply(format_target(call)) == SkillCall(skill="approach_left", params={"distance_cm": 7.3})
+
+
+def test_training_target_has_no_reason() -> None:
+    assert format_target(SkillTarget(skill="retract")) == '{"skill":"retract","params":{}}'
 
 
 def test_prompt_names_the_task_the_last_result_and_every_skill() -> None:

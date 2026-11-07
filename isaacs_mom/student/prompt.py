@@ -4,7 +4,7 @@ import json
 
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import MAX_DISTANCE_CM, SKILLS, SkillCall
+from isaacs_mom.contracts import MAX_DISTANCE_CM, SKILLS, SkillCall, SkillTarget
 
 
 class UnparseableReply(ValueError):
@@ -27,9 +27,9 @@ def build_messages(instruction: str, feedback: str) -> list[dict[str, object]]:
     return [{"role": "user", "content": [{"type": "image"}, {"type": "text", "text": text}]}]
 
 
-def format_target(call: SkillCall) -> str:
+def format_target(target: SkillTarget) -> str:
     """The reply the student is trained to give."""
-    return SkillCall(skill=call.skill, params={k: round(v, 1) for k, v in call.params.items()}).model_dump_json()
+    return SkillTarget(skill=target.skill, params={k: round(v, 1) for k, v in target.params.items()}).model_dump_json()
 
 
 def parse_reply(text: str) -> SkillCall:
