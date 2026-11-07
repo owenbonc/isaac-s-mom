@@ -26,7 +26,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - Robot: Unitree G1 (29 DoF) from MuJoCo Menagerie, free-standing: it keeps its floating base and balances on its own feet under joint-position control, in Unitree's soft-knee standing pose. It does not walk; it reaches the bin by twisting at the waist. Collision pads on the hands, since Menagerie's hands are visual only. A table, an orange box, a green bin on the robot's left.
 - One head-mounted RGB camera, 320×240, rendered with `mujoco.Renderer`.
 - Skills (whitelist): `reach_left`, `reach_right` (slide the arms' working point sideways, `distance_cm` 0–20, default 5, within ±12 cm), `turn_left`, `turn_right` (twist the waist, `angle_deg` 0–45, default 30, within ±150°), `hug`, `lift`, `place` (reach out over the bin, lower, let go, settle 2.5 s), `reobserve`. Damped least-squares IK plus a joint-position controller turns a skill into simulator steps; a skill whose IK target is out of reach, or that would pass a reach or twist limit, is refused with a reason and nothing moves (rule 7).
-- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading beside the robot) is a pure function of the seed.
+- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading beside the robot) is a pure function of the seed. `perturb` moves only a box resting on the table out of the robot's hands, and puts the bin only where it touches nothing; otherwise it refuses and nothing moves. FakeSim follows the same rule.
 - `FakeSim` (foundation) implements the same protocol with drawn frames and trivial physics so every other workstream and CI build without the real scene.
 - The demo video is recorded from the rendered frames (head camera next to a third-person camera), not screen capture.
 
@@ -42,7 +42,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - If Argon is unreachable or over budget, the robot holds and re-observes, and the run reports it.
 
 ### 3.4 Validator and recorder (workstream 3)
-- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration.
+- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest (neither moving nor turning) for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration.
 - Recorder writes `runs/<run_id>/episodes/<episode_id>/` (manifest §4.2, frames as JPEG, actions as `.npy`) and `runs/<run_id>/events.jsonl`.
 - `build_training_set(run_id, round) -> path` applies rules 2 and 3.
 - `replay(sim, manifest_path)` re-executes the stored skill calls and perturbations from the stored seed and reports whether the executed actions and the final verdict reproduce; it sets `replay_valid`.
@@ -51,7 +51,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - One command, `uv run mom run`, executes the loop (§3.6) and writes events.
 - Dashboard (FastAPI plus one HTML page, server-sent events): live head camera, the current controller (student checkpoint or teacher), each decision with its reasoning, validator verdicts, the success-rate table per round, and where each model runs with its measured latency.
 - `uv run mom demo --ckpt <id> --seed <s> --perturb-at <step>` runs the judged single take: student on an unseen scene, a perturbation mid-run, re-observe, finish.
-- Perturbations (`move_box`, `move_bin`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame.
+- Perturbations (`move_box`, `move_bin`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame. Only an applied perturbation is recorded and emitted as a `perturbation` event; a refused one is an `error` event.
 
 ### 3.6 The teach → fine-tune loop
 1. Evaluate the current student checkpoint on the 20 held-out seeds (success rate, n=20).
@@ -75,7 +75,7 @@ class RobotSim(Protocol):  # student and teacher
 
 class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
     def ground_truth(self) -> GroundTruth: ...
-    def perturb(self, p: Perturbation) -> None: ...
+    def perturb(self, p: Perturbation) -> bool: ...  # True when it applied; False changes nothing
     def render_third_person(self) -> bytes: ...  # JPEG, for the video
 ```
 - `Observation{episode_id, step, sim_time, head_rgb_jpeg: bytes, joint_state: list[float]}`

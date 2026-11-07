@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, SkillCall
+from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, PerturbationRecord, SkillCall
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
@@ -87,6 +87,17 @@ def test_replay_applies_the_recorded_mid_run_perturbation(tmp_path: Path) -> Non
     assert replay(FakeSim(), path)
 
     manifest.perturbations = []
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)
+
+
+def test_replay_rejects_a_recorded_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1606)
+    manifest = _load(path)
+    # The box is in the bin by the end, so moving it is refused and nothing else about the replay changes.
+    manifest.perturbations = [
+        PerturbationRecord(before_step=len(manifest.steps), perturbation=Perturbation(kind="move_box", seed=1))
+    ]
     path.write_text(manifest.model_dump_json())
     assert not replay(FakeSim(), path)
 
