@@ -239,6 +239,26 @@
   const following = (v, now) => running(v.live, v.frozen ? v.frozen.at : now);
 
   const accepted = (ep) => ep.verdict !== null && ep.verdict.task && ep.verdict.physics;
+  // What an episode is: the judged take, a held-out test, a teacher demonstration or a student trial.
+  function kind(ep) {
+    if (ep.demo) return "take";
+    if (ep.split === "heldout") return "heldout";
+    const first = ep.rows.find((r) => r.kind === "decision");
+    return first && first.controller === "teacher" ? "demonstration" : "trial";
+  }
+  // The verdict in the words of the episode's kind (SPEC §3.5): only a demonstration is admitted to training; the
+  // rest succeed or fail, and the judged take says whether the student finished it alone. Null before the verdict.
+  function verdictWords(ep) {
+    if (!ep.verdict) return null;
+    const good = accepted(ep);
+    const k = kind(ep);
+    if (k === "demonstration") return good ? "Accepted for training" : "Rejected";
+    const outcome = good ? "Succeeded" : "Failed";
+    if (k !== "take") return outcome;
+    const took = ep.rows.find((r) => r.kind === "takeover");
+    if (!took) return good ? `${outcome}, by the student alone` : outcome;
+    return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
+  }
   // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
   const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || current(s);
 
@@ -312,7 +332,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, following, accepted, teacherDrove, episode, finetuning, target, stageStep, keydown };
+  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, following, accepted, kind, verdictWords, teacherDrove, episode, finetuning, target, stageStep, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

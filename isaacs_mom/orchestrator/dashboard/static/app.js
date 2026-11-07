@@ -52,15 +52,18 @@ const skillText = (row) => (row.skill ? esc(row.skill) + amount(row) : '<span cl
 // What an episode is, named without the loop's round index, which reads like a checkpoint number and is not one.
 // An episode is over once judged, or once the view has moved past it or the run has stopped.
 const finished = (ep) => ep.verdict !== null || ep !== MomState.current(MomState.shown(view)) || !MomState.following(view, now());
+const KINDS = {
+  take: ["Judged take", "unseen scene, seed"],
+  heldout: ["Held-out test", "seed"],
+  demonstration: ["Teacher demonstration", "development seed"],
+  trial: ["Student trial", "development seed"],
+};
 const kindOf = (ep) => {
-  if (ep.demo) return ["Judged take", `unseen scene, seed ${esc(ep.seed ?? "")}`];
-  if (ep.split === "heldout") return ["Held-out test", `seed ${esc(ep.seed ?? "")}`];
-  const first = ep.rows.find((r) => r.kind === "decision");
-  return [first && first.controller === "teacher" ? "Teacher demonstration" : "Student trial", `development seed ${esc(ep.seed ?? "")}`];
+  const [name, seed] = KINDS[MomState.kind(ep)];
+  return [name, `${seed} ${esc(ep.seed ?? "")}`];
 };
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
-const isAccepted = (v) => v.task && v.physics;
-const verdictChip = (v) => `<span class="verdict ${isAccepted(v) ? "good" : "bad"}">${isAccepted(v) ? CHECK + "Accepted" : X + "Rejected"}</span>`;
+const verdictChip = (ep) => `<span class="verdict ${MomState.accepted(ep) ? "good" : "bad"}">${MomState.accepted(ep) ? CHECK : X}${esc(MomState.verdictWords(ep))}</span>`;
 const MOVED = { move_box: "Box moved", move_bin: "Bin moved" };
 // Durations read at a glance from the back of the room: ms under a second, then seconds, then minutes.
 const duration = (v) => (v < 1000 ? `${v >= 100 ? Math.round(v) : v.toFixed(1)} ms` : v < 120000 ? `${(v / 1000).toFixed(1)} s` : `${(v / 60000).toFixed(1)} min`);
@@ -114,16 +117,19 @@ function renderControl() {
   }
   const took = ep.rows.find((r) => r.kind === "takeover");
   const done = finished(ep);
-  // The controller tag is the sentence's subject.
+  const words = MomState.verdictWords(ep);
+  // The controller tag is the sentence's subject; a judged take's verdict already says when the teacher took over.
   const detail = took
-    ? `took over when the student stopped${took.step === null ? "" : " at step " + esc(took.step)}.`
+    ? ep.demo && words
+      ? ""
+      : `took over when the student stopped${took.step === null ? "" : " at step " + esc(took.step)}.`
     : ep.controller === "student"
       ? `${done ? "chose" : "is choosing"} each skill from the head-camera frame.`
       : `${done ? "demonstrated" : "is demonstrating"} from the head-camera frame.`;
   const [kind, where] = kindOf(ep);
   el.className = "control " + ep.controller;
-  el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}<span class="note">${detail}</span>${ep.verdict ? verdictChip(ep.verdict) : ""}`;
-  announce(`${WHO[ep.controller]} ${done ? "was" : "is"} in control.${ep.verdict ? ` The validator ${isAccepted(ep.verdict) ? "accepted" : "rejected"} this episode.` : ""}`);
+  el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}${detail ? `<span class="note">${detail}</span>` : ""}${words ? verdictChip(ep) : ""}`;
+  announce(`${WHO[ep.controller]} ${done ? "was" : "is"} in control.${words ? ` Verdict: ${words}.` : ""}`);
 }
 
 function renderCamera() {
@@ -212,8 +218,9 @@ function decisionRow(row, after, done, full) {
 
 function verdictRow(ep) {
   const v = ep.verdict;
+  const good = MomState.accepted(ep);
   const reason = v.reason ? `${esc(cap(v.reason))}. ` : "";
-  return `<li class="event ${isAccepted(v) ? "good" : "bad"}"><span class="n">${isAccepted(v) ? CHECK : X}</span><span>The validator ${isAccepted(v) ? "accepted" : "rejected"} this episode. <span class="d">${reason}Task ${v.task ? "succeeded" : "not met"}, physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
+  return `<li class="event ${good ? "good" : "bad"}"><span class="n">${good ? CHECK : X}</span><span>${esc(MomState.verdictWords(ep))}. <span class="d">${reason}Task ${v.task ? "succeeded" : "not met"}, physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
 }
 
 const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m", "b-end": "End" };
@@ -231,7 +238,7 @@ function renderEpisode() {
   // The name stays "Pause" and aria-pressed carries the state; the visible label says what Space does next.
   $("b-pause").setAttribute("aria-pressed", String(view.frozen !== null));
   $("b-pause").lastElementChild.textContent = view.frozen ? `Resume · ${MomState.buffered(view)} new` : "Pause";
-  // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when rejected.
+  // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when it failed or was rejected.
   $("rail").style.setProperty("--n", s.episodes.length);
   $("rail").innerHTML = s.episodes
     .map((e) => `<li class="${MomState.teacherDrove(e) ? "teacher" : "student"} ${e.verdict ? (MomState.accepted(e) ? "accepted" : "rejected") : "open"}${e === ep ? " here" : ""}"></li>`)

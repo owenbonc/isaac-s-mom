@@ -790,3 +790,42 @@ def test_the_move_pairs_the_last_frame_before_it_with_the_first_after_and_finds_
         events,
     )
     assert out == {"before": "/f/1.jpg", "after": "/f/2.jpg", "decision": 2, "none": None}
+
+
+def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished_it() -> None:
+    def kinded(episode_id: str, **data: object) -> tuple[str, dict]:
+        return "episode_started", {**started(episode_id)[1], **data}
+
+    took = ("decision", {"controller": "teacher", "takeover": True, "step": 8, "skill": None})
+    events = stream(
+        *demo("demo-ok", "trial", accepted=True),
+        *demo("demo-bad", "trial", accepted=False),
+        *[kinded("heldout-ok", split="heldout"), decision(0), verdict(True)],
+        *[kinded("heldout-bad", split="heldout"), decision(0), verdict(False)],
+        *[started("trial-ok"), decision(0), verdict(True)],
+        *[started("trial-bad"), decision(0), verdict(False)],
+        *[kinded("alone", demo=True), decision(0), verdict(True)],
+        *[kinded("rescued", demo=True), decision(0), took, decision(8, controller="teacher"), verdict(True)],
+        *[kinded("lost", demo=True), decision(0), took, decision(8, controller="teacher"), verdict(False)],
+        *[started("open"), decision(0)],
+    )
+    out = run(
+        """
+        const s = S.initial();
+        for (const e of events) S.reduce(s, e);
+        return s.episodes.map((e) => [S.kind(e), S.verdictWords(e)]);
+        """,
+        events,
+    )
+    assert out == [
+        ["demonstration", "Accepted for training"],
+        ["demonstration", "Rejected"],
+        ["heldout", "Succeeded"],
+        ["heldout", "Failed"],
+        ["trial", "Succeeded"],
+        ["trial", "Failed"],
+        ["take", "Succeeded, by the student alone"],
+        ["take", "Succeeded after the teacher took over at step 8"],
+        ["take", "Failed after the teacher took over at step 8"],
+        ["trial", None],
+    ]
