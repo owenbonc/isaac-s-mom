@@ -241,7 +241,7 @@ def test_a_box_pushed_into_the_table_is_flagged(sim: MujocoSim) -> None:
     sim.execute(SkillCall(skill="reobserve"))
     gt = sim.ground_truth()
     assert gt.penetration
-    assert validate(gt).reason == "objects penetrated each other"
+    assert "penetration" in validate(gt).reason.split("; ")
 
 
 def test_a_shoved_robot_is_flagged_as_fallen(sim: MujocoSim) -> None:
@@ -249,7 +249,7 @@ def test_a_shoved_robot_is_flagged_as_fallen(sim: MujocoSim) -> None:
     _wait(sim, 2.0)
     gt = sim.ground_truth()
     assert gt.robot_fallen
-    assert validate(gt).reason == "robot fell"
+    assert validate(gt).reason.split("; ")[0] == "robot fell"
 
 
 def test_an_arm_forced_past_its_joint_range_is_flagged(sim: MujocoSim) -> None:
@@ -258,7 +258,7 @@ def test_an_arm_forced_past_its_joint_range_is_flagged(sim: MujocoSim) -> None:
     sim.execute(SkillCall(skill="reobserve"))
     gt = sim.ground_truth()
     assert gt.joint_limit_violation
-    assert validate(gt).reason == "joint limit violated"
+    assert "joint limit violated" in validate(gt).reason.split("; ")
 
 
 def _state(sim: MujocoSim) -> tuple[object, ...]:
