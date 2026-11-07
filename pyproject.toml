@@ -18,7 +18,12 @@ dependencies = [
 mom = "isaacs_mom.orchestrator.cli:main"
 
 [dependency-groups]
-dev = ["pyright>=1.1.390", "pytest>=8.3", "ruff>=0.8"]
+dev = [
+    "httpx>=0.28.1",
+    "pyright>=1.1.390",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
 
 [build-system]
 requires = ["hatchling"]

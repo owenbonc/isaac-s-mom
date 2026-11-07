@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<title>Isaac's Mom</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<pre id="log">waiting for events</pre>
+<script>
+  const log = document.getElementById("log");
+  new EventSource("/events").onmessage = (e) => {
+    const event = JSON.parse(e.data);
+    log.textContent += "\n" + event.type + " " + JSON.stringify(event.data);
+  };
+</script>
