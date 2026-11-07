@@ -47,7 +47,13 @@ def run_episode(
                 break
             recorder.mark_takeover()
             events.emit(
-                "decision", episode_id=episode_id, controller="teacher", takeover=True, step=total_steps, skill=None
+                "decision",
+                episode_id=episode_id,
+                controller="teacher",
+                takeover=True,
+                step=total_steps,
+                skill=None,
+                reason="student stopped without succeeding; teacher takes over",
             )
         for _ in range(max_steps):
             if total_steps == perturb_at:

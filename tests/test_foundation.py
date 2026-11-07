@@ -133,8 +133,10 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
         round_=0,
         instruction="push",
     )
-    decisions = [json.loads(line)["data"] for line in events.path.read_text().splitlines() if '"decision"' in line]
+    events_seen = [json.loads(line) for line in events.path.read_text().splitlines()]
+    decisions = [e["data"] for e in events_seen if e["type"] == "decision"]
     assert all("latency_ms" in d for d in decisions if not d.get("takeover"))
-    assert any(d.get("reason") == "block is right of the hand" for d in decisions)
+    assert all("reason" in d for d in decisions)
+    assert any(d["reason"] == "block is right of the hand" for d in decisions)
     lines = build_training_set(tmp_path, 1).read_text().splitlines()
-    assert lines and all(json.loads(line)["target"]["reason"] == "" for line in lines)
+    assert lines and all("reason" not in json.loads(line)["target"] for line in lines)
