@@ -8,7 +8,7 @@ let renderedSide = null;
 // The log follows new rows until the reader scrolls up from its bottom, and again once they scroll back down.
 let logFollowing = true;
 let flashedFrame = null;
-let spoken = { text: "", episode: null, paused: false };
+let lastHeard = { text: "", episode: null, paused: false };
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
 const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Gemini API", finetune: "Modal A10G" };
 
@@ -89,10 +89,10 @@ function announce(text) {
   const ep = MomState.episode(view, now());
   const heard = { text, episode: ep && ep.id, paused: view.frozen !== null };
   const parts = [];
-  if (heard.paused !== spoken.paused) parts.push(heard.paused ? "Paused." : "Resumed.");
-  if (ep && heard.episode !== spoken.episode) parts.push(`Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}, ${kindOf(ep)[0].toLowerCase()}.`, text);
-  else if (text !== spoken.text) parts.push(text);
-  spoken = heard;
+  if (heard.paused !== lastHeard.paused) parts.push(heard.paused ? "Paused." : "Resumed.");
+  if (ep && heard.episode !== lastHeard.episode) parts.push(`Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}, ${kindOf(ep)[0].toLowerCase()}.`, text);
+  else if (text !== lastHeard.text) parts.push(text);
+  lastHeard = heard;
   const message = parts.filter(Boolean).join(" ");
   if (message) $("announce").textContent = message;
 }
@@ -278,7 +278,7 @@ function renderRounds() {
     const spoken = both ? `${first.successes} of ${first.n}, then ${last.successes} of ${last.n}` : `${first.successes} of ${first.n}`;
     const n = first.n === last.n ? `n=${last.n}${both ? " each" : ""}` : `n=${first.n} and n=${last.n}`;
     const span = both ? `${esc(first.checkpoint)} → ${esc(last.checkpoint)}` : esc(first.checkpoint);
-    // The first and the latest checkpoint only: the change is the claim, and every round between is in the run's files.
+    // First and latest only: the change is the claim.
     body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note mono">${span}</span></div>`;
   }
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip(rounds.length > 0)}</header><div class="body">${body}</div>`;
