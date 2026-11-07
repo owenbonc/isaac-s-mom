@@ -1,5 +1,6 @@
 import json
 import logging
+import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 
 from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget, TrainingExample
 from isaacs_mom.orchestrator.loop import INSTRUCTION
+from isaacs_mom.student import finetune_modal
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, adapter_dir, resolve_adapter, valid_run_id
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
@@ -330,3 +332,16 @@ def test_nested_trainer_file_name_is_rejected_before_anything_is_written(tmp_pat
     with pytest.raises(RuntimeError, match="not plain"):
         finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=trainer)
     assert not (tmp_path / "run-a" / "checkpoints").exists()
+
+
+def test_the_modal_image_pins_the_torch_that_uv_lock_resolves_for_linux() -> None:
+    lock = tomllib.loads((Path(__file__).parent.parent / "uv.lock").read_text(encoding="utf-8"))
+    linux = {
+        p["name"]: p["version"].split("+")[0]
+        for p in lock["package"]
+        if p["name"] in ("torch", "torchvision") and p["source"].get("registry", "").endswith("/whl/cpu")
+    }
+    assert linux == {
+        "torch": finetune_modal.TORCH.removeprefix("torch=="),
+        "torchvision": finetune_modal.TORCHVISION.removeprefix("torchvision=="),
+    }

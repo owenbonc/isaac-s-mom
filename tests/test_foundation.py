@@ -248,17 +248,18 @@ def test_the_cli_refuses_a_run_id_a_checkpoint_id_could_not_carry(
 
 
 def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int], str]) -> tuple[dict, dict]:
+    run_dir = tmp_path / "some-run"
     run_loop(
         FakeSim(),
-        tmp_path,
-        "t",
+        run_dir,
+        "some-run",
         max_rounds=1,
         demos=1,
         dev_trials=1,
         make_student=StubStudent,
         train_student=train_student,
     )
-    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
     [started] = [e["data"] for e in events if e["type"] == "finetune_started"]
     [completed] = [e["data"] for e in events if e["type"] == "finetune_completed"]
     return started, completed
@@ -271,8 +272,8 @@ def test_a_skipped_finetune_says_so_and_names_no_adapter(tmp_path: Path) -> None
 
 
 def test_a_finetune_reports_what_it_trained_on_how_long_and_where(tmp_path: Path) -> None:
-    started, completed = finetune_events(tmp_path, lambda training_set, previous, round_: f"t/ckpt-r{round_}")
-    assert (completed["checkpoint"], completed["skipped"]) == ("t/ckpt-r1", False)
+    started, completed = finetune_events(tmp_path, lambda training_set, previous, round_: f"some-run/ckpt-r{round_}")
+    assert (completed["checkpoint"], completed["skipped"]) == ("some-run/ckpt-r1", False)
     assert completed["examples"] == len(Path(started["training_set"]).read_text().splitlines())
     assert isinstance(completed["duration_s"], float) and completed["duration_s"] >= 0
-    assert Path(completed["checkpoint_path"]).parts[-3:] == ("t", "checkpoints", "ckpt-r1")
+    assert Path(completed["checkpoint_path"]).parts == (*tmp_path.parts, "some-run", "checkpoints", "ckpt-r1")

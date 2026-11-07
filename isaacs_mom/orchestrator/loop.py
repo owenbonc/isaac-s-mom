@@ -2,6 +2,7 @@
 
 import time
 from collections.abc import Callable
+from functools import partial
 from pathlib import Path
 
 from isaacs_mom.contracts import EpisodeManifest, EvaluationResult
@@ -59,9 +60,11 @@ def run_loop(
     max_rounds: int = MAX_ROUNDS,
     demos: int = DEMOS_PER_ROUND,
     dev_trials: int = DEV_TRIALS,
-    make_student: StudentFactory = StudentPolicy,
+    make_student: StudentFactory | None = None,
     train_student: StudentTrainer = finetune,
 ) -> list[EvaluationResult]:
+    # finetune writes checkpoints beside the run dir, so the default student looks there too.
+    make_student = make_student or partial(StudentPolicy, runs_dir=run_dir.parent)
     events = EventLog(run_dir, run_id)
     checkpoint = BASE_CHECKPOINT
     results: list[EvaluationResult] = []
@@ -111,7 +114,7 @@ def run_loop(
         previous, checkpoint = checkpoint, train_student(training_set, checkpoint, round_ + 1)
         duration_s = round(time.monotonic() - started, 1)
         skipped = checkpoint == previous
-        path = None if skipped else adapter_dir(checkpoint)
+        path = None if skipped else adapter_dir(checkpoint, run_dir.parent)
         events.emit(
             "finetune_completed",
             round=round_ + 1,
