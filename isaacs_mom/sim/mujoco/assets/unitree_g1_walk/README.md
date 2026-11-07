@@ -1,0 +1,1 @@
+Unitree G1 walking policy `deploy/pre_train/g1/motion.pt` from unitreerobotics/unitree_rl_gym, commit `276801e46c5d433564f24658bac64f254b7d2d4b`, BSD-3-Clause (see `LICENSE`). `policy.npz` holds its TorchScript weights as float32 arrays (LSTM 47→64, `b` = `bias_ih + bias_hh`; MLP 64→32 ELU→12), so `walk.py` runs it in numpy; checked against torch to 1e-5 over 500 recurrent steps.

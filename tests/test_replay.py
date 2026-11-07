@@ -21,7 +21,7 @@ from isaacs_mom.contracts import (
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
-from isaacs_mom.sim.fake import FakeSim
+from isaacs_mom.sim.fake import PLACE_X, FakeSim
 from isaacs_mom.validator import replay, replay_accepted
 
 
@@ -36,19 +36,25 @@ class GreedyHugger:
 
     def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
         gt = self.sim.ground_truth()
-        work_y, waist, closed, lifted = obs.joint_state
+        work_y, closed, lifted = obs.joint_state
+        x, y, heading = self.sim.pose()
         if gt.box_on_bin_floor:
             return None
         if not closed:
-            dy = gt.box_xyz[1] - work_y
+            dy = -math.sin(heading) * (gt.box_xyz[0] - x) + math.cos(heading) * (gt.box_xyz[1] - y) - work_y
             if abs(dy) > 0.01:
                 return SkillCall(skill="reach_left" if dy > 0 else "reach_right", params={"distance_cm": abs(dy) * 100})
             return SkillCall(skill="hug")
         if not lifted:
             return SkillCall(skill="lift")
-        turn = math.degrees(math.atan2(gt.bin_xy[1], gt.bin_xy[0]) - waist)
+        if abs(gt.box_xyz[0] - 0.4) < 0.2 and abs(gt.box_xyz[1]) < 0.25:  # still over the table
+            return SkillCall(skill="walk_back", params={"distance_cm": 30})
+        dist = math.hypot(gt.bin_xy[0] - x, gt.bin_xy[1] - y)
+        turn = math.degrees(math.remainder(math.atan2(gt.bin_xy[1] - y, gt.bin_xy[0] - x) - heading, math.tau))
         if abs(turn) > 2:
             return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
+        if dist > PLACE_X + 0.05:
+            return SkillCall(skill="walk_forward", params={"distance_cm": (dist - PLACE_X - 0.02) * 100})
         return SkillCall(skill="place")
 
 
