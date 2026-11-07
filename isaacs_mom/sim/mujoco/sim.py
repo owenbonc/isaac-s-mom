@@ -50,7 +50,9 @@ TURN_SPEED_RAD_S = np.deg2rad(60)
 SETTLE_STEP_S = 0.5
 MAX_SETTLE_S = 6.0  # a box that lands leaning on a wall can take several seconds to tip flat
 FALLEN_Z = 0.6
-PENETRATION_TOL = 0.02  # a dropped box dips ~1 cm into the bin floor for a step; tunnelling goes far deeper
+PENETRATION_TOL_M = (
+    0.03  # a box landing on a corner dips up to ~2 cm into the bin floor for a step; tunnelling goes deeper
+)
 AT_REST_SPEED_M_S = 0.02
 AT_REST_SPIN_RAD_S = 0.2
 AT_REST_WINDOW_S = 1.0
@@ -298,7 +300,7 @@ class MujocoSim:
             for adr, lo, hi in self._limited
         )
         self._penetrated |= any(
-            c.dist < -PENETRATION_TOL and (c.geom1 in self._scenery or c.geom2 in self._scenery)
+            c.dist < -PENETRATION_TOL_M and (c.geom1 in self._scenery or c.geom2 in self._scenery)
             for c in d.contact[: d.ncon]
         )
 
