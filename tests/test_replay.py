@@ -85,16 +85,14 @@ def _load(path: Path) -> EpisodeManifest:
 
 def test_replay_reproduces_an_accepted_episode_and_marks_the_manifest(tmp_path: Path) -> None:
     path = _record(tmp_path, GreedyHugger, seed=1600)
-    verdict = _load(path).validation
-    assert verdict is not None and verdict.accepted
+    assert _accepted(path)
     assert replay(FakeSim(), path)
     assert _load(path).replay_valid is True
 
 
 def test_replay_reproduces_a_rejected_episode(tmp_path: Path) -> None:
     path = _record(tmp_path, lambda _: ReobserveOnce(), seed=1601)
-    verdict = _load(path).validation
-    assert verdict is not None and not verdict.accepted
+    assert not _accepted(path)
     assert replay(FakeSim(), path)
 
 

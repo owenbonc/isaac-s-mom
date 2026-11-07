@@ -10,8 +10,7 @@ from isaacs_mom.validator.rules import validate
 
 # The recorder saves actions as float32, so a faithful re-run matches only to float32 precision.
 TOLERANCE = 1e-5
-# What a re-run can raise: missing or corrupt frames and actions, bad simulator input, and MuJoCo's own FatalError,
-# which subclasses none of the others.
+# MuJoCo's FatalError subclasses none of the built-in errors.
 REPLAY_ERRORS = (OSError, ValueError, RuntimeError, ArithmeticError, LookupError, mujoco.FatalError)  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
 
 
@@ -31,8 +30,8 @@ def replay(sim: TruthSim, manifest_path: Path) -> bool:
 def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
     """Replay every accepted episode in a run (the ones that can become lessons); writes `replay_report.json`.
 
-    It never raises: an episode that can't be read, re-run or saved is recorded as a failure with a reason, so one
-    bad episode can't lose the report for the whole run.
+    An episode that can't be read, re-run (any of `REPLAY_ERRORS`) or saved is recorded as a failed replay with a
+    reason instead of raising, so one bad episode can't lose the report for the whole run.
     """
     replayed = 0
     failures: list[ReplayFailure] = []
@@ -54,7 +53,8 @@ def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
         try:
             write_manifest(manifest_path, manifest)
         except OSError as error:
-            reason = f"could not save the replay result: {error}"
+            saving = f"could not save the replay result: {error}"
+            reason = f"{reason}; {saving}" if reason else saving
         if reason is not None:
             failures.append(ReplayFailure(episode_id=manifest.episode_id, reason=reason))
     report = ReplayReport(replayed=replayed, reproduced=replayed - len(failures), failures=failures)

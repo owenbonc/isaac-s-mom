@@ -132,3 +132,15 @@ def test_a_recording_error_before_the_first_step_is_still_counted(tmp_path: Path
 
     assert summary.rejected_by == {"recording_error": 1}
     assert summary.empty_dev_episodes == 1
+
+
+def test_a_students_recording_error_is_not_counted_as_a_demonstration(tmp_path: Path) -> None:
+    refused = recording_error_verdict(RecordingError("timestamps go backwards"))
+    _write(tmp_path, "student-trial", manifest(validation=refused, controllers=("student",)))
+
+    summary = TrainingSetSummary.model_validate_json(
+        build_training_set(tmp_path, 1).with_suffix(".summary.json").read_text()
+    )
+
+    assert summary.demonstrations == 0
+    assert summary.rejected_by == {}

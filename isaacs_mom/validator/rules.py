@@ -5,10 +5,17 @@ from isaacs_mom.contracts import GroundTruth, Validation
 ROBOT_FELL = "robot fell"
 JOINT_LIMIT = "joint limit violated"
 PENETRATION = "penetration"
-# Robot-relative: short of the bin is between the robot and it, past is beyond it, left and right as the head camera
-# sees it.
-DIRECTIONS = ("short", "past", "left", "right", "short-left", "short-right", "past-left", "past-right")
-MISSES = {d: "box past the bin" if d == "past" else f"box {d} of the bin" for d in DIRECTIONS}
+# Robot-relative: along and across the torso heading, with left as the head camera sees it.
+MISSES = {
+    "short": "box short of the bin",
+    "past": "box past the bin",
+    "left": "box left of the bin",
+    "right": "box right of the bin",
+    "short-left": "box short-left of the bin",
+    "short-right": "box short-right of the bin",
+    "past-left": "box past-left of the bin",
+    "past-right": "box past-right of the bin",
+}
 ON_RIM = "box on the rim"
 STILL_MOVING = "box still moving"
 RECORDING_ERROR = "recording error"
@@ -16,7 +23,14 @@ CATEGORIES = {
     "robot_fallen": ROBOT_FELL,
     "joint_limit": JOINT_LIMIT,
     "penetration": PENETRATION,
-    **{"past_bin" if d == "past" else f"{d.replace('-', '_')}_of_bin": MISSES[d] for d in DIRECTIONS},
+    "short_of_bin": MISSES["short"],
+    "past_bin": MISSES["past"],
+    "left_of_bin": MISSES["left"],
+    "right_of_bin": MISSES["right"],
+    "short_left_of_bin": MISSES["short-left"],
+    "short_right_of_bin": MISSES["short-right"],
+    "past_left_of_bin": MISSES["past-left"],
+    "past_right_of_bin": MISSES["past-right"],
     "on_rim": ON_RIM,
     "still_moving": STILL_MOVING,
     "recording_error": RECORDING_ERROR,
@@ -45,7 +59,7 @@ def validate(gt: GroundTruth) -> Validation:
         if flagged
     ]
     if not inside:
-        problems.append(ON_RIM if over_bin else MISSES[_miss_direction(gt, dx, dy)])
+        problems.append(ON_RIM if over_bin else MISSES[_miss_direction(dx, dy, gt.robot_yaw, gt.bin_inner_half)])
     if not gt.box_at_rest:
         problems.append(STILL_MOVING)
     return Validation(
@@ -55,20 +69,21 @@ def validate(gt: GroundTruth) -> Validation:
     )
 
 
-def _miss_direction(gt: GroundTruth, dx: float, dy: float) -> str:
+def _miss_direction(dx: float, dy: float, robot_yaw: float, half: float) -> str:
     """Which way the box missed in the robot's torso frame at the end of the episode.
 
     An axis is named only when the box is clearly beyond the bin's half-width along it (a dead zone), so a near-miss
     gets no jittery second label. A miss inside both dead zones is named by its larger axis.
     """
-    forward, left = _turned(dx, dy, gt.robot_yaw)
-    name_along, name_side = abs(forward) > gt.bin_inner_half, abs(left) > gt.bin_inner_half
-    if not (name_along or name_side):
-        name_along = abs(forward) >= abs(left)
-        name_side = not name_along
-    along = ("past" if forward > 0 else "short") if name_along else ""
-    side = ("left" if left > 0 else "right") if name_side else ""
-    return "-".join(part for part in (along, side) if part)
+    forward, left = _turned(dx, dy, robot_yaw)
+    along = "past" if forward > 0 else "short"
+    side = "left" if left > 0 else "right"
+    clear_along, clear_side = abs(forward) > half, abs(left) > half
+    if clear_along and clear_side:
+        return f"{along}-{side}"
+    if clear_along or clear_side:
+        return along if clear_along else side
+    return along if abs(forward) >= abs(left) else side
 
 
 def _turned(dx: float, dy: float, yaw: float) -> tuple[float, float]:
