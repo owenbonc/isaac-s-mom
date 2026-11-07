@@ -3,7 +3,7 @@
 from pathlib import Path
 
 from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult
-from isaacs_mom.orchestrator.episode import run_episode
+from isaacs_mom.orchestrator.episode import HEARTBEAT_SECONDS, heartbeat, run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
@@ -74,7 +74,8 @@ def run_loop(
         diagnosed: list[tuple[str, Diagnosis]] = []
         for manifest in failures:
             episode_dir = run_dir / "episodes" / manifest.episode_id
-            diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps], argon)
+            with heartbeat(events, manifest.episode_id, HEARTBEAT_SECONDS):
+                diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps], argon)
             events.emit("diagnosis", episode_id=manifest.episode_id, **diagnosis.model_dump())
             diagnosed.append((manifest.episode_id, diagnosis))
         lessons: list[tuple[str | None, Diagnosis | None]] = [*diagnosed] or [(None, None)]

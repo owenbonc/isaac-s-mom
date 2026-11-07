@@ -14,7 +14,7 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy
-from isaacs_mom.teacher.argon import Argon, stub_generate
+from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 
 JPEG = b"\xff\xd8\xff\xd9"
 
@@ -255,3 +255,21 @@ def test_two_threads_emitting_at_once_write_whole_lines_in_time_order(tmp_path: 
         thread.join()
     times = [Event.model_validate_json(line).t for line in log.path.read_text().splitlines()]
     assert len(times) == 100 and times == sorted(times)
+
+
+def test_a_slow_diagnosis_sends_heartbeats_for_the_episode_it_diagnoses(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setattr("isaacs_mom.orchestrator.loop.HEARTBEAT_SECONDS", 0.05)
+
+    def slow(purpose: Purpose, parts: list[Part]) -> str:
+        if purpose == "diagnose":
+            time.sleep(0.2)
+        return stub_generate(purpose, parts)
+
+    argon = Argon(EventLog(tmp_path, "r1"), generate=slow)
+    run_loop(FakeSim(), tmp_path, "r1", max_rounds=1, demos=1, dev_trials=1, argon=argon)
+    events = logged(tmp_path)
+    at = next(i for i, e in enumerate(events) if e["type"] == "diagnosis")
+    beats = [e["data"]["episode_id"] for e in events[:at] if e["type"] == "heartbeat"]
+    assert len(beats) >= 2 and set(beats) == {events[at]["data"]["episode_id"]}
