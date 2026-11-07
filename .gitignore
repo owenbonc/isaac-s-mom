@@ -8,3 +8,4 @@ checkpoints/
 *.safetensors
 .claude/worktrees/
 .DS_Store
+.impeccable/live/
