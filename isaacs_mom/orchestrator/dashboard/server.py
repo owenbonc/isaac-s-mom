@@ -87,7 +87,10 @@ def create_app(run_dir: Path) -> FastAPI:
         target = (run_dir / path).resolve()
         if not target.is_relative_to(run_dir.resolve()) or target.suffix not in FRAME_SUFFIXES or not target.is_file():
             raise HTTPException(status_code=404)
-        return FileResponse(target, media_type="image/jpeg")
+        # The recorder writes each frame once under a unique episode id, so a URL's bytes never change.
+        return FileResponse(
+            target, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"}
+        )
 
     app.mount("/static", FreshStatic(directory=STATIC))
     return app

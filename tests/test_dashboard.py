@@ -32,6 +32,13 @@ def test_frames_are_served_from_inside_the_run_directory(tmp_path: Path) -> None
     assert response.headers["content-type"] == "image/jpeg"
 
 
+def test_frames_are_cached_for_good_because_a_recorded_frame_never_changes(tmp_path: Path) -> None:
+    client = TestClient(create_app(make_run(tmp_path)))
+    response = client.get("/frames/episodes/ep-1/frames/0000.jpg")
+    assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert "cache-control" not in client.get("/frames/episodes/ep-1/frames/missing.jpg").headers
+
+
 def test_frames_reject_traversal_and_non_frames(tmp_path: Path) -> None:
     client = TestClient(create_app(make_run(tmp_path)))
     for path in ["../../secret.jpg", "%2e%2e/%2e%2e/secret.jpg", "notes.txt", "episodes/ep-1/frames/missing.jpg"]:
