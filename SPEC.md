@@ -21,7 +21,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 ## 3. The system
 
 ### 3.1 Simulation (workstream 1)
-- **MuJoCo** (organisers' Option A), running in-process on every teammate's Mac. Modal is used only for fine-tuning.
+- **MuJoCo** (organisers' Option A), running in-process on every teammate's Mac. Modal is used only for fine-tuning with `--trainer modal`; by default fine-tuning runs on the local CUDA GPU (§3.2).
 - Task: hug a big box (30 × 25 × 25 cm, 0.8 kg) off a table with both arms, lift it, twist to the bin beside the robot and drop it in.
 - Robot: Unitree G1 (29 DoF) from MuJoCo Menagerie, free-standing: it keeps its floating base and balances on its own feet under joint-position control, in Unitree's soft-knee standing pose. It does not walk; it reaches the bin by twisting at the waist. Collision pads on the hands, since Menagerie's hands are visual only. A table, an orange box, a green bin on the robot's left.
 - One head-mounted RGB camera, 320×240, rendered with `mujoco.Renderer`.
@@ -33,7 +33,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 ### 3.2 Student (workstream 4)
 - SmolVLM2-500M-Video-Instruct, local (the team's Windows NVIDIA machines with CUDA 12.8 torch, or Mac MPS; CPU torch on Linux and CI). `predict_skill(obs, instruction, feedback) -> SkillCall`, output parsed as JSON and checked against the whitelist; an unparseable answer becomes `reobserve` and is logged.
 - Two consecutive `reobserve` replies from the model end the student's episode (`act` returns `None`); an unparseable reply's fallback `reobserve` does not count.
-- Fine-tuning: LoRA on Modal A10G (`student/finetune_modal.py`), on training examples (§4.3). Each round produces a checkpoint id `<run_id>/ckpt-r<round>`, stored in `runs/<run_id>/checkpoints/ckpt-r<round>/` (gitignored); `ckpt-r0` is the base model.
+- Fine-tuning: LoRA in bf16 on training examples (§4.3), by one training function (`student/lora.py`) with the same hyperparameters wherever it runs: the local CUDA GPU by default, or a Modal A10G with `mom run --trainer modal` (`student/finetune_modal.py`). With `--student smolvlm` and the local trainer, `mom run` checks for CUDA at startup, before any episode, and without it stops with "local fine-tuning needs a CUDA GPU (the 4070 Ti / 5060 laptops), or pass --trainer modal". `scripts/rehearse_student.py` takes the same `--trainer`. Each round produces a checkpoint id `<run_id>/ckpt-r<round>`, stored in `runs/<run_id>/checkpoints/ckpt-r<round>/` (gitignored); `ckpt-r0` is the base model.
 
 ### 3.3 Teacher (workstream 2)
 - Argon (`gemini-4-argon`, Gemini API) with a typed tool adapter over `RobotSim`.
@@ -145,6 +145,7 @@ docs/                        one-page summary, pitch
 | G1 hug slips or the robot tips while twisting | Lighter box, smaller twist range (the scripted policy succeeds on 36 of 40 seeds now) | Sat 21:00 |
 | Rendering on CI | `MUJOCO_GL=osmesa`; real-scene tests skip with a reason when no GL is available | Sat 17:00 |
 | SmolVLM2 too weak to fine-tune usefully | Report the measured result honestly; demo leans on the validated data pipeline | Sun 06:00 |
+| Modal unavailable (the sponsor's credits don't work) | Fine-tune on the local CUDA GPU (the 4070 Ti / 5060 laptops), the default trainer; `--trainer modal` keeps the A10G path | Sat 21:00 |
 | Argon latency or tool mismatch | Fewer, coarser skills per call | Sat 23:00 |
 | Remote Argon costs autonomy points | The demo run uses the fine-tuned local student; Argon only teaches | — |
 

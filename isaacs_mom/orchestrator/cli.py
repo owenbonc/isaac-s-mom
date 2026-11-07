@@ -1,10 +1,20 @@
 import argparse
 import time
+from functools import partial
 from pathlib import Path
 
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
-from isaacs_mom.student import StubStudent, StudentPolicy, finetune, stub_finetune, valid_run_id
+from isaacs_mom.student import (
+    NO_CUDA,
+    TRAINERS,
+    StubStudent,
+    StudentPolicy,
+    finetune,
+    has_cuda,
+    stub_finetune,
+    valid_run_id,
+)
 
 
 def run_id(text: str) -> str:
@@ -32,11 +42,19 @@ def main() -> None:
     run = commands.add_parser("run", help="the teach -> fine-tune loop (SPEC §3.6)")
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--student", choices=["smolvlm", "stub"], default="smolvlm", help="stub: no model, no training")
+    run.add_argument(
+        "--trainer", choices=list(TRAINERS), default="local", help="local: this machine's CUDA GPU; modal: an A10G"
+    )
     run.add_argument("--rounds", type=int, default=3)
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     args = parser.parse_args()
 
-    make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
+    if args.student == "stub":
+        make_student, train_student = StubStudent, stub_finetune
+    else:
+        if args.trainer == "local" and not has_cuda():
+            run.error(NO_CUDA)
+        make_student, train_student = StudentPolicy, partial(finetune, trainer=TRAINERS[args.trainer])
     run_dir = Path("runs") / args.run_id
     results = run_loop(
         make_sim(args.sim),

@@ -1,4 +1,4 @@
-"""Fine-tuning, local side (SPEC §3.2): package a training set, train on Modal, store the run's ckpt-r<round>."""
+"""Fine-tuning (SPEC §3.2): package a training set, train on the local GPU or Modal, store the run's ckpt-r<round>."""
 
 import json
 import logging
@@ -13,6 +13,20 @@ from isaacs_mom.student.prompt import format_target
 
 Trainer = Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]
 log = logging.getLogger(__name__)
+NO_CUDA = "local fine-tuning needs a CUDA GPU (the 4070 Ti / 5060 laptops), or pass --trainer modal"
+
+
+def has_cuda() -> bool:
+    """Checked at startup, so a run without a GPU stops before any episode instead of at its first fine-tune."""
+    import torch
+
+    return torch.cuda.is_available()
+
+
+def local_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    from isaacs_mom.student.lora import lora_train
+
+    return lora_train(examples, images, "cuda")
 
 
 def modal_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
@@ -22,6 +36,9 @@ def modal_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> d
 
     with modal.enable_output(), app.run():
         return train.remote(examples, images)
+
+
+TRAINERS: dict[str, Trainer] = {"local": local_trainer, "modal": modal_trainer}
 
 
 def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]:
@@ -45,7 +62,7 @@ def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]
     return examples, images
 
 
-def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, trainer: Trainer = modal_trainer) -> str:
+def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, trainer: Trainer = local_trainer) -> str:
     """Retrains from the base model on the cumulative set, so a checkpoint depends only on its training set."""
     run_dir = training_set.parent
     if not valid_run_id(run_dir.name):

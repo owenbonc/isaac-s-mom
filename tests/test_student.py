@@ -1,14 +1,17 @@
 import json
 import logging
+import sys
 import tomllib
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import torch
 
 from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget, TrainingExample
+from isaacs_mom.orchestrator import cli
 from isaacs_mom.orchestrator.loop import INSTRUCTION
-from isaacs_mom.student import finetune_modal
+from isaacs_mom.student import finetune_modal, stub_finetune, tuning
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, adapter_dir, resolve_adapter, valid_run_id
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
@@ -345,3 +348,48 @@ def test_the_modal_image_pins_the_torch_that_uv_lock_resolves_for_linux() -> Non
         "torch": finetune_modal.TORCH.removeprefix("torch=="),
         "torchvision": finetune_modal.TORCHVISION.removeprefix("torchvision=="),
     }
+
+
+def mom_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *flags: str, cuda: bool) -> dict:
+    """Runs `mom run --sim fake` up to the loop, recording what the loop was given instead of running it."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--run-id", "t", *flags])
+    given: dict = {}
+
+    def run_loop(*args: object, **kwargs: object) -> list:
+        given.update(kwargs)
+        return []
+
+    monkeypatch.setattr(cli, "run_loop", run_loop)
+    cli.main()
+    return given
+
+
+def test_without_cuda_the_local_trainer_stops_the_run_before_any_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_:
+        mom_run(monkeypatch, tmp_path, cuda=False)
+    assert exit_.value.code == 2
+    assert tuning.NO_CUDA in capsys.readouterr().err
+    assert not (tmp_path / "runs").exists()
+
+
+@pytest.mark.parametrize(
+    ("flags", "cuda", "trainer"),
+    [
+        ((), True, tuning.local_trainer),
+        (("--trainer", "local"), True, tuning.local_trainer),
+        (("--trainer", "modal"), False, tuning.modal_trainer),
+    ],
+)
+def test_the_trainer_flag_picks_the_trainer_the_loop_fine_tunes_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, flags: tuple[str, ...], cuda: bool, trainer: tuning.Trainer
+) -> None:
+    train_student = mom_run(monkeypatch, tmp_path, *flags, cuda=cuda)["train_student"]
+    assert (train_student.func, train_student.keywords) == (finetune, {"trainer": trainer})
+
+
+def test_the_stub_student_needs_no_cuda_whatever_the_trainer(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert mom_run(monkeypatch, tmp_path, "--student", "stub", cuda=False)["train_student"] is stub_finetune
