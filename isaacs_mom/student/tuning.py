@@ -19,7 +19,12 @@ log = logging.getLogger(__name__)
 
 
 def modal_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
-    raise NotImplementedError("Task 6 wires the Modal A10G trainer")
+    import modal
+
+    from isaacs_mom.student.finetune_modal import app, train
+
+    with modal.enable_output(), app.run():
+        return train.remote(examples, images)
 
 
 def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]:
