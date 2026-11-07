@@ -4,25 +4,28 @@
 --student-rule:#b9cbfa;--teacher-rule:#f0c3a8;--event-bg:#f5f7fa;--frame-bg:#d8dde4;--hatch:#eceff3;--selection:#c9d8ff;
 --shadow:0 1px 2px rgb(18 23 31 / .2);
 --ease-out:cubic-bezier(.23,1,.32,1);
---mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace}
+--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+/* Type roles step 1.25:1 from the 16px floor: body, panel heading, title, stage skill, held-out figure. */
+--step-1:1.25rem;--step-2:1.5625rem;--step-3:1.953rem;--step-4:2.441rem}
 *{box-sizing:border-box}
 html{scrollbar-color:var(--rule-strong) transparent}
 /* Projector floor: 16px at 1280x720, scaling with the smaller viewport side so the layout keeps its proportions. */
-html{font-size:clamp(16px,min(1.25vw,2.22vh),20px)}
-body{margin:0;background:var(--ground);color:var(--ink);font:400 1rem/1.4 system-ui,-apple-system,"Segoe UI",sans-serif;font-variant-numeric:tabular-nums;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+html{font-size:clamp(1rem,min(1.25vw,2.22vh),1.25rem)}
+body{margin:0;background:var(--ground);color:var(--ink);font:400 1rem/1.4 var(--sans);font-variant-numeric:tabular-nums;height:100vh;overflow:hidden;display:flex;flex-direction:column}
 ::selection{background:var(--selection)}
 :focus-visible{outline:2px solid var(--focus);outline-offset:2px}
 /* Scroll regions sit inside clipped panels, so their ring goes inside. */
 ol.log:focus-visible,.side:focus-visible{outline-offset:-2px}
 h1,h2{margin:0;font-weight:700;text-wrap:balance}
-h2{font-size:1.125rem}
+h1,h2{line-height:1.2}
+h2{font-size:var(--step-1)}
 .note{color:var(--muted)}
 .mono{font-family:var(--mono)}
 .ph-text{color:var(--ph)}
 
 header.bar{flex:none;background:var(--panel);border-bottom:1px solid var(--rule)}
 .bar .top{display:flex;align-items:center;gap:.4rem 1rem;padding:.45rem 1.1rem .3rem;flex-wrap:wrap}
-header.bar h1{font-size:1.25rem}
+header.bar h1{font-size:var(--step-2)}
 .bar .where{display:flex;align-items:center;gap:1rem;padding:0 1.1rem .4rem}
 #episode-line{margin:0;font-weight:600;white-space:nowrap}
 /* The run at a glance: one mark per episode, tall for the teacher, short for the student, hollow when rejected. */
@@ -42,13 +45,13 @@ header.bar h1{font-size:1.25rem}
 
 /* Key hints that are also buttons: the key cap carries the border, so the row reads as a legend. */
 .presenter{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .5rem;margin-left:auto}
-.presenter .pair{display:inline-flex;align-items:center;gap:.3rem;font-weight:600}
-.presenter button{font:inherit;font-weight:600;color:var(--ink);background:none;border:0;border-radius:4px;padding:.15rem .3rem;display:inline-flex;align-items:center;gap:.35rem;cursor:pointer}
+.presenter .pair{display:inline-flex;align-items:center;gap:.3rem}
+.presenter button{font:inherit;color:var(--ink);background:none;border:0;border-radius:4px;padding:.15rem .3rem;display:inline-flex;align-items:center;gap:.35rem;cursor:pointer}
 .presenter .pair button{padding:.15rem .1rem}
 .presenter button:hover:not(:disabled){background:var(--ground)}
 .presenter button:disabled{color:var(--ph);cursor:default}
 .presenter button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
-kbd{font-family:var(--mono);font-weight:600;padding:0 .3rem;border:1px solid currentColor;border-radius:3px}
+kbd{font-family:inherit;font-weight:600;padding:0 .3rem;border:1px solid currentColor;border-radius:3px}
 .chip.paused{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.95fr);gap:.8rem;padding:.8rem}
 .col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
@@ -60,12 +63,12 @@ footer.models h2{font-size:1rem}
 footer.models .chip:last-child{margin-left:auto}
 footer.models .v{color:var(--muted)}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;min-width:0;min-height:0}
-.panel>header{display:flex;align-items:center;gap:.6rem;padding:.5rem .8rem;border-bottom:1px solid var(--rule)}
+.panel>header{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem;padding:.5rem .8rem;border-bottom:1px solid var(--rule)}
 .panel>header .chip:last-child,.panel>header>span:last-child{margin-left:auto}
 .panel .body{padding:.6rem .8rem;overflow-wrap:anywhere}
 .panel[hidden]{display:none}
 
-.chip{display:inline-flex;align-items:center;gap:.35rem;font-weight:600;letter-spacing:.02em;padding:.12rem .5rem;border-radius:3px;border:1px solid var(--rule-strong);background:var(--panel);color:var(--ink);white-space:nowrap}
+.chip{display:inline-flex;align-items:center;gap:.35rem;font-weight:600;padding:.12rem .4rem;border-radius:3px;border:1px solid var(--rule-strong);background:var(--panel);color:var(--ink);white-space:nowrap}
 .chip.recorded::before{content:"";width:.5rem;height:.5rem;border-radius:50%;border:2px solid var(--ink)}
 .chip.live::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:var(--ok)}
 .chip.live{border-color:var(--ok);color:var(--ok)}
@@ -89,6 +92,11 @@ footer.models .v{color:var(--muted)}
 .shot img{display:block;width:100%;height:100%;object-fit:contain}
 .shot .over{position:absolute;left:.6rem;top:.6rem;display:flex;gap:.5rem;align-items:center}
 .over .step{background:var(--ink);color:var(--panel);font-weight:600;padding:.12rem .5rem;border-radius:3px}
+/* The skill the shown frame led to, large enough to read from the back of the room; smaller in P's half-width pair. */
+.shot .said{position:absolute;left:.6rem;bottom:.6rem;background:var(--panel);box-shadow:var(--shadow);border-radius:3px;padding:.05rem .5rem;font:700 var(--step-3)/1.15 var(--mono)}
+.said.student{color:var(--student)}
+.said.teacher{color:var(--teacher)}
+@container (width < 24rem){.shot .said{font-size:var(--step-1)}}
 .over .tag{background:var(--panel);box-shadow:var(--shadow)}
 .empty{display:grid;place-items:center;text-align:center;color:var(--ph);padding:1rem;max-width:30ch;margin:auto}
 [data-missing]{background:repeating-linear-gradient(135deg,var(--panel) 0 5px,var(--hatch) 5px 7px)}
@@ -112,21 +120,22 @@ footer.models .v{color:var(--muted)}
   .shot.flash::before{content:"";position:absolute;inset:0;background:var(--panel);box-shadow:inset 0 0 0 .5rem var(--ink);pointer-events:none;animation:flash .4s var(--ease-out) forwards}
 }
 @keyframes flash{from{opacity:.85}to{opacity:0}}
-.stop{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:600;color:var(--ink)}
+.stop{font-family:var(--sans);font-weight:600;color:var(--ink)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .strip .st{color:var(--muted)}
 
 ol.log{list-style:none;margin:0;padding:0;overflow:auto;min-height:0;flex:1}
-ol.log li{display:grid;grid-template-columns:2rem minmax(0,1fr);gap:.2rem .5rem;padding:.45rem .8rem;border-bottom:1px solid var(--rule);align-items:baseline}
+ol.log li{display:grid;grid-template-columns:1.5rem minmax(0,1fr);gap:.2rem .5rem;padding:.45rem .8rem;border-bottom:1px solid var(--rule);align-items:baseline}
 ol.log li .n{color:var(--muted);text-align:right}
 ol.log .line{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:0 .6rem;min-width:0}
 ol.log .skill{font-family:var(--mono);font-weight:600;overflow-wrap:anywhere}
 ol.log li.student .skill{color:var(--student)}
 ol.log li.teacher .skill{color:var(--teacher)}
 ol.log .reason{grid-column:2;text-wrap:pretty;display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden;overflow-wrap:anywhere;max-height:calc(3 * 1.4em)}
-ol.log .reason.none{color:var(--ph)}
 ol.log .right{display:flex;gap:.6rem;align-items:baseline;white-space:nowrap}
-ol.log .ok{color:var(--ok);font-weight:600}
+ol.log .ok{color:var(--ok);display:inline-flex}
+ol.log .ok svg{width:1em;height:1em}
+#chip-log{display:flex;flex-wrap:wrap;align-items:center;gap:.3rem .5rem}
 ol.log .no{color:var(--bad);font-weight:600}
 ol.log .lat{color:var(--muted)}
 ol.log li.event{background:var(--event-bg);font-weight:600}
@@ -140,7 +149,7 @@ ol.log li.event.moved .n{color:var(--panel)}
 ol.log li.focus{box-shadow:inset 0 0 0 3px var(--ink),inset 0 0 0 5px var(--panel)}
 ol.log .after{grid-column:2;font-weight:700;color:var(--ink)}
 .gain{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .6rem;margin-bottom:.6rem}
-.gain .fig{font-size:2.5rem;font-weight:700;line-height:1.1;letter-spacing:-.01em}
+.gain .fig{font-size:var(--step-4);font-weight:700;line-height:1.05;letter-spacing:-.01em}
 ol.log li.fresh{animation:in .16s var(--ease-out)}
 @keyframes in{from{opacity:0;transform:translateY(4px)}}
 ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}

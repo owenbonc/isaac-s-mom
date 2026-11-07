@@ -98,10 +98,11 @@ function renderCamera() {
   // The caption row is always there, so the peak's caption never shrinks the frame.
   let frame, caption;
   if (view.compare && move) {
-    frame = cell(move.before, '<span class="tag">Before the move</span>', false) + cell(move.after, '<span class="tag">After</span>', true);
+    const step = (f) => (f && f.step !== null ? `<span class="step">step ${esc(f.step)}</span>` : "");
+    frame = cell(ep, move.before, `<span class="tag">Before the move</span>${step(move.before)}`, false) + cell(ep, move.after, `<span class="tag">After</span>${step(move.after)}`, true);
     caption = `<p class="caption moved">${what} between these frames${move.decision ? `, before decision ${esc(move.decision.step)}` : ""}.</p>`;
   } else {
-    frame = cell(last, tag(last.controller, last.checkpoint), last.moved);
+    frame = cell(ep, last, tag(last.controller, last.checkpoint), last.moved);
     caption = last.moved
       ? `<p class="caption moved">${what} just before this frame, the first to show it.</p>`
       : `<p class="caption">${last.step === null ? "Head-camera frame." : `Seen before decision ${esc(last.step)}.`}</p>`;
@@ -121,11 +122,12 @@ function renderCamera() {
   flashedFrame = last.moved ? key : flashedFrame;
 }
 
-// One frame on the stage with its label; a missing frame keeps its place, hatched.
-function cell(f, label, moved) {
+// One frame on the stage with its label and the skill it led to; a missing frame keeps its place, hatched.
+function cell(ep, f, label, moved) {
   const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : `, seen before decision ${esc(f.step)}`}">` : "";
-  const step = f && f.step !== null ? `<span class="step">step ${esc(f.step)}</span>` : "";
-  return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}<div class="over">${label}${step}</div></div></div>`;
+  const row = f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill);
+  const said = row ? `<span class="said ${row.controller || "unknown"}">${skillText(row)}</span>` : "";
+  return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}<div class="over">${label}</div>${said}</div></div>`;
 }
 
 function logRow(row) {
@@ -143,9 +145,9 @@ function logRow(row) {
 }
 
 function decisionRow(row, after) {
-  const outcome = !row.skill ? "" : row.ok === null ? '<span class="lat">running</span>' : row.ok ? '<span class="ok">executed</span>' : '<span class="no">failed</span>';
+  const outcome = !row.skill ? "" : row.ok === null ? '<span class="lat">running</span>' : row.ok ? `<span class="ok">${CHECK}<span class="sr">executed</span></span>` : '<span class="no">failed</span>';
   const latency = row.latency === null ? "" : `<span class="lat">${duration(row.latency)}</span>`;
-  const reason = row.reason ? `<div class="reason" title="${esc(row.reason)}">${esc(row.reason)}</div>` : '<div class="reason none">No reason given.</div>';
+  const reason = row.reason ? `<div class="reason" title="${esc(row.reason)}">${esc(row.reason)}</div>` : "";
   const error = row.error ? `<div class="err">${esc(row.error)}</div>` : "";
   const mark = after ? '<div class="after">First decision after the move</div>' : "";
   return `<li class="${row.controller || "unknown"}${after && view.compare ? " focus" : ""}"><span class="n">${esc(row.step ?? "")}</span><div class="line"><span class="skill">${skillText(row)}</span><span class="right">${latency}${outcome}</span></div>${mark}${reason}${error}</li>`;
@@ -177,7 +179,9 @@ function renderEpisode() {
 function renderLog() {
   const ep = MomState.episode(view, now());
   const list = $("log");
-  $("chip-log").innerHTML = panelChip(ep !== null, ep);
+  // Said once in the header rather than on every row, until a decision in the episode carries a reason.
+  const reasons = !ep || ep.rows.some((r) => r.kind === "decision" && r.reason) || !ep.rows.some((r) => r.kind === "decision");
+  $("chip-log").innerHTML = (reasons ? "" : '<span class="note">No reasons yet</span>') + panelChip(ep !== null, ep);
   if (!ep) {
     list.innerHTML = '<li class="empty">No decisions yet. Each decision appears with its reason and latency.</li>';
     renderedEpisode = null;
@@ -212,7 +216,7 @@ function renderRounds() {
     const n = first.n === last.n ? `n=${last.n}${both ? " each" : ""}` : `n=${first.n} and n=${last.n}`;
     const span = both ? `${esc(first.checkpoint)} → ${esc(last.checkpoint)}` : esc(first.checkpoint);
     const table = `<table><thead><tr><th>Checkpoint</th><th class="num">Successes</th><th class="num">Rate</th></tr></thead><tbody>${rounds.map((r) => `<tr><td class="mono">${esc(r.checkpoint)}</td><td class="num">${r.successes}/${r.n}</td><td class="num">${pct(r.successes, r.n)}</td></tr>`).join("")}</tbody></table>`;
-    body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note">${span}</span></div>${table}`;
+    body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note mono">${span}</span></div>${table}`;
   }
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip(rounds.length > 0)}</header><div class="body">${body}</div>`;
 }
@@ -254,8 +258,7 @@ function renderDiagnosis() {
     : d
       ? `<div class="body stack">${diagnosisText(d)}</div>`
       : `<div class="body ph-text">${ep ? "No diagnosis for this episode. The teacher diagnoses failed student episodes on development seeds, then demonstrates on new ones." : "No episode yet."}</div>`;
-  const title = acting ? "Diagnosis it acts on" : "Teacher's diagnosis";
-  $("p-diagnosis").innerHTML = `<header><h2>${title}</h2>${panelChip(Boolean(acting ? acting.diagnosis : d), ep)}</header>${body}`;
+  $("p-diagnosis").innerHTML = `<header><h2>Diagnosis</h2>${panelChip(Boolean(acting ? acting.diagnosis : d), ep)}</header>${body}`;
 }
 
 function render() {
