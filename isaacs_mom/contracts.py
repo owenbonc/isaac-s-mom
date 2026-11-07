@@ -29,6 +29,8 @@ EventType = Literal[
 class SkillCall(BaseModel):
     skill: Skill
     params: dict[str, float] = Field(default_factory=dict)
+    # Why the policy chose this skill, shown on the dashboard; training targets drop it.
+    reason: str = ""
 
     @field_validator("params")
     @classmethod

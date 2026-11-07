@@ -112,3 +112,29 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
     assert all(r.n == len(heldout_seeds()) for r in results)
     event_types = {json.loads(line)["type"] for line in (tmp_path / "events.jsonl").read_text().splitlines()}
     assert {"evaluation_result", "finetune_completed", "validation"} <= event_types
+
+
+def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason(tmp_path: Path) -> None:
+    class Explains(ScriptedPolicy):
+        def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+            call = super().act(obs, instruction, feedback)
+            return call.model_copy(update={"reason": "block is right of the hand"}) if call else None
+
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    run_episode(
+        sim,
+        GiveUp(),
+        takeover=Explains(sim),
+        run_dir=tmp_path,
+        events=events,
+        seed=1504,
+        split="dev",
+        round_=0,
+        instruction="push",
+    )
+    decisions = [json.loads(line)["data"] for line in events.path.read_text().splitlines() if '"decision"' in line]
+    assert all("latency_ms" in d for d in decisions if not d.get("takeover"))
+    assert any(d.get("reason") == "block is right of the hand" for d in decisions)
+    lines = build_training_set(tmp_path, 1).read_text().splitlines()
+    assert lines and all(json.loads(line)["target"]["reason"] == "" for line in lines)

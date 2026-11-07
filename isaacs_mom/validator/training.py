@@ -18,7 +18,7 @@ def training_examples(episode_dir: Path, manifest: EpisodeManifest) -> list[Trai
                     image=str(episode_dir / record.frame),
                     instruction=manifest.instruction,
                     feedback=feedback,
-                    target=record.skill_call,
+                    target=record.skill_call.model_copy(update={"reason": ""}),
                 )
             )
         feedback = f"{record.skill_call.skill}: {'ok' if record.ok else record.error}"
