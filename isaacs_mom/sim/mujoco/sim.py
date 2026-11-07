@@ -47,7 +47,7 @@ PLACE_X = 0.40  # the hands push the box this far ahead of the pelvis before let
 PLACE_Z = 0.84  # the box drops ~40 cm to the bin floor from here
 REACH_LIMIT = 0.12
 STEPPING_PELVIS_Z = 0.774  # the pelvis's mean height while the legs step in place
-BOX_SHIFT_LIMIT = 0.10  # a moved box stays this close to the table's centre line, as at reset
+BOX_MOVE_TRIES = 20
 DEFAULT_REACH_CM = 5.0
 DEFAULT_WALK_CM = 30.0
 DEFAULT_TURN_DEG = 30.0
@@ -55,6 +55,9 @@ WALK_SPEED = 0.3  # m/s
 TURN_RATE = 0.7  # rad/s
 ARRIVED = 0.03  # m, and ARRIVED_YAW rad, from the goal pose
 ARRIVED_YAW = np.deg2rad(3)
+# The stepping gait sways a few centimetres about its stance; a walk this far off its goal didn't get there.
+MISSED = 0.10
+MISSED_YAW = np.deg2rad(10)
 WALK_SETTLE_S = 0.6
 TABLE_KEEP_OUT = 0.15  # the pelvis stays this far from the table top's edge
 BIN_KEEP_OUT = 0.42  # and this far from the bin's centre, so the toes stay clear of its stand
@@ -107,6 +110,10 @@ class MujocoSim:
         self._box_geom = self.model.geom("box").id
         self._bin_floor = self.model.geom("bin_floor").id
         self.on_tick: Callable[[], None] | None = None  # e.g. to film the motion for the demo video
+        pelvis = self.model.body("pelvis").id
+        self._robot_geoms = {
+            g for g in range(self.model.ngeom) if self.model.body_rootid[self.model.geom_bodyid[g]] == pelvis
+        }
         self._scenery = {
             g
             for g in range(self.model.ngeom)
@@ -179,9 +186,14 @@ class MujocoSim:
         if perturbation.kind == "move_box":
             if self.closed:  # the box is in the robot's grip, as FakeSim treats it
                 return
-            x, y = box_xy(rng)
-            # Land between the open hands, never inside one.
-            self._put_box((x, float(np.clip(self.work_y + y, -BOX_SHIFT_LIMIT, BOX_SHIFT_LIMIT))))
+            # Somewhere new on the table clear of the robot's arms; the same seed always picks the same spot.
+            start = self.data.qpos[self._box_qadr : self._box_qadr + 7].copy()
+            for _ in range(BOX_MOVE_TRIES):
+                self._put_box(box_xy(rng))
+                mujoco.mj_forward(self.model, self.data)
+                if not self._box_touches_robot():
+                    return
+            self.data.qpos[self._box_qadr : self._box_qadr + 7] = start
         else:
             self._put_bin(*bin_pose(rng, around=self.pose()[:2]))
         mujoco.mj_forward(self.model, self.data)
@@ -225,11 +237,11 @@ class MujocoSim:
                 error = self._blocked(goal)
                 if error:
                     return f"{call.skill}: {error}"
-                self._walk_to(goal, self.goal_yaw, abs(step) / WALK_SPEED)
+                return self._walk_to(goal, self.goal_yaw, abs(step) / WALK_SPEED, call.skill)
             case "turn_left" | "turn_right":
                 sign = 1.0 if call.skill == "turn_left" else -1.0
                 angle = np.deg2rad(call.params.get("angle_deg", DEFAULT_TURN_DEG))
-                self._walk_to(self.goal_xy, wrap(self.goal_yaw + sign * angle), angle / TURN_RATE)
+                return self._walk_to(self.goal_xy, wrap(self.goal_yaw + sign * angle), angle / TURN_RATE, call.skill)
             case "hug":
                 point = self._hand_point(closed=True)
                 (goal, grip), error = self._plan_hands(point, CLOSED_HALF, self.data.ctrl, level=False)
@@ -323,15 +335,25 @@ class MujocoSim:
                     return f"would walk into {name}"
         return None
 
-    def _walk_to(self, xy: np.ndarray, yaw: float, expected_s: float) -> None:
+    def _walk_to(self, xy: np.ndarray, yaw: float, expected_s: float, skill: str) -> str | None:
+        """Walk the stance to `xy`, `yaw`; reports how far short it stopped if it hasn't arrived by the deadline."""
         self.goal_xy, self.goal_yaw = xy, yaw
         deadline = self.data.time + expected_s + 2.0
-        while self.data.time < deadline:
-            x, y, heading = self.pose()
-            if np.hypot(x - xy[0], y - xy[1]) < ARRIVED and abs(wrap(yaw - heading)) < ARRIVED_YAW:
-                break
+        while self.data.time < deadline and not self._arrived():
             self._hold(0.1)
         self._hold(WALK_SETTLE_S)
+        distance, angle = self._off_goal()
+        if distance < MISSED and angle < MISSED_YAW:
+            return None
+        return f"{skill}: stopped {distance * 100:.0f} cm and {np.degrees(angle):.0f} deg short"
+
+    def _off_goal(self) -> tuple[float, float]:
+        x, y, heading = self.pose()
+        return float(np.hypot(x - self.goal_xy[0], y - self.goal_xy[1])), abs(wrap(self.goal_yaw - heading))
+
+    def _arrived(self) -> bool:
+        distance, angle = self._off_goal()
+        return distance < ARRIVED and angle < ARRIVED_YAW
 
     def _hold(self, duration: float) -> None:
         move(self.model, self.data, self.data.ctrl.copy(), duration, self._tick, self._drive)
@@ -363,6 +385,12 @@ class MujocoSim:
         self._penetrated |= any(
             c.dist < -PENETRATION_TOL and (c.geom1 in self._scenery or c.geom2 in self._scenery)
             for c in d.contact[: d.ncon]
+        )
+
+    def _box_touches_robot(self) -> bool:
+        return any(
+            c.dist < 0 and {c.geom1, c.geom2} & self._robot_geoms and self._box_geom in (c.geom1, c.geom2)
+            for c in self.data.contact[: self.data.ncon]
         )
 
     def _bin_yaw(self) -> float:

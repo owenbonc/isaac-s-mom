@@ -317,3 +317,20 @@ def test_moving_the_box_is_ignored_once_it_is_hugged(sim: MujocoSim) -> None:
     held = sim.ground_truth().box_xyz
     sim.perturb(Perturbation(kind="move_box", seed=99))
     assert sim.ground_truth().box_xyz == held
+
+
+def test_a_walk_that_never_arrives_reports_how_far_short(sim: MujocoSim, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sim.walker, "command_to", lambda *args, **kwargs: np.zeros(3))  # legs that won't go anywhere
+    sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    result = sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 50}))
+    assert not result.ok and result.error and "short" in result.error
+    assert result.executed_actions  # it did try: the stepping it executed is still recorded (rule 4)
+
+
+def test_a_moved_box_never_lands_in_the_robots_arms(sim: MujocoSim) -> None:
+    for seed in range(20):
+        sim.reset(SEED)
+        sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 5}))
+        sim.perturb(Perturbation(kind="move_box", seed=seed))
+        sim.execute(SkillCall(skill="reobserve"))
+        assert not sim.ground_truth().penetration, f"move_box seed {seed}"
