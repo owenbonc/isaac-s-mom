@@ -99,6 +99,8 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
         tmp_path, "g-unexplained", manifest(validation=Validation(task_success=False, physics_valid=True, reason="x"))
     )
     _write(tmp_path, "h-empty", manifest(validation=missed, controllers=()))
+    # A held-out episode the teacher drove is still an exam, never a demonstration.
+    _write(tmp_path, "j-exam-teacher", manifest(seed=min(heldout_seeds())).model_copy(update={"split": "heldout"}))
     _write(
         tmp_path, "i-sim-bug", manifest(validation=recording_error_verdict(RecordingError("timestamps go backwards")))
     )
@@ -108,7 +110,7 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
     summary = TrainingSetSummary.model_validate_json(training_set.with_suffix(".summary.json").read_text())
     assert summary == TrainingSetSummary(
         round=1,
-        episodes_scanned=9,
+        episodes_scanned=10,
         demonstrations=6,
         accepted=1,
         rejected=4,
@@ -118,3 +120,15 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
         examples=2,
     )
     assert len(training_set.read_text().splitlines()) == summary.examples
+
+
+def test_a_recording_error_before_the_first_step_is_still_counted(tmp_path: Path) -> None:
+    refused = recording_error_verdict(RecordingError("timestamps go backwards"))
+    _write(tmp_path, "refused-at-once", manifest(validation=refused, controllers=()))
+
+    summary = TrainingSetSummary.model_validate_json(
+        build_training_set(tmp_path, 1).with_suffix(".summary.json").read_text()
+    )
+
+    assert summary.rejected_by == {"recording_error": 1}
+    assert summary.empty_dev_episodes == 1

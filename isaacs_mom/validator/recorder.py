@@ -1,3 +1,4 @@
+import math
 import os
 from itertools import pairwise
 from pathlib import Path
@@ -107,9 +108,13 @@ class Recorder:
 
 
 def write_manifest(path: Path, manifest: EpisodeManifest) -> None:
-    # Write then rename, so a process crash mid-write never leaves a half-written manifest.
+    write_atomically(path, manifest.model_dump_json(indent=2))
+
+
+def write_atomically(path: Path, text: str) -> None:
+    # Write then rename, so a process crash mid-write never leaves a half-written file.
     partial = path.with_name(path.name + ".partial")
-    partial.write_text(manifest.model_dump_json(indent=2))
+    partial.write_text(text)
     os.replace(partial, path)
 
 
@@ -117,5 +122,7 @@ def _check_executed(result: ExecResult) -> None:
     """SPEC §2 rule 4: every executed action needs its own timestamp, in time order."""
     if len(result.executed_actions) != len(result.timestamps):
         raise RecordingError(f"{len(result.executed_actions)} executed actions but {len(result.timestamps)} timestamps")
+    if not all(math.isfinite(t) for t in result.timestamps):
+        raise RecordingError("timestamps are not finite")
     if any(later < earlier for earlier, later in pairwise(result.timestamps)):
         raise RecordingError("timestamps go backwards")
