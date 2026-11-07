@@ -8,7 +8,7 @@ let renderedSide = null;
 // The log follows new rows until the reader scrolls up from its bottom, and again once they scroll back down.
 let logFollowing = true;
 let flashedFrame = null;
-let announced = "";
+let spoken = { text: "", episode: null, paused: false };
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
 const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Gemini API", finetune: "Modal A10G" };
 
@@ -82,9 +82,19 @@ function renderHeader() {
     : "";
 }
 
-// Screen readers hear who is in control and the verdict when either changes, not every step.
+// Screen readers hear the episode when the view moves to another, who is in control and the verdict when either
+// changes, and a pause or resume; not every step.
 function announce(text) {
-  if (text !== announced) $("announce").textContent = announced = text;
+  const s = MomState.shown(view);
+  const ep = MomState.episode(view, now());
+  const heard = { text, episode: ep && ep.id, paused: view.frozen !== null };
+  const parts = [];
+  if (heard.paused !== spoken.paused) parts.push(heard.paused ? "Paused." : "Resumed.");
+  if (ep && heard.episode !== spoken.episode) parts.push(`Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}, ${kindOf(ep)[0].toLowerCase()}.`, text);
+  else if (text !== spoken.text) parts.push(text);
+  spoken = heard;
+  const message = parts.filter(Boolean).join(" ");
+  if (message) $("announce").textContent = message;
 }
 
 function renderControl() {
@@ -349,6 +359,17 @@ function schedule() {
   renderQueued = true;
   requestAnimationFrame(render);
 }
+
+// Labels closes on Escape or a click outside it, as a popover does.
+const legend = document.querySelector(".legend");
+document.addEventListener("keydown", (e) => {
+  if (e.key !== "Escape" || !legend.open) return;
+  legend.open = false;
+  legend.querySelector("summary").focus();
+});
+document.addEventListener("click", (e) => {
+  if (legend.open && !legend.contains(e.target)) legend.open = false;
+});
 
 $("side").addEventListener("scroll", fadeSide);
 $("log").addEventListener("scroll", (e) => {
