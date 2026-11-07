@@ -11,6 +11,7 @@
   <div class="meta" id="meta"></div>
 </header>
 <div class="control" id="control" aria-live="polite"></div>
+<div class="episode"><p id="episode-line"></p></div>
 <main>
   <section class="panel col camera">
     <header><h2>Head camera</h2><span id="chip-camera"></span></header>
@@ -18,14 +19,14 @@
     <ol class="strip" id="strip" aria-label="Recent head-camera frames"></ol>
   </section>
   <section class="panel col">
-    <header><h2>Decisions</h2><span class="note" id="episode-line"></span><span id="chip-log"></span></header>
+    <header><h2>Decisions</h2><span id="chip-log"></span></header>
     <ol class="log" id="log" tabindex="0" aria-label="Decision log"></ol>
   </section>
-  <div class="col side">
+  <div class="col side" tabindex="0" role="region" aria-label="Did it work">
     <section class="panel" id="p-verdict"></section>
+    <section class="panel" id="p-diagnosis"></section>
     <section class="panel" id="p-rounds"></section>
     <section class="panel" id="p-models"></section>
-    <section class="panel" id="p-diagnosis"></section>
   </div>
 </main>
 <script src="/static/state.js"></script>

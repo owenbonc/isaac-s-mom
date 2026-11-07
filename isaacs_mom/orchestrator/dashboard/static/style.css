@@ -19,16 +19,17 @@ header.bar{display:flex;align-items:center;gap:1rem;padding:0 1.1rem;height:3rem
 header.bar h1{font-size:1.25rem}
 .meta{display:flex;gap:1.1rem;color:var(--muted);margin-left:auto;white-space:nowrap;overflow:hidden}
 .meta b{color:var(--ink);font-weight:600}
-.control{flex:none;display:flex;align-items:center;gap:.9rem;padding:.5rem 1.1rem;border-bottom:1px solid var(--rule);background:var(--panel);min-height:2.6rem}
+.control{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem;padding:.5rem 1.1rem;border-bottom:1px solid var(--rule);background:var(--panel);min-height:2.6rem}
 .control.student{background:var(--student-bg);border-bottom-color:#b9cbfa}
 .control.teacher{background:var(--teacher-bg);border-bottom-color:#f0c3a8}
 .control .what{font-weight:700}
 
-#episode-line{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.episode{flex:none;padding:.4rem 1.1rem;background:var(--panel);border-bottom:1px solid var(--rule)}
+#episode-line{margin:0;overflow-wrap:anywhere}
 main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,.9fr);gap:.8rem;padding:.8rem}
 .col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
-.side{display:flex;flex-direction:column;gap:.8rem;min-height:0}
-.side .panel{flex:none;overflow:hidden}
+.side{display:flex;flex-direction:column;gap:.8rem;min-height:0;overflow-y:auto}
+.side .panel{flex:none}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;min-width:0;min-height:0}
 .panel>header{display:flex;align-items:center;gap:.6rem;padding:.5rem .8rem;border-bottom:1px solid var(--rule)}
 .panel>header .chip:last-child,.panel>header>span:last-child{margin-left:auto}

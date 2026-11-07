@@ -131,7 +131,7 @@ function renderLog() {
   const list = $("log");
   $("chip-log").innerHTML = panelChip(ep !== null, ep);
   if (!ep) {
-    $("episode-line").textContent = "";
+    $("episode-line").innerHTML = "";
     list.innerHTML = '<li class="empty">No decisions yet. Each decision appears with its reason and latency.</li>';
     renderedEpisode = null;
     return;
@@ -139,11 +139,14 @@ function renderLog() {
   $("episode-line").innerHTML = `${esc(SCENES[ep.split] || "Scene")}, seed ${esc(ep.seed ?? "")}, round ${esc(ep.round ?? "")} <span class="mono">${esc(ep.id)}</span>`;
   const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows;
+  const added = html.length > renderedRows;
+  // Follow new rows only when the reader is already at the bottom, so scrolling back to point at a row holds.
+  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 8;
   list.innerHTML = html.join("");
   if (!fromStart) [...list.children].slice(renderedRows).forEach((li) => li.classList.add("fresh"));
+  if (fromStart || (added && atBottom)) list.scrollTop = list.scrollHeight;
   renderedRows = html.length;
   renderedEpisode = ep.id;
-  list.scrollTop = list.scrollHeight;
 }
 
 function renderVerdict() {
