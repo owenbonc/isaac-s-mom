@@ -7,7 +7,7 @@ import pytest
 
 from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget, TrainingExample
 from isaacs_mom.orchestrator.loop import INSTRUCTION
-from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, adapter_dir, resolve_adapter
+from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, adapter_dir, resolve_adapter, valid_run_id
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
 from isaacs_mom.student.tuning import finetune
@@ -111,7 +111,31 @@ def test_adapter_dir_places_a_checkpoint_inside_its_run_without_touching_disk(tm
     assert adapter_dir("../ckpt-r1", tmp_path) is None
 
 
-@pytest.mark.parametrize("checkpoint", ["ckpt-r1", "run-a/ckpt-rx", "run-a/ckpt-r1/x", "../ckpt-r1", "/ckpt-r1"])
+@pytest.mark.parametrize("run_id", ["run-20261107-173845", "a.b_c-1", "x"])
+def test_a_plain_ascii_run_id_is_valid(run_id: str) -> None:
+    assert valid_run_id(run_id)
+
+
+@pytest.mark.parametrize("run_id", ["demo 1", "rün", ".hidden", "trailing.", ".", "..", "", "a/b", "a\\b"])
+def test_a_run_id_that_a_checkpoint_id_could_not_carry_is_invalid(run_id: str) -> None:
+    assert not valid_run_id(run_id)
+
+
+@pytest.mark.parametrize(
+    "checkpoint",
+    [
+        "ckpt-r1",
+        "run-a/ckpt-rx",
+        "run-a/ckpt-r1/x",
+        "../ckpt-r1",
+        "/ckpt-r1",
+        "run-a/ckpt-r01",
+        "run a/ckpt-r1",
+        "rün/ckpt-r1",
+        "...../ckpt-r1",
+        "run-a\\ckpt-r1",
+    ],
+)
 def test_a_checkpoint_id_without_its_run_is_rejected(tmp_path: Path, checkpoint: str) -> None:
     with pytest.raises(ValueError, match="checkpoint id"):
         resolve_adapter(checkpoint, tmp_path)
@@ -215,6 +239,16 @@ def test_empty_training_set_keeps_the_previous_checkpoint(tmp_path: Path) -> Non
 
     assert finetune(training_set(tmp_path, []), "run-a/ckpt-r1", 2, trainer=trainer) == "run-a/ckpt-r1"
     assert not (tmp_path / "run-a" / "checkpoints").exists()
+
+
+def test_a_run_id_no_checkpoint_id_can_carry_fails_before_training(tmp_path: Path) -> None:
+    rows = [example(tmp_path, SkillTarget(skill="hug"))]
+
+    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+        raise AssertionError("trained before checking the run id")
+
+    with pytest.raises(ValueError, match="demo 1"):
+        finetune(training_set(tmp_path, rows, "demo 1"), "ckpt-r0", 1, trainer=trainer)
 
 
 def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: Path) -> None:

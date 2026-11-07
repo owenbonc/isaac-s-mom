@@ -8,7 +8,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from isaacs_mom.contracts import TrainingExample
-from isaacs_mom.student.checkpoints import ADAPTER_FILES, MODEL_ID, checkpoint_id
+from isaacs_mom.student.checkpoints import ADAPTER_FILES, MODEL_ID, checkpoint_id, valid_run_id
 from isaacs_mom.student.prompt import format_target
 
 Trainer = Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]
@@ -47,6 +47,9 @@ def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]
 
 def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, trainer: Trainer = modal_trainer) -> str:
     """Retrains from the base model on the cumulative set, so a checkpoint depends only on its training set."""
+    run_dir = training_set.parent
+    if not valid_run_id(run_dir.name):
+        raise ValueError(f"run id {run_dir.name!r} cannot name a checkpoint: use letters, digits, '.', '_' or '-'")
     examples, images = package(training_set)
     if not examples:
         log.warning("%s has no accepted teacher steps; keeping %s", training_set, previous_checkpoint)
@@ -59,7 +62,6 @@ def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, train
     for name in files:
         if Path(name).name != name or name in {".", ".."}:
             raise RuntimeError(f"trainer returned a file name that is not plain: {name!r}")
-    run_dir = training_set.parent
     checkpoint = checkpoint_id(run_dir.name, round_)
     out = run_dir / "checkpoints" / f"ckpt-r{round_}"
     staging = out.with_name(f"{out.name}.tmp")

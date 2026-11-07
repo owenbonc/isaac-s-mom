@@ -15,6 +15,9 @@ LORA_TARGETS = r".*text_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|
 ACCURACY_SAMPLE = 64
 SEED = 0
 IGNORE_INDEX = -100
+# uv.lock's Linux versions, so a launch from any laptop trains on the same stack.
+TORCH = "torch==2.15.0"
+TORCHVISION = "torchvision==0.29.2"
 
 
 def _pinned(package: str) -> str:
@@ -24,9 +27,7 @@ def _pinned(package: str) -> str:
 
 image = (
     modal.Image.debian_slim(python_version="3.12")
-    .pip_install(
-        *(_pinned(p) for p in ("torch", "torchvision", "transformers", "peft", "num2words", "pillow", "pydantic"))
-    )
+    .pip_install(TORCH, TORCHVISION, *(_pinned(p) for p in ("transformers", "peft", "num2words", "pillow", "pydantic")))
     .add_local_python_source("isaacs_mom")
 )
 app = modal.App("isaacs-mom-student", image=image)

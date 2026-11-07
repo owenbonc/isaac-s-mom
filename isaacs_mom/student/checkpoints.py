@@ -7,7 +7,12 @@ MODEL_ID = "HuggingFaceTB/SmolVLM2-500M-Video-Instruct"
 BASE_CHECKPOINT = "ckpt-r0"
 RUNS_DIR = Path("runs")
 ADAPTER_FILES = ("adapter_config.json", "adapter_model.safetensors")
-CHECKPOINT_ID = re.compile(r"(?P<run_id>[\w.-]+)/(?P<name>ckpt-r\d+)")
+RUN_ID = r"(?!\.)[A-Za-z0-9._-]+(?<!\.)"
+CHECKPOINT_ID = re.compile(rf"(?P<run_id>{RUN_ID})/(?P<name>ckpt-r(0|[1-9][0-9]*))")
+
+
+def valid_run_id(run_id: str) -> bool:
+    return re.fullmatch(RUN_ID, run_id) is not None
 
 
 def checkpoint_id(run_id: str, round_: int) -> str:
@@ -17,7 +22,7 @@ def checkpoint_id(run_id: str, round_: int) -> str:
 def adapter_dir(checkpoint: str, runs_dir: Path = RUNS_DIR) -> Path | None:
     """Where a fine-tuned checkpoint's adapter belongs; None for the base model or an id of another shape."""
     match = CHECKPOINT_ID.fullmatch(checkpoint)
-    if match is None or match["run_id"] in {".", ".."}:
+    if match is None:
         return None
     return runs_dir / match["run_id"] / "checkpoints" / match["name"]
 

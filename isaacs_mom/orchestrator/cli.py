@@ -4,7 +4,16 @@ from pathlib import Path
 
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
-from isaacs_mom.student import StubStudent, StudentPolicy, finetune, stub_finetune
+from isaacs_mom.student import StubStudent, StudentPolicy, finetune, stub_finetune, valid_run_id
+
+
+def run_id(text: str) -> str:
+    """Checked up front, because a bad id would only fail after a paid fine-tune."""
+    if not valid_run_id(text):
+        raise argparse.ArgumentTypeError(
+            f"{text!r}: use ASCII letters, digits, '.', '_' or '-', not starting or ending with '.'"
+        )
+    return text
 
 
 def make_sim(name: str) -> TruthSim:
@@ -24,7 +33,7 @@ def main() -> None:
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--student", choices=["smolvlm", "stub"], default="smolvlm", help="stub: no model, no training")
     run.add_argument("--rounds", type=int, default=3)
-    run.add_argument("--run-id", default=time.strftime("run-%Y%m%d-%H%M%S"))
+    run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     args = parser.parse_args()
 
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)

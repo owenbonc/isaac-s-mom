@@ -1,5 +1,6 @@
 import json
 import math
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
@@ -7,6 +8,7 @@ import pytest
 from pydantic import ValidationError
 
 from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCall, SkillTarget
+from isaacs_mom.orchestrator import cli
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
@@ -231,6 +233,18 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
     )
     assert built[0] == "ckpt-r0"
     assert "trained-1" in built
+
+
+def test_the_cli_refuses_a_run_id_a_checkpoint_id_could_not_carry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    argv = ["mom", "run", "--sim", "fake", "--student", "stub", "--rounds", "0", "--run-id", "demo 1"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exit_:
+        cli.main()
+    assert exit_.value.code == 2
+    assert not (tmp_path / "runs").exists()
 
 
 def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int], str]) -> tuple[dict, dict]:
