@@ -9,12 +9,13 @@ from pathlib import Path
 from isaacs_mom.contracts import EpisodeManifest, ExecResult, GroundTruth, Observation, Perturbation, SkillCall
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import INSTRUCTION
+from isaacs_mom.orchestrator.loop import INSTRUCTION, ArgonFactory
 from isaacs_mom.orchestrator.video import record
 from isaacs_mom.seeds import assert_not_heldout
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import StudentPolicy
 from isaacs_mom.teacher import ArgonPolicy
+from isaacs_mom.teacher.argon import Argon
 
 
 class _ThirdPersonCapture:
@@ -63,20 +64,30 @@ def _captions(manifest: EpisodeManifest, perturb_at: int) -> list[str]:
 
 
 def run_demo(
-    sim: TruthSim, *, ckpt: str, seed: int, perturb_at: int, out: Path, run_dir: Path, run_id: str, fps: int = 2
+    sim: TruthSim,
+    *,
+    ckpt: str,
+    seed: int,
+    perturb_at: int,
+    out: Path,
+    run_dir: Path,
+    run_id: str,
+    fps: int = 2,
+    make_argon: ArgonFactory = Argon,
 ) -> EpisodeManifest:
     assert_not_heldout(seed)
     capture = _ThirdPersonCapture(sim)
+    events = EventLog(run_dir, run_id)
     manifest = run_episode(
         capture,
         StudentPolicy(ckpt),
         run_dir=run_dir,
-        events=EventLog(run_dir, run_id),
+        events=events,
         seed=seed,
         split="dev",
         round_=0,
         instruction=INSTRUCTION,
-        takeover=ArgonPolicy(None),
+        takeover=ArgonPolicy(None, make_argon(events)),
         perturb_at=perturb_at,
     )
     episode_dir = run_dir / "episodes" / manifest.episode_id

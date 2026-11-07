@@ -7,15 +7,21 @@ from PIL import Image
 
 from isaacs_mom.contracts import Event
 from isaacs_mom.orchestrator.demo import run_demo
+from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.video import record
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
+from isaacs_mom.teacher.argon import Argon
 
 
 def jpeg(colour: tuple[int, int, int], size: tuple[int, int]) -> bytes:
     out = io.BytesIO()
     Image.new("RGB", size, colour).save(out, format="JPEG")
     return out.getvalue()
+
+
+def done_argon(events: EventLog) -> Argon:
+    return Argon(events, generate=lambda parts: '{"done": true}')  # no network in tests
 
 
 def frame_count(path: Path) -> int:
@@ -42,7 +48,16 @@ def test_record_refuses_an_empty_take(tmp_path: Path) -> None:
 def test_demo_records_every_step_and_the_perturbation(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "demo"
     out = tmp_path / "demo.mp4"
-    manifest = run_demo(FakeSim(), ckpt="ckpt-r0", seed=900_001, perturb_at=3, out=out, run_dir=run_dir, run_id="demo")
+    manifest = run_demo(
+        FakeSim(),
+        ckpt="ckpt-r0",
+        seed=900_001,
+        perturb_at=3,
+        out=out,
+        run_dir=run_dir,
+        run_id="demo",
+        make_argon=done_argon,
+    )
     assert frame_count(out) == len(manifest.steps) > 3
     events = [Event.model_validate_json(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
     perturbations = [e for e in events if e.type == "perturbation"]
@@ -53,6 +68,13 @@ def test_demo_refuses_a_heldout_seed(tmp_path: Path) -> None:
     seed = next(iter(heldout_seeds()))
     with pytest.raises(SealedSeedError):
         run_demo(
-            FakeSim(), ckpt="ckpt-r0", seed=seed, perturb_at=3, out=tmp_path / "d.mp4", run_dir=tmp_path, run_id="d"
+            FakeSim(),
+            ckpt="ckpt-r0",
+            seed=seed,
+            perturb_at=3,
+            out=tmp_path / "d.mp4",
+            run_dir=tmp_path,
+            run_id="d",
+            make_argon=done_argon,
         )
     assert not (tmp_path / "d.mp4").exists()

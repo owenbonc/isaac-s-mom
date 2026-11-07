@@ -11,6 +11,7 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy
+from isaacs_mom.teacher.argon import Argon
 
 JPEG = b"\xff\xd8\xff\xd9"
 
@@ -119,7 +120,10 @@ def test_episode_started_names_the_simulator_so_the_page_can_label_fakesim_place
 
 
 def test_each_teacher_demonstration_names_the_failed_episode_whose_diagnosis_it_acts_on(tmp_path: Path) -> None:
-    run_loop(FakeSim(), tmp_path, "r1", max_rounds=1, demos=3, dev_trials=2)
+    def done_argon(events: EventLog) -> Argon:
+        return Argon(events, generate=lambda parts: '{"done": true}')  # no network in tests
+
+    run_loop(FakeSim(), tmp_path, "r1", max_rounds=1, demos=3, dev_trials=2, make_argon=done_argon)
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
     starts = {e["data"]["episode_id"]: e["data"] for e in events if e["type"] == "episode_started"}
     diagnosed = [e["data"]["episode_id"] for e in events if e["type"] == "diagnosis"]

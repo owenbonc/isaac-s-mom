@@ -1,5 +1,6 @@
 """The teach -> fine-tune loop (SPEC §3.6)."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult
@@ -9,7 +10,10 @@ from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
+from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator.training import build_training_set
+
+ArgonFactory = Callable[[EventLog], Argon]
 
 INSTRUCTION = "Hug the orange box, lift it, and put it in the green bin."
 TARGET_RATE = 0.8
@@ -46,8 +50,10 @@ def run_loop(
     max_rounds: int = MAX_ROUNDS,
     demos: int = DEMOS_PER_ROUND,
     dev_trials: int = DEV_TRIALS,
+    make_argon: ArgonFactory = Argon,
 ) -> list[EvaluationResult]:
     events = EventLog(run_dir, run_id)
+    argon = make_argon(events)  # one budget for the whole run (SPEC §2 rule 5)
     checkpoint = BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):
@@ -72,17 +78,16 @@ def run_loop(
         diagnosed: list[tuple[str, Diagnosis]] = []
         for manifest in failures:
             episode_dir = run_dir / "episodes" / manifest.episode_id
-            diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps])
+            diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps], argon)
             events.emit("diagnosis", episode_id=manifest.episode_id, **diagnosis.model_dump())
             diagnosed.append((manifest.episode_id, diagnosis))
-        for seed, (failed_id, diagnosis) in zip(
-            choose_scenes([d for _, d in diagnosed], demos, start=trial_start + 500),
-            (diagnosed or [(None, None)]) * demos,
-            strict=False,
-        ):
+        lessons: list[tuple[str | None, Diagnosis | None]] = [*diagnosed] or [(None, None)]
+        # Rejected trials come back first, in the order of their diagnoses; fresh seeds cycle through the lessons.
+        for i, seed in enumerate(choose_scenes(failures, demos, start=trial_start + 500)):
+            failed_id, diagnosis = lessons[i % len(lessons)]
             run_episode(
                 sim,
-                ArgonPolicy(diagnosis),
+                ArgonPolicy(diagnosis, argon),
                 run_dir=run_dir,
                 events=events,
                 seed=seed,
