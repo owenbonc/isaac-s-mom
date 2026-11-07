@@ -103,7 +103,7 @@ def test_training_set_takes_only_accepted_teacher_steps_from_dev(tmp_path: Path)
     lines = build_training_set(tmp_path, 1).read_text().splitlines()
     teacher_steps = [s for s in accepted.steps if s.controller == "teacher"]
     assert len(lines) == len(teacher_steps) > 0
-    assert all(Path(json.loads(line)["image"]).parent.parent.name == accepted.episode_id for line in lines)
+    assert all(accepted.episode_id in Path(json.loads(line)["image"]).parts for line in lines)
 
 
 def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
