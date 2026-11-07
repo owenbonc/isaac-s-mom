@@ -26,9 +26,11 @@ class FreshStatic(StaticFiles):
 
 
 def frame_url(frame: object, run_dir: Path) -> str | None:
-    """The `/frames/...` URL for an event's frame path, or None when it lies outside the run directory."""
+    """The `/frames/...` URL for an event's frame path, which is relative to the run directory; None outside it."""
+    if not isinstance(frame, str):
+        return None
     try:
-        return "/frames/" + Path(str(frame)).resolve().relative_to(run_dir.resolve()).as_posix()
+        return "/frames/" + (run_dir / frame).resolve().relative_to(run_dir.resolve()).as_posix()
     except ValueError:
         return None
 

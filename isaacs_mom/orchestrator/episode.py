@@ -97,7 +97,8 @@ def run_episode(
                 step=obs.step,
                 ok=result.ok,
                 error=result.error,
-                frame=str(recorder.dir / recorder.manifest.steps[-1].frame),
+                # Relative to the run directory, so a reader started from any directory finds it.
+                frame=(recorder.dir / recorder.manifest.steps[-1].frame).relative_to(run_dir).as_posix(),
             )
             feedback = f"{call.skill}: {'ok' if result.ok else result.error}"
             total_steps += 1

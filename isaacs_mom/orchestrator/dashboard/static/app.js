@@ -5,6 +5,8 @@ let renderedRows = 0;
 let renderedEpisode = null;
 let renderedFocus = null;
 let renderedSide = null;
+// The log follows new rows until the reader scrolls up from its bottom, and again once they scroll back down.
+let logFollowing = true;
 let flashedFrame = null;
 let announced = "";
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
@@ -185,10 +187,11 @@ function logRow(row) {
   }
 }
 
-function decisionRow(row, after, done) {
+// The reason behind the stage's frame, and any decided after it, reads in full; older ones are clamped.
+function decisionRow(row, after, done, full) {
   const outcome = !row.skill ? "" : row.ok === null ? (done ? "" : '<span class="lat">running</span>') : row.ok ? `<span class="ok">${CHECK}<span class="sr">executed</span></span>` : '<span class="no">failed</span>';
   const latency = row.latency === null || !row.skill ? "" : `<span class="lat">${duration(row.latency)}</span>`;
-  const reason = row.reason ? `<div class="reason" title="${esc(row.reason)}">${esc(row.reason)}</div>` : "";
+  const reason = !row.reason ? "" : full ? `<div class="reason">${esc(row.reason)}</div>` : `<div class="reason clamped" title="${esc(row.reason)}">${esc(row.reason)}</div>`;
   const error = row.error ? `<div class="err">${esc(row.error)}</div>` : "";
   const mark = after ? '<div class="after">First decision after the move</div>' : "";
   return `<li class="${row.controller || "unknown"}${after && view.compare ? " focus" : ""}"><span class="n">${esc(row.step ?? "")}</span><div class="line"><span class="skill">${skillText(row)}</span><span class="right">${latency}${outcome}</span></div>${mark}${reason}${error}</li>`;
@@ -234,15 +237,16 @@ function renderLog() {
   }
   const move = MomState.move(ep);
   const done = finished(ep);
-  const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision, done) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
+  const stage = MomState.filmstrip(ep, view.compare && view.compare.step).find((f) => f.now);
+  const full = (r) => !stage || stage.step === null || (r.step !== null && r.step >= stage.step);
+  const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision, done, full(r)) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
   const focus = view.compare && `${ep.id}@${view.compare.step}`;
   // Letting go of P drops the scroll it set, so the log follows new rows again.
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows || (renderedFocus !== null && focus === null);
-  // Stay at the bottom only when the reader is already there, so scrolling back to point at a row holds.
-  const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 8;
+  if (fromStart) logFollowing = true;
   list.innerHTML = html.join("");
   if (!fromStart) [...list.children].slice(renderedRows).forEach((li) => li.classList.add("fresh"));
-  if (fromStart || atBottom) list.scrollTop = list.scrollHeight;
+  if (logFollowing) list.scrollTop = list.scrollHeight;
   const row = list.querySelector(".focus");
   if (focus !== renderedFocus && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
   renderedFocus = focus;
@@ -317,10 +321,11 @@ function render() {
   renderControl();
   renderEpisode();
   renderCamera();
-  renderLog();
   renderRounds();
   renderModels();
   renderDiagnosis();
+  // Last, so its scroll lands after every bar that sets its height is written.
+  renderLog();
   // A new episode starts the side column at its top, where the held-out figure is.
   const ep = MomState.episode(view, now());
   if (ep && ep.id !== renderedSide) $("side").scrollTop = 0;
@@ -332,6 +337,11 @@ function schedule() {
   renderQueued = true;
   requestAnimationFrame(render);
 }
+
+$("log").addEventListener("scroll", (e) => {
+  const log = e.currentTarget;
+  logFollowing = log.scrollHeight - log.scrollTop - log.clientHeight < 8;
+});
 
 // A frame that fails to load is marked missing instead of showing a broken-image icon.
 document.addEventListener(

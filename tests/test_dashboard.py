@@ -2,6 +2,7 @@ import asyncio
 import json
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 from isaacs_mom.contracts import Event
@@ -95,10 +96,36 @@ def test_stream_skips_malformed_lines(tmp_path: Path) -> None:
 def test_stream_turns_frame_paths_into_urls_and_hides_outside_paths(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     log = EventLog(run_dir, "r1")
-    log.emit("action_executed", frame=str(run_dir / "episodes" / "ep-1" / "frames" / "0000.jpg"))
+    log.emit("action_executed", frame="episodes/ep-1/frames/0000.jpg")
+    log.emit("action_executed", frame="../../secret.jpg")
     log.emit("action_executed", frame=str(tmp_path / "secret.jpg"))
+    log.emit("action_executed", frame=None)
     frames = [e["data"]["frame"] for e in collect(run_dir)]
-    assert frames == ["/frames/episodes/ep-1/frames/0000.jpg", None]
+    assert frames == ["/frames/episodes/ep-1/frames/0000.jpg", None, None, None]
+
+
+def test_frame_paths_find_the_same_file_whatever_directory_the_dashboard_starts_from(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    (tmp_path / "loop").mkdir()
+    (tmp_path / "elsewhere").mkdir()
+    monkeypatch.chdir(tmp_path / "loop")
+    run_dir = Path("runs") / "r1"
+    run_episode(
+        FakeSim(),
+        StudentPolicy(BASE_CHECKPOINT),
+        run_dir=run_dir,
+        events=EventLog(run_dir, "r1"),
+        seed=1,
+        split="dev",
+        round_=0,
+        instruction="push",
+    )
+    monkeypatch.chdir(tmp_path / "elsewhere")
+    served = tmp_path / "loop" / "runs" / "r1"
+    urls = [e["data"]["frame"] for e in collect(served) if e["type"] == "action_executed"]
+    client = TestClient(create_app(served))
+    assert urls and all(client.get(url).content == (served / url.removeprefix("/frames/")).read_bytes() for url in urls)
 
 
 def test_episode_started_names_the_simulator_so_the_page_can_label_fakesim_placeholder(tmp_path: Path) -> None:
