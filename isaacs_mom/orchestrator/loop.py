@@ -11,7 +11,7 @@ from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.validator.training import build_training_set
 
-INSTRUCTION = "Push the red block into the green target zone."
+INSTRUCTION = "Hug the orange box, lift it, and put it in the green bin."
 TARGET_RATE = 0.8
 MAX_ROUNDS = 3
 DEMOS_PER_ROUND = 20
