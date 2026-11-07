@@ -4,8 +4,8 @@ Argon sees only head-camera JPEGs, the instruction, the skill history and the va
 ground truth (rule 1), so nothing here imports `isaacs_mom.sim`.
 
 Done rule: a demo ends with exactly one `reobserve`, then None, and the student reads two `reobserve`s in a row as
-done. So the teacher never records a second `reobserve` in a row before the end: an unparseable answer or an
-unreachable Argon is asked again on the same frame, without recording a step.
+done. So the teacher never records a second `reobserve` in a row before the end: an unparseable answer is asked again
+on the same frame, an unreachable Argon is retried after a wait (inside `Argon.ask`), and neither records a step.
 """
 
 import json
@@ -17,7 +17,7 @@ from isaacs_mom.contracts import Controller, Diagnosis, EpisodeManifest, Observa
 from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
 from isaacs_mom.teacher.argon import Argon
 
-ATTEMPTS = 3  # asks this many times per step for a usable answer, holding on the same frame, then ends the demo
+ATTEMPTS = 3  # asks this many times per step for a parseable answer, on the same frame, then ends the demo
 DIAGNOSIS_FRAMES = 4  # the first frame and the last three: the start and how it went wrong, at a bounded cost
 RAW_LOG_CHARS = 500
 
@@ -125,7 +125,7 @@ class ArgonPolicy:
                 return self._finish("ended: Argon call budget used up")
             answer = self.argon.ask("act", [self._prompt(obs, instruction), obs.head_rgb_jpeg])
             if answer is None:
-                continue  # unreachable: hold and look again at the same frame, recording nothing
+                return self._finish("ended: Argon unreachable or over budget")
             step = parse_step(answer)
             if step == "done":
                 return self._finish("Argon: the task looks complete")
@@ -135,7 +135,7 @@ class ArgonPolicy:
                 self.history.append(step)
                 return step
             self.argon.error("act", "unparseable or non-whitelisted Argon answer", raw=answer[:RAW_LOG_CHARS])
-        return self._finish("ended: no usable Argon answer")
+        return self._finish("ended: no parseable Argon answer")
 
     def _last_was_reobserve(self) -> bool:
         return bool(self.history) and self.history[-1].skill == "reobserve"

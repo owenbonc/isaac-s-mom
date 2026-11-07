@@ -24,12 +24,14 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
 from isaacs_mom.teacher import ATTEMPTS, ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import (
+    RETRY_WAITS_S,
     Argon,
     ArgonUnavailable,
     MissingKey,
     Part,
     env_value,
     gemini_generate,
+    retry_after_s,
     stub_generate,
 )
 
@@ -54,9 +56,15 @@ class FakeArgon:
         return answer
 
 
-def argon(tmp_path: Path, *answers: str | Exception, budget: int = 50) -> tuple[Argon, FakeArgon]:
+ASK_TRIES = len(RETRY_WAITS_S) + 1  # one call plus a retry after each wait
+
+
+def argon(
+    tmp_path: Path, *answers: str | Exception, budget: int = 50, waits: list[float] | None = None
+) -> tuple[Argon, FakeArgon]:
     fake = FakeArgon(*answers)
-    return Argon(EventLog(tmp_path, "run"), budget=budget, generate=fake), fake
+    sleep = (waits if waits is not None else []).append
+    return Argon(EventLog(tmp_path, "run"), budget=budget, generate=fake, sleep=sleep), fake
 
 
 def obs(step: int = 0, frame: bytes = b"jpeg-0") -> Observation:
@@ -153,15 +161,32 @@ def test_a_huge_integer_in_a_diagnosis_is_unparseable_not_a_crash(tmp_path: Path
 # --- unreachable: hold on the same frame, never two reobserves in a row mid-demo ---
 
 
-def test_an_unreachable_argon_is_asked_again_without_recording_a_step(tmp_path: Path) -> None:
+def test_an_unreachable_argon_is_retried_after_a_wait_without_recording_a_step(tmp_path: Path) -> None:
     down = ArgonUnavailable("offline")
-    a, fake = argon(tmp_path, down, down, STEP, DONE)
+    waits: list[float] = []
+    a, fake = argon(tmp_path, down, down, STEP, DONE, waits=waits)
     assert demo(ArgonPolicy(None, a)) == [MOVE, "reobserve"]
     assert len(fake.prompts) == 4
+    assert waits == list(RETRY_WAITS_S[:2])
+
+
+def test_a_rate_limit_waits_as_long_as_the_server_says_capped(tmp_path: Path) -> None:
+    waits: list[float] = []
+    limited = [ArgonUnavailable("429", retry_after_s=37.0), ArgonUnavailable("429", retry_after_s=999.0)]
+    a, _ = argon(tmp_path, *limited, STEP, waits=waits)
+    assert a.ask("act", ["x"]) == STEP
+    assert waits == [37.0, 120.0]
+
+
+def test_a_minute_long_rate_limit_does_not_end_the_demo(tmp_path: Path) -> None:
+    waits: list[float] = []
+    a, _ = argon(tmp_path, *[ArgonUnavailable("429")] * (ASK_TRIES - 1), STEP, DONE, waits=waits)
+    assert demo(ArgonPolicy(None, a)) == [MOVE, "reobserve"]
+    assert sum(waits) >= 60
 
 
 def test_argon_down_for_a_whole_step_ends_the_demo_with_one_reobserve(tmp_path: Path) -> None:
-    a, _ = argon(tmp_path, STEP, LOOK, *[ArgonUnavailable("offline")] * ATTEMPTS)
+    a, _ = argon(tmp_path, STEP, LOOK, *[ArgonUnavailable("offline")] * ASK_TRIES)
     assert demo(ArgonPolicy(None, a)) == [MOVE, "reobserve"]
 
 
@@ -174,7 +199,7 @@ def test_no_two_reobserves_in_a_row_before_the_end_whatever_argon_does(tmp_path:
 
 
 def test_an_empty_answer_is_a_failed_call_not_ok(tmp_path: Path) -> None:
-    a, _ = argon(tmp_path, *[""] * ATTEMPTS)
+    a, _ = argon(tmp_path, *[""] * ASK_TRIES)
     assert demo(ArgonPolicy(None, a)) == ["reobserve"]
     assert all(not e["ok"] and e["error"] == "empty answer" for e in events(tmp_path, "argon_call"))
 
@@ -199,8 +224,15 @@ def test_a_bug_in_our_code_is_not_mistaken_for_unreachable(tmp_path: Path) -> No
         ArgonPolicy(None, a).act(obs(), "task", "start")
 
 
-def fake_client(monkeypatch: pytest.MonkeyPatch, made: list[dict[str, object]], answer: object) -> None:
+def fake_client(
+    monkeypatch: pytest.MonkeyPatch, made: list[dict[str, object]], answer: object, preflight: Exception | None = None
+) -> None:
     from google import genai
+
+    def get(**_: object) -> SimpleNamespace:
+        if preflight:
+            raise preflight
+        return SimpleNamespace(name="models/gemini-4-argon")
 
     def generate_content(**_: object) -> SimpleNamespace:
         if isinstance(answer, Exception):
@@ -209,7 +241,7 @@ def fake_client(monkeypatch: pytest.MonkeyPatch, made: list[dict[str, object]], 
 
     def client(**kwargs: object) -> SimpleNamespace:
         made.append(kwargs)
-        return SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
+        return SimpleNamespace(models=SimpleNamespace(get=get, generate_content=generate_content))
 
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
     monkeypatch.setattr(genai, "Client", client)
@@ -259,6 +291,36 @@ def test_our_own_bug_inside_the_sdk_call_is_not_unreachable(monkeypatch: pytest.
     fake_client(monkeypatch, [], KeyError("our bug"))
     with pytest.raises(KeyError):
         gemini_generate()("act", ["hi"])
+
+
+@pytest.mark.parametrize("code", [401, 403, 404])
+def test_a_bad_key_or_a_wrong_model_stops_the_run_when_the_generator_is_built(
+    monkeypatch: pytest.MonkeyPatch, code: int
+) -> None:
+    from google.genai import errors
+
+    fake_client(monkeypatch, [], STEP, preflight=errors.ClientError(code, {"error": {"message": "no"}}))
+    with pytest.raises(errors.ClientError):
+        gemini_generate()
+
+
+def test_an_unreachable_server_at_startup_stops_the_run_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx2
+
+    fake_client(monkeypatch, [], STEP, preflight=httpx2.ConnectError("down"))
+    with pytest.raises(ArgonUnavailable, match="startup"):
+        gemini_generate()
+
+
+def test_the_server_wait_is_read_from_retry_info_or_the_header() -> None:
+    from google.genai import errors
+
+    info = {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": "37s"}
+    assert retry_after_s(errors.ClientError(429, {"error": {"message": "q", "details": [info]}})) == 37.0
+    with_header = errors.ClientError(429, {"error": {"message": "q"}})
+    with_header.response = SimpleNamespace(headers={"retry-after": "12"})  # type: ignore[assignment]
+    assert retry_after_s(with_header) == 12.0
+    assert retry_after_s(errors.ClientError(429, {"error": {"message": "q"}})) is None
 
 
 def test_tests_cannot_build_a_live_client(monkeypatch: pytest.MonkeyPatch) -> None:
