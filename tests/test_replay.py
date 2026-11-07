@@ -166,7 +166,8 @@ def test_one_broken_episode_does_not_stop_the_whole_run_replay(tmp_path: Path) -
 def test_replay_notices_a_step_with_fewer_timestamps(tmp_path: Path) -> None:
     path = _record(tmp_path, GreedyHugger, seed=1611)
     manifest = _load(path)
-    manifest.steps[0].timestamps = manifest.steps[0].timestamps[:1]
+    # Two timestamps against ten neither match nor broadcast, so only the length check gives a clean reason.
+    manifest.steps[0].timestamps = manifest.steps[0].timestamps[:2]
     path.write_text(manifest.model_dump_json())
 
     report = replay_accepted(FakeSim(), tmp_path)
