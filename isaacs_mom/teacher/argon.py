@@ -1,14 +1,16 @@
-"""The one door to Argon: a per-run call budget, an `argon_call` event per call, and a hold when it is unreachable.
+"""The one door to Argon: a per-run call budget and an `argon_call` event for every call, failed or not.
 
-Building the Gemini generator checks the key and the model with one metadata request, so a bad key or a wrong model
-stops the run before any episode. Only server, rate-limit and transport errors count as "unreachable", and those are
-retried after a wait (the server's Retry-After when it gives one); any other 4xx raises.
+Server, timeout, rate-limit and transport errors raise `ArgonUnavailable`, which the teacher holds on; any other 4xx
+(bad key, wrong model, malformed request) raises as it is and stops the run. `check` makes one real call at startup,
+so a bad key or a wrong model stops the run before any episode.
 """
 
 import os
+import re
 import time
 from collections.abc import Callable
 from pathlib import Path
+from typing import Literal
 
 from isaacs_mom.contracts import EventType
 from isaacs_mom.orchestrator.events import EventLog
@@ -16,18 +18,18 @@ from isaacs_mom.orchestrator.events import EventLog
 MODEL = "gemini-4-argon"
 DEFAULT_BUDGET = 800  # a hug-and-place demo is ~7-9 calls: ~190 a round plus the B1 baseline
 TIMEOUT_S = 60
-RATE_LIMITED = 429
-RETRY_WAITS_S = (5.0, 15.0, 45.0)  # covers a minute-long rate limit before a step is given up
+RETRYABLE_CODES = (408, 429)  # request timeout and rate limit: transient, unlike the other 4xx
+RETRY_WAITS_S = (10.0, 50.0)  # between the 3 attempts of a step: a minute-long rate limit is ridden out
 MAX_WAIT_S = 120.0
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 Part = str | bytes  # text, or a JPEG from the head camera
-Purpose = str  # "act" or "diagnose"
+Purpose = Literal["act", "diagnose", "startup"]
 Generate = Callable[[Purpose, list[Part]], str]
 
 
 class ArgonUnavailable(Exception):
-    """The request failed on the network, at the server, or was rate limited: the robot holds."""
+    """The request timed out, failed on the network or at the server, or was rate limited: the robot holds."""
 
     def __init__(self, message: str, retry_after_s: float | None = None) -> None:
         super().__init__(message)
@@ -39,12 +41,14 @@ class MissingKey(RuntimeError):
 
 
 def env_value(name: str, env_path: Path | None = None) -> str | None:
+    """The environment first, then the last definition in .env (quotes, `export`, a BOM and `# comments` handled)."""
     if os.environ.get(name):
         return os.environ[name]
     env_path = env_path or ENV_PATH
     if not env_path.exists():
         return None
-    for line in env_path.read_text().splitlines():
+    found: str | None = None
+    for line in env_path.read_text(encoding="utf-8-sig").splitlines():
         key, sep, value = line.strip().removeprefix("export ").partition("=")
         if not sep or key.strip() != name:
             continue
@@ -53,9 +57,9 @@ def env_value(name: str, env_path: Path | None = None) -> str | None:
         if quote in ("'", '"') and quote in value[1:]:
             value = value[1 : value.index(quote, 1)]
         else:
-            value = value.lstrip("'\"").split(" #", 1)[0].strip()
-        return value or None
-    return None
+            value = re.split(r"\s#", value.lstrip("'\""), maxsplit=1)[0].strip()
+        found = value or None
+    return found
 
 
 def retry_after_s(error: Exception) -> float | None:
@@ -88,26 +92,20 @@ def gemini_generate(model: str = MODEL) -> Generate:
     from google.genai import errors, types
 
     client = genai.Client(api_key=key, http_options=types.HttpOptions(timeout=TIMEOUT_S * 1000))
-    unreachable = (errors.ServerError, errors.UnknownApiResponseError, httpx2.TransportError)
-    try:
-        client.models.get(model=model)  # a bad key (401/403) or a wrong model (404) raises ClientError here
-    except unreachable as e:
-        raise ArgonUnavailable(f"Argon not reachable at startup: {type(e).__name__}: {e}") from e
+    jpeg = "image/jpeg"
 
     def generate(purpose: Purpose, parts: list[Part]) -> str:
         try:
             response = client.models.generate_content(
                 model=model,
-                contents=[
-                    types.Part.from_bytes(data=p, mime_type="image/jpeg") if isinstance(p, bytes) else p for p in parts
-                ],
+                contents=[types.Part.from_bytes(data=p, mime_type=jpeg) if isinstance(p, bytes) else p for p in parts],
                 config=types.GenerateContentConfig(response_mime_type="application/json"),
             )
         except errors.ClientError as e:
-            if e.code != RATE_LIMITED:
+            if e.code not in RETRYABLE_CODES:
                 raise
             raise ArgonUnavailable(f"ClientError: {e}", retry_after_s(e)) from e
-        except unreachable as e:
+        except (errors.ServerError, errors.UnknownApiResponseError, httpx2.RequestError) as e:
             raise ArgonUnavailable(f"{type(e).__name__}: {e}", retry_after_s(e)) from e
         return response.text or ""
 
@@ -132,55 +130,58 @@ class Argon:
         sleep: Callable[[float], None] = time.sleep,
     ) -> None:
         self.events = events
-        self.sleep = sleep
         self.budget = budget if budget is not None else int(env_value("ARGON_CALL_BUDGET") or DEFAULT_BUDGET)
         self.generate = generate or gemini_generate()
+        self.sleep = sleep
         self.calls = 0
         self.failed = 0
+        self.server_wait_s: float | None = None
+        self.last_error: str | None = None
 
     @property
     def exhausted(self) -> bool:
         return self.calls >= self.budget
 
-    def ask(self, purpose: Purpose, parts: list[Part]) -> str | None:
-        """Argon's answer, or None when it is over budget, or still unreachable or silent after every retry."""
-        for retry, wait in enumerate((*RETRY_WAITS_S, None)):
-            if self.exhausted:
-                self.error(purpose, f"Argon call budget of {self.budget} used up")
-                return None
-            text, server_wait = self._call(purpose, parts, retry)
-            if text is not None:
-                return text
-            if wait is not None:
-                self.sleep(min(server_wait or wait, MAX_WAIT_S))
-        return None
+    def check(self) -> None:
+        """One real call at startup, counted and logged: a bad key or a wrong model raises before any episode."""
+        if self.ask("startup", ['Reply with exactly this JSON object: {"done": true}']) is None:
+            raise ArgonUnavailable(f"Argon did not answer the startup check: {self.last_error}")
 
-    def _call(self, purpose: Purpose, parts: list[Part], retry: int) -> tuple[str | None, float | None]:
+    def ask(self, purpose: Purpose, parts: list[Part]) -> str | None:
+        """One attempt: Argon's answer, or None when it is over budget, unreachable or silent."""
+        if self.exhausted:
+            self.error(purpose, f"Argon call budget of {self.budget} used up")
+            return None
         self.calls += 1
         started = time.perf_counter()
-        server_wait = None
+        self.server_wait_s = None
         try:
             text, error = self.generate(purpose, parts), None
         except ArgonUnavailable as e:
-            text, error, server_wait = None, str(e), e.retry_after_s
+            text, error, self.server_wait_s = None, str(e), e.retry_after_s
         if text == "":
             text, error = None, "empty answer"
         self.failed += error is not None
+        self.last_error = error
         self._emit(
             "argon_call",
             purpose=purpose,
             model=MODEL,
             call=self.calls,
             budget=self.budget,
-            retry=retry,
             ok=error is None,
             error=error,
             latency_ms=round((time.perf_counter() - started) * 1000, 1),
         )
-        return text, server_wait
+        return text
+
+    def wait(self, attempt: int) -> None:
+        """Before the next attempt: the server's Retry-After when the last call gave one, else the schedule."""
+        default = RETRY_WAITS_S[min(attempt, len(RETRY_WAITS_S) - 1)]
+        self.sleep(min(self.server_wait_s or default, MAX_WAIT_S))
 
     def summary(self) -> str:
-        """For the end of a run (SPEC §3.3: the run reports when Argon was unavailable or over budget)."""
+        """For the end of a run (SPEC §3.3: calls used out of the budget, unavailable answers, budget run out)."""
         line = f"argon: {self.calls}/{self.budget} calls, {self.failed} unavailable or empty"
         return line + (", budget used up" if self.exhausted else "")
 
