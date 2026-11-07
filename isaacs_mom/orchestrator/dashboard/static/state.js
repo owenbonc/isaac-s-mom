@@ -86,7 +86,7 @@
           controller,
           checkpoint: text(d.checkpoint) || null,
           skill: skill ? text(skill.skill) || null : null,
-          params: skill && skill.params ? skill.params : {},
+          distance: skill && skill.params ? num(skill.params.distance_cm) : null,
           reason: text(d.reason),
           latency,
           ok: null,

@@ -44,12 +44,13 @@ const tag = (controller, checkpoint) => {
   const who = { student: "Student", teacher: "Teacher (Argon)" }[controller] || "Unknown controller";
   return `<span class="tag ${controller || "unknown"}">${who}${checkpoint ? ` <span class="mono">${esc(checkpoint)}</span>` : ""}</span>`;
 };
-const skillText = (row) => (row.skill ? esc(row.skill) + (row.params && row.params.distance_cm != null ? ` ${esc(row.params.distance_cm)} cm` : "") : '<span class="stop">Stopped, no skill chosen</span>');
+const skillText = (row) => (row.skill ? esc(row.skill) + (row.distance === null ? "" : ` ${+row.distance.toFixed(1)} cm`) : '<span class="stop">Stopped, no skill chosen</span>');
 const SCENES = { dev: "Development scene", heldout: "Held-out test scene" };
 const MOVED = { move_block: "Block moved", move_target: "Target zone moved" };
-const ms = (v) => (v >= 100 ? Math.round(v) : v.toFixed(1)) + " ms";
+// Durations read at a glance from the back of the room: ms under a second, then seconds, then minutes.
+const duration = (v) => (v < 1000 ? `${v >= 100 ? Math.round(v) : v.toFixed(1)} ms` : v < 120000 ? `${(v / 1000).toFixed(1)} s` : `${(v / 60000).toFixed(1)} min`);
 const pct = (k, n) => (n ? Math.round((100 * k) / n) + "%" : "n/a");
-const stat = (s) => (s ? `${ms(s.median)} <span class="note">n=${s.n}</span>` : '<span class="ph-text">no data</span>');
+const stat = (s) => (s ? `${duration(s.median)} <span class="note">n=${s.n}</span>` : '<span class="ph-text">no data</span>');
 
 function renderHeader() {
   const run = view.live;
@@ -59,7 +60,7 @@ function renderHeader() {
   $("status").innerHTML = status + paused + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
   const s = MomState.shown(view);
   $("meta").innerHTML = s.eventCount
-    ? `<span>Run <b class="mono">${esc(s.runId)}</b></span><span>${s.episodes.length} episodes</span><span>${s.eventCount} events</span>`
+    ? `<span>Run <b class="mono">${esc(s.runId)}</b></span><span>${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}</span><span>${s.eventCount} events</span>`
     : "";
 }
 
@@ -85,7 +86,7 @@ function renderControl() {
       ? "Choosing each skill from the head-camera frame."
       : "Demonstrating from the head-camera frame.";
   el.className = "control " + ep.controller;
-  el.innerHTML = `<span class="what">${ep.verdict ? "Last in control:" : "In control:"}</span>${tag(ep.controller, ep.checkpoint)}<span class="note" style="color:var(--ink)">${detail}${result}</span>`;
+  el.innerHTML = `<span class="what">${ep.verdict ? "Last in control:" : "In control:"}</span>${tag(ep.controller, ep.checkpoint)}<span class="note">${detail}${result}</span>`;
 }
 
 function renderCamera() {
@@ -132,10 +133,10 @@ function logRow(row) {
 
 function decisionRow(row) {
   const outcome = !row.skill ? "" : row.ok === null ? '<span class="lat">running</span>' : row.ok ? '<span class="ok">executed</span>' : '<span class="no">failed</span>';
-  const latency = row.latency === null ? "" : `<span class="lat">${ms(row.latency)}</span>`;
+  const latency = row.latency === null ? "" : `<span class="lat">${duration(row.latency)}</span>`;
   const reason = row.reason ? `<div class="reason" title="${esc(row.reason)}">${esc(row.reason)}</div>` : '<div class="reason none">No reason given.</div>';
   const error = row.error ? `<div class="err">${esc(row.error)}</div>` : "";
-  return `<li class="${row.controller || "unknown"}"><span class="n">${esc(row.step ?? "")}</span><span class="skill">${skillText(row)}</span><span class="right">${latency}${outcome}</span>${reason}${error}</li>`;
+  return `<li class="${row.controller || "unknown"}"><span class="n">${esc(row.step ?? "")}</span><div class="line"><span class="skill">${skillText(row)}</span><span class="right">${latency}${outcome}</span></div>${reason}${error}</li>`;
 }
 
 function verdictRow(ep) {
@@ -201,7 +202,7 @@ function renderRounds() {
     const spoken = both ? `${first.successes} of ${first.n}, then ${last.successes} of ${last.n}` : `${first.successes} of ${first.n}`;
     const n = first.n === last.n ? `n=${last.n}${both ? " each" : ""}` : `n=${first.n} and n=${last.n}`;
     const span = both ? `${esc(first.checkpoint)} → ${esc(last.checkpoint)}` : esc(first.checkpoint);
-    const table = `<table><thead><tr><th>Checkpoint</th><th class="num">Successes</th><th class="num">n</th><th class="num">Rate</th></tr></thead><tbody>${rounds.map((r) => `<tr><td class="mono">${esc(r.checkpoint)}</td><td class="num">${esc(r.successes)}</td><td class="num">${esc(r.n)}</td><td class="num">${pct(r.successes, r.n)}</td></tr>`).join("")}</tbody></table>`;
+    const table = `<table><thead><tr><th>Checkpoint</th><th class="num">Successes</th><th class="num">Rate</th></tr></thead><tbody>${rounds.map((r) => `<tr><td class="mono">${esc(r.checkpoint)}</td><td class="num">${r.successes}/${r.n}</td><td class="num">${pct(r.successes, r.n)}</td></tr>`).join("")}</tbody></table>`;
     body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note">${span}</span></div>${table}`;
   }
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip(rounds.length > 0)}</header><div class="body">${body}</div>`;
