@@ -116,15 +116,14 @@ class FakeSim:
     def perturb(self, perturbation: Perturbation) -> bool:
         rng = np.random.default_rng(perturbation.seed)
         if perturbation.kind == "move_box":
-            if self.box_z != TABLE_Z or self.held:
+            if not self._box_loose_on_table():
                 return False
             self.box = _box_xy(rng)
             return True
         if self.box_z == BIN_Z:  # moving it would tip the box out
             return False
         bin_xy, bin_yaw = _bin_pose(rng, self.xy)
-        # A box on the floor is in the bin's way; one on the table or in the hands is above it.
-        if self.box_z < TABLE_Z and not self._clear_of_box(bin_xy, bin_yaw):
+        if self._box_can_block_bin() and not self._clear_of_box(bin_xy, bin_yaw):
             return False
         self.bin, self.bin_yaw = bin_xy, bin_yaw
         return True
@@ -194,6 +193,13 @@ class FakeSim:
 
     def _hands(self, forward: float) -> np.ndarray:
         return self.xy + _rot(self.heading, (forward, self.work_y))
+
+    def _box_loose_on_table(self) -> bool:
+        return self.box_z == TABLE_Z and not self.held
+
+    def _box_can_block_bin(self) -> bool:
+        """In the bin or on the floor, low enough to be in a bin's way; on the table or in the hands it is above one."""
+        return self.box_z < TABLE_Z
 
     def _clear_of_box(self, bin_xy: np.ndarray, bin_yaw: float) -> bool:
         """A bin at this pose would stand clear of the box, however the box is turned."""

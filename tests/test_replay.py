@@ -178,3 +178,12 @@ def test_one_broken_episode_does_not_stop_the_whole_run_replay(tmp_path: Path) -
     assert report.failures[0].reason.startswith("replay raised FileNotFoundError")
     assert _load(broken).replay_valid is False
     assert _load(good).replay_valid is True
+
+
+def test_replay_rejects_a_mid_run_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1603)
+    manifest = _load(path)
+    lift = next(i for i, s in enumerate(manifest.steps) if s.skill_call.skill == "lift")  # the box is held by then
+    manifest.perturbations = [PerturbationRecord(before_step=lift, perturbation=Perturbation(kind="move_box", seed=1))]
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)  # every step and the verdict still match: only the refused move tells

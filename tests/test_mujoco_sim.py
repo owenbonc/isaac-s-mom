@@ -246,9 +246,10 @@ def test_a_box_dropped_in_the_bin_is_accepted_only_once_at_rest(sim: MujocoSim) 
     assert validate(gt).accepted
 
 
-def test_a_box_pushed_into_the_table_is_flagged(sim: MujocoSim) -> None:
+@pytest.mark.parametrize("depth", [0.045, 0.05])  # shallower, the contact pushes it out before the first 20 ms tick
+def test_a_box_pushed_into_the_table_is_flagged(sim: MujocoSim, depth: float) -> None:
     start = sim.ground_truth().box_xyz
-    _put_box(sim, (start[0], start[1], start[2] - 0.05))
+    _put_box(sim, (start[0], start[1], start[2] - depth))
     sim.execute(SkillCall(skill="reobserve"))
     gt = sim.ground_truth()
     assert gt.penetration
@@ -517,4 +518,53 @@ def test_moving_the_bin_is_refused_while_the_box_is_in_it(sim: MujocoSim) -> Non
     before = sim.ground_truth()
     assert before.box_on_bin_floor
     assert not sim.perturb(Perturbation(kind="move_bin", seed=99))
+    assert sim.ground_truth() == before
+
+
+def test_a_box_landing_on_a_corner_is_contact_not_penetration(blind_sim: MujocoSim, tmp_path: Path) -> None:
+    # Seed 23 with the box moved first drops it corner-first, 2.1 cm into the bin floor for one step.
+    manifest = run_episode(
+        blind_sim,
+        OraclePolicy(blind_sim),
+        run_dir=tmp_path,
+        events=EventLog(tmp_path, "t"),
+        seed=23,
+        split="dev",
+        round_=0,
+        instruction="hug",
+        perturb_at=1,
+    )
+    assert manifest.validation and manifest.validation.accepted, manifest.validation
+
+
+def test_a_box_with_an_open_hand_against_it_still_moves(sim: MujocoSim) -> None:
+    box, pads = sim.model.geom("box").id, {sim.model.geom(f"{s}_hand_pad").id for s in ("left", "right")}
+    start = sim.ground_truth().box_xyz
+
+    def touching() -> set[int]:
+        return {g for c in sim.data.contact[: sim.data.ncon] for g in (c.geom1, c.geom2) if box in (c.geom1, c.geom2)}
+
+    for y in np.arange(start[1], 0.3, 0.005):  # slide it left until the open left pad touches it
+        _put_box(sim, (start[0], float(y), start[2]))
+        mujoco.mj_forward(sim.model, sim.data)
+        if touching() & pads:
+            break
+    assert touching() & pads and not sim.closed
+    before = sim.ground_truth().box_xyz
+    assert sim.perturb(Perturbation(kind="move_box", seed=99))
+    assert sim.ground_truth().box_xyz[:2] != pytest.approx(before[:2], abs=0.01)
+
+
+def test_a_moved_box_lands_between_the_open_hands(sim: MujocoSim) -> None:
+    assert sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 10})).ok
+    for seed in range(10):
+        assert sim.perturb(Perturbation(kind="move_box", seed=seed))
+        assert abs(sim.ground_truth().box_xyz[1] - sim.work_y) <= 0.10 + 1e-6, f"move_box seed {seed}"
+        sim.execute(SkillCall(skill="reobserve"))  # let it settle onto the table before the next move
+
+
+def test_moving_the_bin_onto_the_robot_is_refused(sim: MujocoSim, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr("isaacs_mom.sim.mujoco.sim.bin_pose", lambda rng: ((0.0, 0.0), 0.0))  # where it stands
+    before = sim.ground_truth()
+    assert not sim.perturb(Perturbation(kind="move_bin", seed=0))
     assert sim.ground_truth() == before

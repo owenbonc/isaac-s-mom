@@ -293,6 +293,7 @@ version = "0.1.0"
 source = { editable = "." }
 dependencies = [
     { name = "google-genai" },
+    { name = "httpx2" },
     { name = "mujoco" },
     { name = "numpy" },
     { name = "pillow" },
@@ -309,6 +310,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "google-genai", specifier = ">=3.0.0" },
+    { name = "httpx2", specifier = ">=2.16.0" },
     { name = "mujoco", specifier = ">=3.3" },
     { name = "numpy", specifier = ">=2.0" },
     { name = "pillow", specifier = ">=11.0" },

@@ -257,7 +257,7 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
     calls: list[object] = []
 
     def fake_argon(events: EventLog) -> Argon:
-        return Argon(events, generate=lambda parts: calls.append(parts) or '{"done": true}')
+        return Argon(events, generate=lambda purpose, parts: calls.append(parts) or '{"done": true}')
 
     results = run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=2, dev_trials=2, make_argon=fake_argon)
     assert calls  # the teacher ran, on the fake: no live Gemini call even with a key in .env

@@ -21,36 +21,36 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 ## 3. The system
 
 ### 3.1 Simulation (workstream 1)
-- **MuJoCo** (organisers' Option A), running in-process on every teammate's Mac. Modal is used only for fine-tuning.
-- Task: hug a big box (30 × 25 × 25 cm, 0.8 kg) off a table with both arms, lift it, walk it to a bin across the room and drop it in.
-- Robot: Unitree G1 (29 DoF) from MuJoCo Menagerie with its floating base. Its legs run Unitree's pretrained walking policy (unitree_rl_gym `motion.pt`, BSD-3-Clause, run in numpy from `assets/unitree_g1_walk/policy.npz`) for the whole episode: it steps in place to hold its spot while the arms work, and walks or turns on command. Arms are joint-position controlled. Collision pads on the hands, since Menagerie's hands are visual only. A table, an orange box, and a green bin on a pedestal 1.0–1.4 m from the robot, beside or behind it, never ahead where the table is.
-- One head-mounted RGB camera, 320×240, tilted 45° down with a 100° vertical field of view, rendered with `mujoco.Renderer`. It sees the hands at the box during the hug, the bin above the carried box from ~1.1 m out, and the bin under the box at placing distance.
-- Skills (whitelist): `reach_left`, `reach_right` (slide the arms' working point sideways, `distance_cm` default 5, within ±12 cm), `walk_forward`, `walk_back` (`distance_cm` 0–150, default 30), `turn_left`, `turn_right` (turn the whole body by stepping, `angle_deg` 0–180, default 30), `hug`, `lift` (7 cm, just clear of the table, so the box doesn't hide the bin), `place` (push the box out, lower, let go, settle 3 s), `reobserve`. Damped least-squares IK (holding the hands' grip orientation while they carry the box) plus a joint-position controller turns an arm skill into simulator steps; a skill whose IK target is out of reach, that would pass the reach limit, or that would walk the robot into the table or within 42 cm of the bin's centre is refused with a reason and nothing moves (rule 7).
-- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading) is a pure function of the seed and the task; `move_bin` puts the bin at the task's distance from wherever the robot is then. `perturb` moves only a box resting on the table out of the robot's hands, and puts the bin only where it touches nothing and never while the box is in it; otherwise it refuses, nothing moves, and it returns False. FakeSim follows the same rule.
-- Tasks (`sim/mujoco/task.py`): a `TaskConfig` sets the box's size, mass and starting offset and the bin's distance and bearing, and refuses settings the G1 can't do. Presets: `across_room` (the default: bin 1.0–1.4 m away), `centred_box`, `near_bin` (0.7–0.9 m), `heavy_box` (2 kg), `small_box`, `far_bin` (1.6–2.2 m). Skills and the success rule are the same in every task. The task name is part of `sim_version`, so a manifest replays only on the task it was recorded in. `mom run --task <preset>` picks one; FakeSim plays the default only.
+- **MuJoCo** (organisers' Option A), running in-process on every teammate's machine (Macs and the Windows machines). Modal is used only for fine-tuning.
+- Task: hug a big box (30 × 25 × 25 cm, 0.8 kg) off a table with both arms, lift it, twist to the bin beside the robot and drop it in.
+- Robot: Unitree G1 (29 DoF) from MuJoCo Menagerie, free-standing: it keeps its floating base and balances on its own feet under joint-position control, in Unitree's soft-knee standing pose. It does not walk; it reaches the bin by twisting at the waist. Collision pads on the hands, since Menagerie's hands are visual only. A table, an orange box, a green bin on the robot's left.
+- One head-mounted RGB camera, 320×240, rendered with `mujoco.Renderer`.
+- Skills (whitelist): `reach_left`, `reach_right` (slide the arms' working point sideways, `distance_cm` 0–20, default 5, within ±12 cm), `turn_left`, `turn_right` (twist the waist, `angle_deg` 0–45, default 30, within ±150°), `hug`, `lift`, `place` (reach out over the bin, lower, let go, settle 2.5 s), `reobserve`. Damped least-squares IK plus a joint-position controller turns a skill into simulator steps; a skill whose IK target is out of reach, or that would pass a reach or twist limit, is refused with a reason and nothing moves (rule 7).
+- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading beside the robot) is a pure function of the seed. `perturb` moves only a box resting on the table out of the robot's hands, and puts the bin only where it touches nothing; otherwise it refuses and nothing moves. FakeSim follows the same rule.
 - `FakeSim` (foundation) implements the same protocol with drawn frames and trivial physics so every other workstream and CI build without the real scene.
 - The demo video is recorded from the rendered frames (head camera next to a third-person camera), not screen capture.
 
 ### 3.2 Student (workstream 4)
-- SmolVLM2-500M-Video-Instruct, local (Mac MPS or the 4070 Ti laptop). `predict_skill(obs, instruction, feedback) -> SkillCall`, output parsed as JSON and checked against the whitelist; an unparseable answer becomes `reobserve` and is logged.
+- SmolVLM2-500M-Video-Instruct, local: Mac MPS, or CUDA on the Windows RTX 5070 and 5060 machines. `predict_skill(obs, instruction, feedback) -> SkillCall`, output parsed as JSON and checked against the whitelist; an unparseable answer becomes `reobserve` and is logged.
+- Done rule: `StudentPolicy.act` returns `None` after its second `reobserve` in a row, which ends the episode; two unparseable answers in a row therefore end it too. The student learns to stop from the teacher's demonstrations, which end with one `reobserve` (§3.3).
 - Fine-tuning: LoRA on Modal A10G (`student/finetune_modal.py`), on training examples (§4.3). Each round produces a checkpoint id `ckpt-r<round>`; `ckpt-r0` is the base model.
 
 ### 3.3 Teacher (workstream 2)
 - Argon (`gemini-4-argon`, Gemini API) with a typed tool adapter over `RobotSim`.
 - `diagnose(failure) -> Diagnosis`: from the failed episode's frames, skill calls, and the validator's reason, a failure hypothesis with evidence and confidence.
-- `demonstrate(seed, instruction, diagnosis) -> Episode`: drives the robot skill by skill from fresh camera frames until done or the step limit (20), re-observing after every skill so a mid-run change alters the next decision.
-- `choose_scenes(diagnoses, n) -> list[int]`: picks development seeds that target the diagnosed failure. Rejects held-out seeds.
-- If Argon is unreachable or over budget, the robot holds and re-observes, and the run reports it.
+- `demonstrate(seed, instruction, diagnosis) -> Episode`: drives the robot skill by skill from fresh camera frames until done or the step limit (20), reading the new frame after every skill so a mid-run change alters the next decision. A demonstration ends with exactly one `reobserve`, then stops; it never records two `reobserve`s in a row before the end (the student's done rule, §3.2).
+- `choose_scenes(failures, n) -> list[int]`: the development seeds whose student trials the validator rejected, then fresh development seeds up to `n`. It reads only validator verdicts, never layout or ground truth (rule 1), and rejects held-out seeds. Stretch, if time allows: Argon picks seeds from the head-camera first frames of candidate development seeds.
+- If Argon is unreachable (5xx, rate limit, transport error, unusable answer), the teacher asks again on the same frame, waiting between attempts (honouring `Retry-After`), up to 3 attempts per step; then the demonstration ends with its one closing `reobserve`. Over budget, it ends at once with its closing `reobserve`. Every attempt counts against the budget and is logged as an `argon_call`. A missing key or a setup error (any other 4xx) stops the run instead. `mom run` prints a summary of Argon calls used out of the budget, unavailable answers, and whether the budget ran out.
 
 ### 3.4 Validator and recorder (workstream 3)
-- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest (neither moving nor turning) for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration. The reason lists every problem found, separated by "; ", in words and without measurements (rule 1): `robot fell`, `joint limit violated`, `penetration`, `box short of the bin`, `box past the bin`, `box on the rim`, `box still moving`. An episode the recorder refused gets `recording error: <why>` and counts as its own rejection kind.
+- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest (neither moving nor turning) for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration. The reason lists every problem found, separated by "; ", in words and without measurements (rule 1): `robot fell`, `joint limit violated`, `penetration`, `box short of the bin`, `box past the bin`, `box left of the bin`, `box right of the bin`, `box short-left of the bin`, `box short-right of the bin`, `box past-left of the bin`, `box past-right of the bin`, `box on the rim`, `box still moving`. Directions are in the robot's torso heading at the end of the episode, so they match the head-camera view: short and past are nearer and farther than the bin along the heading, left and right are across it. An axis is named only when the box's centre is beyond `bin_inner_half` from the bin's centre along it. An episode the recorder refused gets `recording error: <why>` and counts as its own rejection kind.
 - Recorder writes `runs/<run_id>/episodes/<episode_id>/` (manifest §4.2, frames as JPEG, actions as `.npy`) and `runs/<run_id>/events.jsonl`. The manifest is rewritten after every step, so a crashed episode keeps its steps with `validation: null`; a step whose executed actions and timestamps differ in count or go back in time is refused.
 - `build_training_set(run_id, round) -> path` applies rules 2 and 3, and writes `training_r<round>.summary.json` (`TrainingSetSummary`: demonstrations seen, accepted, rejected by problem kind, unfinished, empty dev episodes, examples).
 - `replay(sim, manifest_path)` re-executes the stored skill calls and perturbations from the stored seed and reports whether the executed actions and the final verdict reproduce; it sets `replay_valid`, and fails when a recorded perturbation no longer applies. `replay_accepted(sim, run_dir)` replays every accepted episode in a run and writes `replay_report.json` (`ReplayReport`: reproduced out of replayed, with a reason for each failure); a failure or exception in one episode is recorded there and sets `replay_valid=false`, never raised.
 
 ### 3.5 Orchestrator, dashboard, demo (workstream 5)
-- One command, `uv run mom run`, executes the loop (§3.6) and writes events.
-- Dashboard (FastAPI plus one HTML page, server-sent events): live head camera, the current controller (student checkpoint or teacher), each decision with its reasoning, validator verdicts, the success-rate table per round, and where each model runs with its measured latency.
+- One command, `uv run mom run`, executes the loop (§3.6) and writes events. A step the recorder refuses doesn't stop the run: `run_episode` emits an `error` event and finishes that episode as rejected with `recording error: <why>`. A held-out evaluation episode that errors is reported as errored, not as a student failure: the success rate is successes out of (n − errored), with the errored count shown.
+- Dashboard (FastAPI plus one HTML page, server-sent events): live head camera, the current controller (student checkpoint or teacher), each decision with its reasoning, validator verdicts, the success-rate table per round (successes out of n, with errored episodes shown apart), each round's training-set summary (read from `training_r<round>.summary.json`), the run's replay result (reproduced out of replayed, from `replay_report.json`), and where each model runs with its measured latency.
 - `uv run mom demo --ckpt <id> --seed <s> --perturb-at <step>` runs the judged single take: student on an unseen scene, a perturbation mid-run, re-observe, finish.
 - Perturbations (`move_box`, `move_bin`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame. Only an applied perturbation is recorded and emitted as a `perturbation` event; a refused one is an `error` event.
 
@@ -60,7 +60,8 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 3. Teacher diagnoses the failures and chooses 20 development seeds; demonstrates each; the validator accepts or rejects.
 4. Build the training set from accepted teacher episodes of all rounds so far; LoRA fine-tune; new checkpoint.
 5. Repeat from 1 until held-out success ≥ 80% or 3 rounds.
-6. If time allows, B1: the same budget of randomly chosen seeds demonstrated by the teacher, fine-tuned and evaluated the same way.
+6. Replay every accepted episode of the run (`replay_accepted`) after the loop's results are saved.
+7. If time allows, B1: the same budget of randomly chosen seeds demonstrated by the teacher, fine-tuned and evaluated the same way.
 
 ## 4. Contracts
 
@@ -82,7 +83,7 @@ class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
 - `Observation{episode_id, step, sim_time, head_rgb_jpeg: bytes, joint_state: list[float]}`
 - `SkillTarget{skill: Skill, params: dict[str, float]}`; `SkillCall(SkillTarget){reason: str}`, where `reason` is shown on the dashboard and never trained on; `ExecResult{ok, error, executed_actions: list[list[float]], timestamps: list[float]}`
 - `Perturbation{kind: move_box | move_bin, seed}`
-- `GroundTruth{box_xyz, bin_xy, bin_yaw, bin_inner_half, box_on_bin_floor, box_at_rest, robot_fallen, joint_limit_violation, penetration, robot_xy, robot_yaw}` (`robot_xy`: the pelvis's floor position; `robot_yaw`: the torso's heading, which the head camera shares, so a miss can be named as the camera sees it)
+- `GroundTruth{box_xyz, bin_xy, bin_yaw, bin_inner_half, box_on_bin_floor, box_at_rest, robot_fallen, joint_limit_violation, penetration, robot_xy, robot_yaw}`, where `robot_xy` is the pelvis floor position and `robot_yaw` the torso heading, which the validator uses for the miss direction (§3.4)
 - `Validation{task_success, physics_valid, reason}` is computed by the validator from `GroundTruth`.
 
 ### 4.2 Episode manifest (`manifest.json`)
@@ -142,11 +143,13 @@ docs/                        one-page summary, pitch
 
 | Risk | Fallback | Decide by |
 |---|---|---|
-| G1 hug slips or the robot falls while walking | Lighter box, slower walking (the scripted policy succeeds on 40 of 40 seeds now, 0 falls) | Sat 21:00 |
+| G1 hug slips or the robot tips while twisting | Lighter box, smaller twist range (the scripted policy succeeds on 36 of 40 seeds now) | Sat 21:00 |
 | Rendering on CI | `MUJOCO_GL=osmesa`; real-scene tests skip with a reason when no GL is available | Sat 17:00 |
 | SmolVLM2 too weak to fine-tune usefully | Report the measured result honestly; demo leans on the validated data pipeline | Sun 06:00 |
 | Argon latency or tool mismatch | Fewer, coarser skills per call | Sat 23:00 |
 | Remote Argon costs autonomy points | The demo run uses the fine-tuned local student; Argon only teaches | — |
+| Walking (the G1 carries the box across the room) is unproven with the real teacher | Stay on the fixed-feet task. Trial: the real Argon teacher on the same 10 development seeds of each task; walking replaces it only at ≥ 6/10 accepted and a median of ≤ 12 Argon calls per demonstration | Sat 23:00 |
+| Fixed `hug`, `lift`, `place` can't be corrected by the teacher | Add only the parameter that the trial's rejected teacher demonstrations call for (e.g. grip width for slips, lift height for rim hits), with a per-skill cap and tests; no speed parameter | Sat 23:00 |
 
 ## 9. Later phases (not built now)
 
