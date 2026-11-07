@@ -11,7 +11,7 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.video import record
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
-from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.teacher.argon import Argon, stub_generate
 
 
 def jpeg(colour: tuple[int, int, int], size: tuple[int, int]) -> bytes:
@@ -21,7 +21,7 @@ def jpeg(colour: tuple[int, int, int], size: tuple[int, int]) -> bytes:
 
 
 def done_argon(events: EventLog) -> Argon:
-    return Argon(events, generate=lambda parts: '{"done": true}')  # no network in tests
+    return Argon(events, generate=stub_generate)  # no network in tests
 
 
 def frame_count(path: Path) -> int:

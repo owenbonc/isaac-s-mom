@@ -2,8 +2,10 @@ import argparse
 import time
 from pathlib import Path
 
+from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
+from isaacs_mom.teacher.argon import Argon, stub_generate
 
 
 def make_sim(name: str) -> TruthSim:
@@ -33,6 +35,12 @@ def main() -> None:
     demo.add_argument("--perturb-at", type=int, required=True)
     demo.add_argument("--out", type=Path, default=Path("demo.mp4"))
     demo.add_argument("--run-id", default=time.strftime("demo-%Y%m%d-%H%M%S"))
+    for command in (run, demo):
+        command.add_argument(
+            "--teacher",
+            choices=["argon", "stub"],
+            help="stub: no Argon calls and no key; the default on --sim fake, so the skeleton run needs no key",
+        )
     args = parser.parse_args()
 
     if args.command == "dashboard":
@@ -40,6 +48,13 @@ def main() -> None:
 
         serve(args.run, args.port)
         return
+    teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
+    argons: list[Argon] = []
+
+    def make_argon(events: EventLog) -> Argon:
+        argons.append(Argon(events, generate=stub_generate if teacher == "stub" else None))
+        return argons[-1]
+
     if args.command == "demo":
         from isaacs_mom.orchestrator.demo import run_demo
 
@@ -52,13 +67,15 @@ def main() -> None:
             out=args.out,
             run_dir=run_dir,
             run_id=args.run_id,
+            make_argon=make_argon,
         )
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
 
     run_dir = Path("runs") / args.run_id
-    results = run_loop(make_sim(args.sim), run_dir, args.run_id, max_rounds=args.rounds)
+    results = run_loop(make_sim(args.sim), run_dir, args.run_id, max_rounds=args.rounds, make_argon=make_argon)
     for r in results:
         print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")
+    print(argons[0].summary() + (" (stub teacher)" if teacher == "stub" else ""))
     print(f"run saved to {run_dir}")

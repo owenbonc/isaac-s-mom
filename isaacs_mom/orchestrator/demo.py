@@ -41,8 +41,8 @@ class _ThirdPersonCapture:
     def ground_truth(self) -> GroundTruth:
         return self._sim.ground_truth()
 
-    def perturb(self, perturbation: Perturbation) -> None:
-        self._sim.perturb(perturbation)
+    def perturb(self, perturbation: Perturbation) -> bool:
+        return self._sim.perturb(perturbation)
 
     def render_third_person(self) -> bytes:
         return self._sim.render_third_person()
