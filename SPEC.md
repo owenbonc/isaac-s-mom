@@ -22,11 +22,11 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 
 ### 3.1 Simulation (workstream 1)
 - **MuJoCo** (organisers' Option A), running in-process on every teammate's Mac. Modal is used only for fine-tuning.
-- Task: hug a big box (30 × 25 × 25 cm, 0.8 kg) off a table with both arms, lift it, twist to the bin beside the robot and drop it in.
-- Robot: Unitree G1 (29 DoF) from MuJoCo Menagerie, free-standing: it keeps its floating base and balances on its own feet under joint-position control, in Unitree's soft-knee standing pose. It does not walk; it reaches the bin by twisting at the waist. Collision pads on the hands, since Menagerie's hands are visual only. A table, an orange box, a green bin on the robot's left.
-- One head-mounted RGB camera, 320×240, rendered with `mujoco.Renderer`.
-- Skills (whitelist): `reach_left`, `reach_right` (slide the arms' working point sideways, `distance_cm` 0–20, default 5, within ±12 cm), `turn_left`, `turn_right` (twist the waist, `angle_deg` 0–45, default 30, within ±150°), `hug`, `lift`, `place` (reach out over the bin, lower, let go, settle 2.5 s), `reobserve`. Damped least-squares IK plus a joint-position controller turns a skill into simulator steps; a skill whose IK target is out of reach, or that would pass a reach or twist limit, is refused with a reason and nothing moves (rule 7).
-- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading beside the robot) is a pure function of the seed.
+- Task: hug a big box (30 × 25 × 25 cm, 0.8 kg) off a table with both arms, lift it, walk it to a bin across the room and drop it in.
+- Robot: Unitree G1 (29 DoF) from MuJoCo Menagerie with its floating base. Its legs run Unitree's pretrained walking policy (unitree_rl_gym `motion.pt`, BSD-3-Clause, run in numpy from `assets/unitree_g1_walk/policy.npz`) for the whole episode: it steps in place to hold its spot while the arms work, and walks or turns on command. Arms are joint-position controlled. Collision pads on the hands, since Menagerie's hands are visual only. A table, an orange box, and a green bin on a pedestal 1.0–1.4 m from the robot, beside or behind it, never ahead where the table is.
+- One head-mounted RGB camera, 320×240, tilted 45° down with a 100° vertical field of view, rendered with `mujoco.Renderer`. It sees the hands at the box during the hug, the bin above the carried box from ~1.1 m out, and the bin under the box at placing distance.
+- Skills (whitelist): `reach_left`, `reach_right` (slide the arms' working point sideways, `distance_cm` default 5, within ±12 cm), `walk_forward`, `walk_back` (`distance_cm` 0–150, default 30), `turn_left`, `turn_right` (turn the whole body by stepping, `angle_deg` 0–180, default 30), `hug`, `lift` (7 cm, just clear of the table, so the box doesn't hide the bin), `place` (push the box out, lower, let go, settle 3 s), `reobserve`. Damped least-squares IK (holding the hands' grip orientation while they carry the box) plus a joint-position controller turns an arm skill into simulator steps; a skill whose IK target is out of reach, that would pass the reach limit, or that would walk the robot into the table or within 40 cm of the bin's centre is refused with a reason and nothing moves (rule 7).
+- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading) is a pure function of the seed; `move_bin` puts the bin 1.0–1.4 m from wherever the robot is then.
 - `FakeSim` (foundation) implements the same protocol with drawn frames and trivial physics so every other workstream and CI build without the real scene.
 - The demo video is recorded from the rendered frames (head camera next to a third-person camera), not screen capture.
 
@@ -141,7 +141,7 @@ docs/                        one-page summary, pitch
 
 | Risk | Fallback | Decide by |
 |---|---|---|
-| G1 hug slips or the robot tips while twisting | Lighter box, smaller twist range (the scripted policy succeeds on 36 of 40 seeds now) | Sat 21:00 |
+| G1 hug slips or the robot falls while walking | Lighter box, slower walking (the scripted policy succeeds on 40 of 40 seeds now, 0 falls) | Sat 21:00 |
 | Rendering on CI | `MUJOCO_GL=osmesa`; real-scene tests skip with a reason when no GL is available | Sat 17:00 |
 | SmolVLM2 too weak to fine-tune usefully | Report the measured result honestly; demo leans on the validated data pipeline | Sun 06:00 |
 | Argon latency or tool mismatch | Fewer, coarser skills per call | Sat 23:00 |

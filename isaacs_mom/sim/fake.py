@@ -1,7 +1,7 @@
 """FakeSim: a top-down 2D stand-in for the MuJoCo scene so every workstream and CI can run the loop.
 
-It mirrors MujocoSim's skills with trivial physics: the hug catches the box only when the hands are lined up with it
-and the waist faces the table, and `place` drops it where the hands are, into the bin or onto the floor.
+It mirrors MujocoSim's skills with trivial physics: the robot walks and turns exactly as told, the hug catches the box
+only when the hands are lined up with it, and `place` drops it where the hands are, into the bin or onto the floor.
 """
 
 import io
@@ -13,40 +13,53 @@ from PIL import Image, ImageDraw
 
 from isaacs_mom.contracts import ExecResult, GroundTruth, Observation, Perturbation, SkillCall
 
-BOX_X = 0.34  # metres forward of the robot, where the arms work
+BOX_X = 0.34  # metres ahead of the robot, where the arms work
 BOX_HALF = (0.125, 0.15)
-BIN_INNER_HALF = 0.22
-PLACE_X = 0.38
+TABLE_CENTER, TABLE_HALF = (0.40, 0.0), (0.2, 0.25)
+BIN_INNER_HALF, BIN_WALL = 0.22, 0.02
+BIN_DIST = (1.0, 1.4)
+BIN_BEARING = (math.radians(75), math.radians(285))
+TABLE_CLEARANCE = 0.45
+PLACE_X = 0.40
 REACH_LIMIT = 0.12
-TURN_LIMIT = math.radians(150)
 HUG_TOLERANCE = 0.03
+TABLE_KEEP_OUT = 0.15
+BIN_KEEP_OUT = PLACE_X
 DEFAULT_REACH_CM = 5.0
+DEFAULT_WALK_CM = 30.0
 DEFAULT_TURN_DEG = 30.0
 STEPS_PER_SKILL = 10
 DT = 0.02
-TABLE_Z, HELD_Z, BIN_Z, FLOOR_Z = 0.845, 0.965, 0.445, 0.125
+TABLE_Z, HELD_Z, BIN_Z, FLOOR_Z = 0.845, 0.915, 0.445, 0.125
 SIZE = (320, 240)
-VIEW = 0.6  # metres from the robot to the image edge
+VIEW = 1.6  # metres from the robot to the image's top and bottom edges
+
+
+def _rot(angle: float, p: tuple[float, float] | np.ndarray) -> np.ndarray:
+    c, s = math.cos(angle), math.sin(angle)
+    return np.array([c * p[0] - s * p[1], s * p[0] + c * p[1]])
+
+
+def _table_clearance(xy: np.ndarray) -> float:
+    gap = np.maximum(np.abs(xy - TABLE_CENTER) - TABLE_HALF, 0.0)
+    return float(np.linalg.norm(gap))
 
 
 def _box_xy(rng: np.random.Generator) -> np.ndarray:
     return np.array([BOX_X + rng.uniform(-0.02, 0.02), rng.uniform(-0.1, 0.1)])
 
 
-def _bin_pose(rng: np.random.Generator) -> tuple[np.ndarray, float]:
-    angle = rng.uniform(math.radians(97), math.radians(112))
-    dist = rng.uniform(0.43, 0.45)
-    return np.array([dist * math.cos(angle), dist * math.sin(angle)]), angle
-
-
-def _rot(angle: float, p: tuple[float, float]) -> np.ndarray:
-    c, s = math.cos(angle), math.sin(angle)
-    return np.array([c * p[0] - s * p[1], s * p[0] + c * p[1]])
+def _bin_pose(rng: np.random.Generator, around: np.ndarray) -> tuple[np.ndarray, float]:
+    while True:
+        bearing = rng.uniform(*BIN_BEARING)
+        xy = around + rng.uniform(*BIN_DIST) * np.array([math.cos(bearing), math.sin(bearing)])
+        if _table_clearance(xy) > BIN_INNER_HALF + BIN_WALL + TABLE_CLEARANCE:
+            return xy, bearing
 
 
 class FakeSim:
-    sim_version = "fake-2"
-    robot_config = "fake-hugger-2d"
+    sim_version = "fake-3"
+    robot_config = "fake-walker-2d"
 
     def __init__(self) -> None:
         self.reset(0)
@@ -55,10 +68,10 @@ class FakeSim:
         rng = np.random.default_rng(seed)
         self.episode_id = f"ep-{seed}-{uuid.uuid4().hex[:6]}"
         self.box = _box_xy(rng)
-        self.bin, self.bin_yaw = _bin_pose(rng)
+        self.bin, self.bin_yaw = _bin_pose(rng, np.zeros(2))
         self.box_z = TABLE_Z
+        self.xy, self.heading = np.zeros(2), 0.0
         self.work_y = 0.0
-        self.waist = 0.0
         self.closed = self.lifted = self.held = False
         self.step = 0
         self.sim_time = 0.0
@@ -70,7 +83,7 @@ class FakeSim:
             step=self.step,
             sim_time=self.sim_time,
             head_rgb_jpeg=self._render(),
-            joint_state=[self.work_y, self.waist, float(self.closed), float(self.lifted)],
+            joint_state=self._joints(),
         )
 
     def execute(self, call: SkillCall) -> ExecResult:
@@ -81,7 +94,7 @@ class FakeSim:
         actions, timestamps = [], []
         for _ in range(STEPS_PER_SKILL):
             self.sim_time += DT
-            actions.append([self.work_y, self.waist, float(self.closed), float(self.lifted)])
+            actions.append([*self.xy, self.heading, *self._joints()])
             timestamps.append(self.sim_time)
         return ExecResult(ok=True, executed_actions=actions, timestamps=timestamps)
 
@@ -104,10 +117,17 @@ class FakeSim:
             if self.box_z == TABLE_Z and not self.held:
                 self.box = _box_xy(rng)
         else:
-            self.bin, self.bin_yaw = _bin_pose(rng)
+            self.bin, self.bin_yaw = _bin_pose(rng, self.xy)
 
     def render_third_person(self) -> bytes:
         return self._render()
+
+    def pose(self) -> tuple[float, float, float]:
+        """The robot's floor pose (x, y, heading), for tests; the agents never see it."""
+        return float(self.xy[0]), float(self.xy[1]), self.heading
+
+    def _joints(self) -> list[float]:
+        return [self.work_y, float(self.closed), float(self.lifted)]
 
     def _apply(self, call: SkillCall) -> str | None:
         match call.skill:
@@ -115,22 +135,23 @@ class FakeSim:
                 sign = 1.0 if call.skill == "reach_left" else -1.0
                 work_y = self.work_y + sign * call.params.get("distance_cm", DEFAULT_REACH_CM) / 100
                 if abs(work_y) > REACH_LIMIT + 1e-9:
-                    return f"{call.skill}: would reach {abs(work_y) * 100:.0f} cm off-centre"
+                    return f"{call.skill}: past the {REACH_LIMIT * 100:.0f} cm reach limit"
                 self.work_y = work_y
-                if self.held:
-                    self.box = self._hands(BOX_X)
+            case "walk_forward" | "walk_back":
+                sign = 1.0 if call.skill == "walk_forward" else -1.0
+                step = sign * call.params.get("distance_cm", DEFAULT_WALK_CM) / 100
+                goal = self.xy + _rot(self.heading, (step, 0.0))
+                error = self._blocked(goal)
+                if error:
+                    return f"{call.skill}: {error}"
+                self.xy = goal
             case "turn_left" | "turn_right":
                 sign = 1.0 if call.skill == "turn_left" else -1.0
-                waist = self.waist + sign * math.radians(call.params.get("angle_deg", DEFAULT_TURN_DEG))
-                if abs(waist) > TURN_LIMIT:
-                    return f"{call.skill}: would twist {math.degrees(abs(waist)):.0f} deg"
-                self.waist = waist
-                if self.held:
-                    self.box = self._hands(BOX_X)
+                self.heading += sign * math.radians(call.params.get("angle_deg", DEFAULT_TURN_DEG))
             case "hug":
-                facing_table = abs(self.waist) < math.radians(5)
-                lined_up = abs(self.work_y - self.box[1]) < HUG_TOLERANCE
-                self.held = facing_table and lined_up and self.box_z == TABLE_Z
+                local = _rot(-self.heading, self.box - self.xy)
+                lined_up = abs(local[0] - BOX_X) < HUG_TOLERANCE and abs(local[1] - self.work_y) < HUG_TOLERANCE
+                self.held = lined_up and self.box_z == TABLE_Z
                 self.closed = True
             case "lift":
                 self.lifted = True
@@ -143,13 +164,28 @@ class FakeSim:
                 self.closed = self.lifted = self.held = False
             case "reobserve":
                 pass
+        if self.held:
+            self.box = self._hands(BOX_X)
+        return None
+
+    def _blocked(self, goal: np.ndarray) -> str | None:
+        gaps = {
+            "the table": lambda p: _table_clearance(p) - TABLE_KEEP_OUT,
+            "the bin": lambda p: float(np.linalg.norm(p - self.bin)) - BIN_KEEP_OUT,
+        }
+        for name, gap in gaps.items():
+            start = gap(self.xy)
+            for a in np.linspace(0.0, 1.0, 21)[1:]:
+                g = gap(self.xy + a * (goal - self.xy))
+                if g < 0 and g < start - 1e-6:
+                    return f"would walk into {name}"
         return None
 
     def _hands(self, forward: float) -> np.ndarray:
-        return _rot(self.waist, (forward, self.work_y))
+        return self.xy + _rot(self.heading, (forward, self.work_y))
 
     def _over_bin(self) -> bool:
-        local = _rot(-self.bin_yaw, (self.box[0] - self.bin[0], self.box[1] - self.bin[1]))
+        local = _rot(-self.bin_yaw, self.box - self.bin)
         return bool(np.all(np.abs(local) <= BIN_INNER_HALF - min(BOX_HALF)))
 
     def _render(self) -> bytes:
@@ -158,24 +194,25 @@ class FakeSim:
         scale = SIZE[1] / (2 * VIEW)
 
         def px(xy: np.ndarray) -> tuple[float, float]:
-            # Top-down with the robot at the centre: forward (+x) is up, left (+y) is left.
-            return SIZE[0] / 2 - xy[1] * scale, SIZE[1] / 2 - xy[0] * scale
+            # Top-down around the robot, turned with it: ahead is up and its left is left.
+            local = _rot(-self.heading, xy - self.xy)
+            return SIZE[0] / 2 - local[1] * scale, SIZE[1] / 2 - local[0] * scale
 
         def square(centre: np.ndarray, half: tuple[float, float], yaw: float, fill: tuple[int, int, int]) -> None:
             corners = [(half[0], half[1]), (-half[0], half[1]), (-half[0], -half[1]), (half[0], -half[1])]
             draw.polygon([px(centre + _rot(yaw, c)) for c in corners], fill=fill)
 
-        square(np.array([0.40, 0.0]), (0.2, 0.25), 0.0, (160, 115, 75))
+        square(np.array(TABLE_CENTER), TABLE_HALF, 0.0, (160, 115, 75))
         square(self.bin, (BIN_INNER_HALF, BIN_INNER_HALF), self.bin_yaw, (65, 160, 90))
         box_colour = (205, 85, 45) if self.box_z != FLOOR_Z else (120, 60, 40)
-        square(self.box, BOX_HALF, self.waist if self.held else 0.0, box_colour)
+        square(self.box, BOX_HALF, self.heading if self.held else 0.0, box_colour)
         half = 0.135 if self.closed else 0.30
         for sign in (1.0, -1.0):
-            hu, hv = px(_rot(self.waist, (BOX_X, self.work_y + sign * half)))
-            r = 9 if self.lifted else 6
+            hu, hv = px(self._hands(BOX_X) + _rot(self.heading, (0.0, sign * half)))
+            r = 6 if self.lifted else 4
             draw.ellipse((hu - r, hv - r, hu + r, hv + r), fill=(60, 60, 60))
-        cu, cv = px(np.zeros(2))
-        draw.ellipse((cu - 14, cv - 14, cu + 14, cv + 14), fill=(230, 230, 235), outline=(90, 90, 90))
+        cu, cv = px(self.xy)
+        draw.ellipse((cu - 10, cv - 10, cu + 10, cv + 10), fill=(230, 230, 235), outline=(90, 90, 90))
         out = io.BytesIO()
         image.save(out, format="JPEG", quality=85)
         return out.getvalue()

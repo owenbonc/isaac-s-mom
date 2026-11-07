@@ -1,5 +1,6 @@
 """Workstream 1: the real MuJoCo scene (SPEC §6 Gate A, rule 7). Skipped with a reason where nothing can render."""
 
+import math
 from pathlib import Path
 
 import numpy as np
@@ -12,7 +13,7 @@ from isaacs_mom.validator import replay, validate
 
 try:
     from isaacs_mom.sim.mujoco import MujocoSim
-    from isaacs_mom.sim.mujoco.preview import OraclePolicy
+    from isaacs_mom.sim.mujoco.preview import OraclePolicy, run_scripted
 
     SIM = MujocoSim()
 except Exception as e:  # a missing GL context (e.g. no osmesa) surfaces as several exception types
@@ -42,7 +43,43 @@ def test_hug_and_lift_raise_the_box_with_physics(sim: MujocoSim) -> None:
     result = sim.execute(SkillCall(skill="lift"))
     assert result.ok and len(result.executed_actions) == len(result.timestamps) > 0
     assert np.all(np.diff(result.timestamps) > 0)
-    assert sim.ground_truth().box_xyz[2] > start[2] + 0.05  # clear of the table, though it slips a little in the hug
+    assert sim.ground_truth().box_xyz[2] > start[2] + 0.025  # clear of the table; the hands sag a little as it steps
+    assert not sim.ground_truth().robot_fallen
+
+
+def test_walk_forward_goes_the_requested_distance_on_its_own_feet(sim: MujocoSim) -> None:
+    sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90}))
+    x, y, heading = sim.pose()
+    result = sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 60}))
+    x2, y2, heading2 = sim.pose()
+    assert result.ok
+    assert math.hypot(x2 - x, y2 - y) == pytest.approx(0.60, abs=0.05)
+    assert abs(math.remainder(heading2 - heading, math.tau)) < math.radians(4)
+    assert not sim.ground_truth().robot_fallen
+
+
+def test_a_hugged_box_survives_walking_and_turning(sim: MujocoSim) -> None:
+    box_y = sim.ground_truth().box_xyz[1]
+    for call in [
+        SkillCall(skill="reach_left", params={"distance_cm": box_y * 100}),
+        SkillCall(skill="hug"),
+        SkillCall(skill="lift"),
+        SkillCall(skill="walk_back", params={"distance_cm": 30}),
+        SkillCall(skill="turn_right", params={"angle_deg": 120}),
+        SkillCall(skill="walk_forward", params={"distance_cm": 80}),
+    ]:
+        assert sim.execute(call).ok, call
+    x, y, heading = sim.pose()
+    box = sim.ground_truth().box_xyz
+    ahead = math.cos(heading) * (box[0] - x) + math.sin(heading) * (box[1] - y)
+    assert box[2] > 0.8 and 0.25 < ahead < 0.45  # still held up in front of the chest
+    assert not sim.ground_truth().robot_fallen
+
+
+def test_the_scripted_policy_finds_a_bin_moved_mid_carry(sim: MujocoSim) -> None:
+    verdict, _ = run_scripted(sim, SEED, move_bin_at=5)
+    assert verdict.accepted, verdict.reason
 
 
 def test_scripted_episode_puts_the_box_in_the_bin(sim: MujocoSim) -> None:
@@ -57,10 +94,14 @@ def test_scripted_episode_puts_the_box_in_the_bin(sim: MujocoSim) -> None:
 
 
 def test_out_of_reach_skills_are_refused_not_executed(sim: MujocoSim) -> None:
-    before = sim.observe().joint_state
-    result = sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 20}))
-    assert not result.ok and result.error and not result.executed_actions
-    assert sim.observe().joint_state == before
+    for call in (
+        SkillCall(skill="reach_left", params={"distance_cm": 20}),
+        SkillCall(skill="walk_forward", params={"distance_cm": 50}),
+    ):
+        before = (sim.observe().joint_state, sim.pose(), sim.data.time)
+        result = sim.execute(call)
+        assert not result.ok and result.error and not result.executed_actions
+        assert (sim.observe().joint_state, sim.pose(), sim.data.time) == before
     assert not sim.ground_truth().joint_limit_violation
 
 

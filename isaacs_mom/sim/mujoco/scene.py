@@ -1,9 +1,9 @@
 # pyright: reportAttributeAccessIssue=false
 # (mujoco's compiled bindings ship no type information, so every mujoco.* attribute looks unknown)
-"""The MuJoCo scene: a free-standing Unitree G1, a table with a big box, and a bin beside the robot.
+"""The MuJoCo scene: a walking Unitree G1, a table with a big box, and a bin across the room.
 
-The G1 keeps its floating base and balances on its own feet under joint-position control; it reaches the bin by
-twisting at the waist, so nothing moves it that a real robot couldn't.
+The G1 keeps its floating base; its legs run Unitree's walking policy (`walk.py`) and its arms are joint-position
+controlled, so nothing moves it that a real robot couldn't.
 """
 
 from dataclasses import dataclass
@@ -12,9 +12,11 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
+from isaacs_mom.sim.mujoco.walk import configure_legs
+
 G1_XML = Path(__file__).parent / "assets" / "unitree_g1" / "g1.xml"
 
-# Unitree's own standing pose: soft knees keep both feet flat, which a straight-legged G1 can't.
+# Unitree's standing pose, which is also the walking policy's default stance.
 STAND_POSE = {
     "left_hip_pitch_joint": -0.1,
     "left_knee_joint": 0.3,
@@ -40,6 +42,10 @@ BIN_INNER_HALF = 0.22  # wider than the box's 39 cm diagonal, so a tumbling box 
 BIN_WALL = 0.02
 BIN_FLOOR_Z = 0.30
 BIN_RIM_Z = 0.50  # below the hanging hands, so the arms clear it at rest
+BIN_STAND_HALF = 0.10  # a narrow pedestal, so the robot's toes fit under the bin from any side
+BIN_DIST = (1.0, 1.4)  # metres from the robot
+BIN_BEARING = (np.deg2rad(75), np.deg2rad(285))  # anywhere but ahead, where the table is
+TABLE_CLEARANCE = 0.45  # metres between the table top and the bin's walls, so the robot can walk between them
 HEAD_SIZE = (320, 240)
 THIRD_SIZE = (640, 480)
 
@@ -50,18 +56,28 @@ class Layout:
 
     box_xy: tuple[float, float]
     bin_xy: tuple[float, float]
-    bin_yaw: float  # the bin faces the robot, so a box carried straight at it fits
+    bin_yaw: float  # the bin faces where the robot stood, so a box carried straight at it fits
 
 
 def box_xy(rng: np.random.Generator) -> tuple[float, float]:
     return float(BOX_X + rng.uniform(-0.02, 0.02)), float(rng.uniform(-0.1, 0.1))
 
 
-def bin_pose(rng: np.random.Generator) -> tuple[tuple[float, float], float]:
-    # On the robot's left, clear of its legs and the table; a bigger twist with the box held out tips it over.
-    angle = rng.uniform(np.deg2rad(97), np.deg2rad(112))
-    dist = rng.uniform(0.43, 0.45)
-    return (float(dist * np.cos(angle)), float(dist * np.sin(angle))), float(angle)
+def bin_pose(rng: np.random.Generator, around: tuple[float, float] = (0.0, 0.0)) -> tuple[tuple[float, float], float]:
+    """A bin 1.0-1.4 m from `around`, facing it, off to the side or behind, and clear of the table."""
+    while True:
+        bearing = rng.uniform(*BIN_BEARING)
+        dist = rng.uniform(*BIN_DIST)
+        xy = (around[0] + dist * np.cos(bearing), around[1] + dist * np.sin(bearing))
+        if table_clearance(xy) > BIN_INNER_HALF + BIN_WALL + TABLE_CLEARANCE:
+            return (float(xy[0]), float(xy[1])), float(bearing)
+
+
+def table_clearance(xy: tuple[float, float]) -> float:
+    """Distance on the floor from `xy` to the table top's edge (0 inside it)."""
+    dx = max(abs(xy[0] - TABLE_CENTER[0]) - TABLE_HALF[0], 0.0)
+    dy = max(abs(xy[1] - TABLE_CENTER[1]) - TABLE_HALF[1], 0.0)
+    return float(np.hypot(dx, dy))
 
 
 def layout(seed: int) -> Layout:
@@ -104,13 +120,14 @@ def _add_hands(spec: mujoco.MjSpec) -> None:
 
 
 def _add_head_camera(spec: mujoco.MjSpec) -> None:
-    # The G1 head is part of torso_link; mount at the face, tilted 50 degrees down at the table.
-    tilt = np.deg2rad(50)
+    # Top of the face, tilted 45 degrees down with a wide lens: the hands at the box, and a bin 1-1.4 m ahead above
+    # the carried box or, once close, below it.
+    tilt = np.deg2rad(45)
     spec.body("torso_link").add_camera(
         name="head",
-        pos=[0.09, 0.0, 0.40],
+        pos=[0.10, 0.0, 0.45],
         xyaxes=[0, -1, 0, np.sin(tilt), 0, np.cos(tilt)],
-        fovy=75.0,
+        fovy=100.0,
     )
 
 
@@ -178,7 +195,7 @@ def _add_world(spec: mujoco.MjSpec) -> None:
     bin_body.add_geom(
         name="bin_stand",
         type=mujoco.mjtGeom.mjGEOM_BOX,
-        size=[BIN_INNER_HALF * 0.7, BIN_INNER_HALF * 0.7, BIN_FLOOR_Z / 2],
+        size=[BIN_STAND_HALF, BIN_STAND_HALF, BIN_FLOOR_Z / 2],
         pos=[0, 0, BIN_FLOOR_Z / 2],
         rgba=[0.35, 0.35, 0.38, 1],
     )
@@ -211,9 +228,9 @@ def _add_world(spec: mujoco.MjSpec) -> None:
         condim=4,
     )
 
-    # From the robot's front-left, where the bin is.
-    eye, target = np.array([1.3, 1.5, 1.6]), np.array([0.05, 0.15, 0.75])
-    world.add_camera(name="third_person", pos=eye, xyaxes=_look_at(eye, target), fovy=50.0)
+    # High over the robot's front-right shoulder, wide enough for the table and a bin anywhere around the robot.
+    eye, target = np.array([2.3, -2.3, 2.9]), np.array([-0.25, 0.1, 0.3])
+    world.add_camera(name="third_person", pos=eye, xyaxes=_look_at(eye, target), fovy=55.0)
 
 
 def build_model() -> mujoco.MjModel:
@@ -221,6 +238,8 @@ def build_model() -> mujoco.MjModel:
     # Menagerie's "stand" keyframe has no room for the scene's extra joints.
     for key in list(spec.keys):
         spec.delete(key)
+    spec.option.impratio = 10  # firmer friction cones, so the hugged box doesn't creep out of the hands
+    configure_legs(spec)
     _grip_feet(spec)
     _add_hands(spec)
     _add_head_camera(spec)

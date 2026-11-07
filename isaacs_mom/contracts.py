@@ -4,10 +4,21 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, Field, field_validator
 
-Skill = Literal["reach_left", "reach_right", "turn_left", "turn_right", "hug", "lift", "place", "reobserve"]
+Skill = Literal[
+    "reach_left",
+    "reach_right",
+    "walk_forward",
+    "walk_back",
+    "turn_left",
+    "turn_right",
+    "hug",
+    "lift",
+    "place",
+    "reobserve",
+]
 SKILLS: tuple[Skill, ...] = get_args(Skill)
-MAX_DISTANCE_CM = 20.0
-MAX_ANGLE_DEG = 45.0
+MAX_DISTANCE_CM = 150.0  # one walk across the room; the arms' reach is refused by the simulator well before this
+MAX_ANGLE_DEG = 180.0
 PARAM_LIMITS = {"distance_cm": MAX_DISTANCE_CM, "angle_deg": MAX_ANGLE_DEG}
 
 Controller = Literal["student", "teacher"]
