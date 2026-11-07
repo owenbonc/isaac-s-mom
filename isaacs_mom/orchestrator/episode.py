@@ -1,3 +1,4 @@
+import time
 from pathlib import Path
 
 from isaacs_mom.contracts import EpisodeManifest, Perturbation, Split
@@ -45,7 +46,9 @@ def run_episode(
             if validate(sim.ground_truth()).accepted:
                 break
             recorder.mark_takeover()
-            events.emit("decision", episode_id=episode_id, controller="teacher", takeover=True)
+            events.emit(
+                "decision", episode_id=episode_id, controller="teacher", takeover=True, step=total_steps, skill=None
+            )
         for _ in range(max_steps):
             if total_steps == perturb_at:
                 perturbation = Perturbation(kind="move_block", seed=seed + PERTURB_SEED_OFFSET)
@@ -53,6 +56,7 @@ def run_episode(
                 recorder.add_perturbation(perturbation)
                 events.emit("perturbation", episode_id=episode_id, kind=perturbation.kind, step=total_steps)
             obs = sim.observe()
+            started = time.perf_counter()
             call = active.act(obs, instruction, feedback)
             events.emit(
                 "decision",
@@ -61,6 +65,8 @@ def run_episode(
                 checkpoint=active.checkpoint,
                 step=obs.step,
                 skill=call.model_dump() if call else None,
+                reason=call.reason if call else "",
+                latency_ms=round((time.perf_counter() - started) * 1000, 1),
             )
             if call is None:
                 break
