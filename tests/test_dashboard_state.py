@@ -4,27 +4,39 @@ import json
 import shutil
 import subprocess
 from pathlib import Path
+from typing import Any
 
 import pytest
 
 STATE_JS = Path(__file__).parent.parent / "isaacs_mom" / "orchestrator" / "dashboard" / "static" / "state.js"
 DRIVER = """
 const S = require(process.argv[1]);
-const events = JSON.parse(require("fs").readFileSync(0, "utf8"));
+const { events, script } = JSON.parse(require("fs").readFileSync(0, "utf8"));
+console.log(JSON.stringify(new Function("S", "events", script)(S, events)));
+"""
+FOLD = """
 const state = S.initial();
 for (const e of events) S.reduce(state, e);
-console.log(JSON.stringify({ state, summary: S.summary(state), filmstrip: S.filmstrip(state.ep) }));
+const ep = S.current(state);
+return { state, ep, summary: S.summary(state), filmstrip: S.filmstrip(ep) };
 """
 
 pytestmark = pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")
 
 
-def fold(*events: tuple[str, dict]) -> dict:
-    stream = [{"t": float(i), "run_id": "r", "type": type_, "data": data} for i, (type_, data) in enumerate(events)]
-    out = subprocess.run(
-        ["node", "-e", DRIVER, str(STATE_JS)], input=json.dumps(stream), capture_output=True, text=True, check=True
-    )
+def stream(*events: tuple[str, dict]) -> list[dict]:
+    return [{"t": float(i), "run_id": "r", "type": type_, "data": data} for i, (type_, data) in enumerate(events)]
+
+
+def run(script: str, events: list[dict]) -> Any:
+    """Run `script` (a JS function body with `S` = state.js and `events`) under node and return its result."""
+    stdin = json.dumps({"events": events, "script": script})
+    out = subprocess.run(["node", "-e", DRIVER, str(STATE_JS)], input=stdin, capture_output=True, text=True, check=True)
     return json.loads(out.stdout)
+
+
+def fold(*events: tuple[str, dict]) -> dict:
+    return run(FOLD, stream(*events))
 
 
 def decision(step: int, controller: str = "student", latency: object = 100.0, reason: str = "why") -> tuple[str, dict]:
@@ -46,9 +58,9 @@ def executed(step: int, ok: bool = True, frame: str | None = "/frames/a.jpg") ->
 def test_an_action_attaches_to_its_decision_and_keeps_a_long_reason() -> None:
     reason = "r" * 120
     out = fold(("episode_started", {"episode_id": "e", "seed": 1}), decision(0, reason=reason), executed(0, ok=False))
-    (row,) = out["state"]["ep"]["rows"]
+    (row,) = out["ep"]["rows"]
     assert (row["reason"], row["ok"], row["error"]) == (reason, False, "joint limit")
-    assert out["state"]["ep"]["frames"][0]["url"] == "/frames/a.jpg"
+    assert out["ep"]["frames"][0]["url"] == "/frames/a.jpg"
 
 
 def test_median_latency_carries_its_sample_size_per_controller() -> None:
@@ -99,8 +111,8 @@ def test_rounds_keep_their_n_and_a_new_episode_replaces_the_current_one() -> Non
         ("ckpt-r0", 0, 20),
         ("ckpt-r1", 3, 20),
     ]
-    assert out["state"]["ep"]["id"] == "b" and out["state"]["ep"]["rows"] == []
-    assert out["state"]["episodeCount"] == 2
+    assert out["ep"]["id"] == "b" and out["ep"]["rows"] == []
+    assert len(out["state"]["episodes"]) == 2
 
 
 def test_finetune_duration_is_measured_between_its_events() -> None:
@@ -116,6 +128,87 @@ def test_takeover_error_and_verdict_rows_appear_in_order() -> None:
         ("error", {"message": "Argon unreachable"}),
         ("validation", {"task_success": False, "physics_valid": True, "reason": "far"}),
     )
-    kinds = [r["kind"] for r in out["state"]["ep"]["rows"]]
+    kinds = [r["kind"] for r in out["ep"]["rows"]]
     assert kinds == ["takeover", "error", "verdict"]
-    assert out["state"]["ep"]["verdict"] == {"task": False, "physics": True, "reason": "far"}
+    assert out["ep"]["verdict"] == {"task": False, "physics": True, "reason": "far"}
+
+
+def started(episode_id: str, sim_version: str | None = "mujoco") -> tuple[str, dict]:
+    data = {"episode_id": episode_id, "seed": 1, "split": "dev", "round": 0}
+    return "episode_started", data if sim_version is None else {
+        **data,
+        "sim_version": sim_version,
+        "robot_config": "g1",
+    }
+
+
+def test_a_reconnect_replays_the_stream_into_a_fresh_state_not_on_top_of_the_old_one() -> None:
+    events = stream(
+        started("a"),
+        decision(0),
+        executed(0),
+        started("b"),
+        decision(0, latency=50.0),
+        ("evaluation_result", {"checkpoint": "ckpt-r0", "round": 0, "successes": 0, "n": 20}),
+        ("argon_call", {"latency_ms": 900.0}),
+    )
+    script = """
+    const v = S.view();
+    for (const e of events) S.reduce(v.live, e);
+    S.reconnect(v);
+    for (const e of events) S.reduce(v.live, e);
+    return { state: v.live, summary: S.summary(v.live) };
+    """
+    out = run(script, events)
+    assert out["state"]["eventCount"] == len(events)
+    assert [e["id"] for e in out["state"]["episodes"]] == ["a", "b"]
+    assert len(out["state"]["rounds"]) == 1
+    assert out["summary"]["student"] == {"median": 75.0, "n": 2}
+    assert out["summary"]["argon"]["n"] == 1
+
+
+def test_a_diagnosis_stays_with_the_episode_it_diagnoses() -> None:
+    diagnosis = {"hypothesis": "pushed too early", "evidence": "block left of hand", "confidence": 0.7, "lesson": ""}
+    out = fold(
+        started("a"),
+        started("b"),
+        ("diagnosis", {"episode_id": "a", **diagnosis}),
+        ("diagnosis", {"episode_id": "gone", **diagnosis}),
+    )
+    a, b = out["state"]["episodes"]
+    assert a["diagnosis"]["hypothesis"] == "pushed too early" and a["diagnosis"]["confidence"] == 0.7
+    assert b["diagnosis"] is None
+
+
+def provenance(events: list[dict], now: float, episode: int | None = None) -> str:
+    script = f"""
+    const s = S.initial();
+    for (const e of events) S.reduce(s, e);
+    return S.provenance(s, {now}, {"null" if episode is None else f"s.episodes[{episode}]"});
+    """
+    return run(script, events)
+
+
+def test_a_fakesim_or_unstated_simulator_is_placeholder_even_while_events_arrive() -> None:
+    assert provenance(stream(started("a", "fake-1")), now=1.0) == "placeholder"
+    assert provenance(stream(started("a", None)), now=1.0) == "placeholder"
+    assert provenance(stream(started("a", "fake-1"), started("b")), now=2.0) == "placeholder"
+    assert provenance([], now=1.0) == "placeholder"
+
+
+def test_a_real_run_is_live_while_events_arrive_or_a_finetune_is_pending_and_recorded_otherwise() -> None:
+    events = stream(started("a"), started("b"))  # last event at t=1
+    assert provenance(events, now=5.0) == "live"
+    assert provenance(events, now=500.0) == "recorded"
+    assert provenance(events, now=5.0, episode=0) == "recorded"  # a finished episode is not live
+    assert provenance(events, now=5.0, episode=1) == "live"
+    pending = stream(started("a"), ("finetune_started", {"round": 1}))
+    assert provenance(pending, now=500.0) == "live"
+
+
+def test_an_unknown_controller_is_dropped_at_the_boundary() -> None:
+    out = fold(started("a"), decision(0, controller='"><img src=x onerror=alert(1)>'), executed(0))
+    (row,) = out["ep"]["rows"]
+    assert row["controller"] is None and out["ep"]["controller"] is None
+    assert out["ep"]["frames"][0]["controller"] is None
+    assert out["summary"]["student"] is None and out["summary"]["teacher"] is None

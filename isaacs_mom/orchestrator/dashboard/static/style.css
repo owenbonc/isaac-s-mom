@@ -38,6 +38,7 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minm
 .chip.recorded::before{content:"";width:.5rem;height:.5rem;border-radius:50%;border:2px solid var(--ink)}
 .chip.live::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:var(--ok)}
 .chip.live{border-color:var(--ok);color:var(--ok)}
+.chip.config{color:var(--muted)}
 .chip.placeholder{border-style:dashed;color:var(--ph);background:repeating-linear-gradient(135deg,#fff 0 5px,#eceff3 5px 7px)}
 .tag{display:inline-flex;align-items:center;gap:.4rem;font-weight:600;font-size:.88rem;padding:.12rem .55rem;border-radius:3px;white-space:nowrap}
 .tag.student{background:#fff;color:var(--student)}

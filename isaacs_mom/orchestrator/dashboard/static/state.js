@@ -2,25 +2,32 @@
 (function (root) {
   const CONTROLLERS = ["student", "teacher"];
   const FILMSTRIP = 8;
+  const FRESH_SECONDS = 20;
 
   function initial() {
     return {
       runId: null,
       lastT: 0,
       eventCount: 0,
-      episodeCount: 0,
-      ep: null,
+      episodes: [],
       rounds: [],
       latency: { student: [], teacher: [] },
       argon: [],
       finetune: { pending: null, durations: [] },
-      diagnosis: null,
       errorCount: 0,
     };
   }
 
+  // The page's view of the stream. Every connection replays events.jsonl from the start, so a reconnect starts over.
+  const view = () => ({ live: initial() });
+  function reconnect(v) {
+    v.live = initial();
+  }
+
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const text = (v) => (typeof v === "string" ? v : "");
+  const controllerOf = (v) => (CONTROLLERS.includes(v) ? v : null);
+  const current = (s) => s.episodes[s.episodes.length - 1] || null;
 
   function median(values) {
     if (!values.length) return null;
@@ -42,11 +49,23 @@
     s.eventCount += 1;
     s.lastT = event.t;
     s.runId = event.run_id;
-    const ep = s.ep;
+    const ep = current(s);
     switch (event.type) {
       case "episode_started":
-        s.episodeCount += 1;
-        s.ep = { id: d.episode_id, seed: d.seed, split: d.split, round: d.round, rows: [], frames: [], verdict: null, perturbedStep: null, controller: null, checkpoint: null };
+        s.episodes.push({
+          id: text(d.episode_id),
+          seed: num(d.seed),
+          split: text(d.split),
+          round: num(d.round),
+          sim: text(d.sim_version) ? { version: d.sim_version, robot: text(d.robot_config) } : null,
+          rows: [],
+          frames: [],
+          verdict: null,
+          perturbedStep: null,
+          controller: null,
+          checkpoint: null,
+          diagnosis: null,
+        });
         break;
       case "decision": {
         if (!ep) break;
@@ -56,33 +75,35 @@
           ep.checkpoint = null;
           break;
         }
+        const controller = controllerOf(d.controller);
         const latency = num(d.latency_ms);
         const skill = d.skill && typeof d.skill === "object" ? d.skill : null;
         ep.rows.push({
           kind: "decision",
           step: num(d.step),
-          controller: d.controller,
-          checkpoint: d.checkpoint ?? null,
-          skill: skill ? skill.skill : null,
+          controller,
+          checkpoint: text(d.checkpoint) || null,
+          skill: skill ? text(skill.skill) || null : null,
           params: skill && skill.params ? skill.params : {},
           reason: text(d.reason),
           latency,
           ok: null,
           error: null,
         });
-        ep.controller = d.controller;
-        ep.checkpoint = d.checkpoint ?? null;
-        if (latency !== null && CONTROLLERS.includes(d.controller)) s.latency[d.controller].push(latency);
+        ep.controller = controller;
+        ep.checkpoint = text(d.checkpoint) || null;
+        if (latency !== null && controller) s.latency[controller].push(latency);
         break;
       }
       case "action_executed": {
         if (!ep) break;
-        const row = lastDecision(ep, d.step);
+        const step = num(d.step);
+        const row = lastDecision(ep, step);
         if (row) {
           row.ok = d.ok === true;
           row.error = text(d.error) || null;
         }
-        ep.frames.push({ step: d.step, url: text(d.frame) || null, controller: row ? row.controller : null });
+        ep.frames.push({ step, url: text(d.frame) || null, controller: row ? row.controller : null });
         break;
       }
       case "perturbation":
@@ -95,11 +116,16 @@
         ep.verdict = { task: d.task_success === true, physics: d.physics_valid === true, reason: text(d.reason) };
         ep.rows.push({ kind: "verdict" });
         break;
+      case "diagnosis": {
+        const target = s.episodes.find((e) => e.id === d.episode_id);
+        if (target) target.diagnosis = { hypothesis: text(d.hypothesis), evidence: text(d.evidence), lesson: text(d.lesson), confidence: num(d.confidence) };
+        break;
+      }
       case "evaluation_result":
-        if (num(d.successes) !== null && num(d.n) !== null) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n });
+        if (num(d.successes) !== null && num(d.n) !== null) s.rounds.push({ round: num(d.round), checkpoint: text(d.checkpoint), successes: d.successes, n: d.n });
         break;
       case "finetune_started":
-        s.finetune.pending = { round: d.round, t: event.t };
+        s.finetune.pending = { round: num(d.round), t: event.t };
         break;
       case "finetune_completed":
         if (s.finetune.pending) s.finetune.durations.push((event.t - s.finetune.pending.t) * 1000);
@@ -110,9 +136,6 @@
         if (latency !== null) s.argon.push(latency);
         break;
       }
-      case "diagnosis":
-        s.diagnosis = { hypothesis: text(d.hypothesis), evidence: text(d.evidence), lesson: text(d.lesson), confidence: num(d.confidence) };
-        break;
       case "error":
         s.errorCount += 1;
         if (ep) ep.rows.push({ kind: "error", text: text(d.message) || text(d.error) || "error event" });
@@ -121,6 +144,17 @@
         break;
     }
     return s;
+  }
+
+  const isReal = (sim) => sim !== null && !sim.version.startsWith("fake");
+
+  // Rule 6: placeholder unless every episode ran on a real simulator; then live while events arrive or a
+  // fine-tune is pending. Pass an episode for a panel that shows one: only the current episode can be live.
+  function provenance(s, now, ep = null) {
+    const episodes = ep ? [ep] : s.episodes;
+    if (!episodes.length || !episodes.every((e) => isReal(e.sim))) return "placeholder";
+    const live = now - s.lastT < FRESH_SECONDS || s.finetune.pending !== null;
+    return live && (!ep || ep === current(s)) ? "live" : "recorded";
   }
 
   // Median latency with its sample size; null when there is no data.
@@ -138,7 +172,7 @@
     return shown.map((f) => ({ ...f, moved: f === moved }));
   }
 
-  const api = { initial, reduce, summary, filmstrip, median };
+  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, median };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

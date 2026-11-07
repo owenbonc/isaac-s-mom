@@ -38,7 +38,15 @@ def run_episode(
         sim_version=sim.sim_version,
         robot_config=sim.robot_config,
     )
-    events.emit("episode_started", episode_id=episode_id, seed=seed, split=split, round=round_)
+    events.emit(
+        "episode_started",
+        episode_id=episode_id,
+        seed=seed,
+        split=split,
+        round=round_,
+        sim_version=sim.sim_version,
+        robot_config=sim.robot_config,
+    )
     feedback = "start"
     total_steps = 0
     for phase, active in enumerate([policy] if takeover is None else [policy, takeover]):

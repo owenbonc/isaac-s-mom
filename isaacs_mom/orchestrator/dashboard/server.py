@@ -96,4 +96,5 @@ def create_app(run_dir: Path) -> FastAPI:
 def serve(run_dir: Path, port: int) -> None:
     import uvicorn
 
-    uvicorn.run(create_app(run_dir), host="127.0.0.1", port=port)
+    # An open event stream never ends on its own, so shutdown would wait for it forever.
+    uvicorn.run(create_app(run_dir), host="127.0.0.1", port=port, timeout_graceful_shutdown=1)

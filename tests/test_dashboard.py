@@ -6,7 +6,10 @@ from fastapi.testclient import TestClient
 
 from isaacs_mom.contracts import Event
 from isaacs_mom.orchestrator.dashboard.server import create_app, tail_events
+from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
+from isaacs_mom.sim.fake import FakeSim
+from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy
 
 JPEG = b"\xff\xd8\xff\xd9"
 
@@ -87,6 +90,24 @@ def test_stream_turns_frame_paths_into_urls_and_hides_outside_paths(tmp_path: Pa
     log.emit("action_executed", frame=str(tmp_path / "secret.jpg"))
     frames = [e["data"]["frame"] for e in collect(run_dir)]
     assert frames == ["/frames/episodes/ep-1/frames/0000.jpg", None]
+
+
+def test_episode_started_names_the_simulator_so_the_page_can_label_fakesim_placeholder(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "r1")
+    run_episode(
+        sim,
+        StudentPolicy(BASE_CHECKPOINT),
+        run_dir=tmp_path,
+        events=events,
+        seed=1,
+        split="dev",
+        round_=0,
+        instruction="push",
+    )
+    first = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
+    assert first["type"] == "episode_started"
+    assert (first["data"]["sim_version"], first["data"]["robot_config"]) == (sim.sim_version, sim.robot_config)
 
 
 def test_page_and_its_scripts_are_served_without_caching(tmp_path: Path) -> None:
