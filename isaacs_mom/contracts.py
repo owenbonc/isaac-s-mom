@@ -82,8 +82,6 @@ class GroundTruth(BaseModel):
     walls. `robot_xy` is the pelvis on the floor and `robot_yaw` the torso heading (pelvis heading plus waist twist),
     the frame the head camera and the skills share."""
 
-    robot_xy: tuple[float, float]
-    robot_yaw: float
     box_xyz: tuple[float, float, float]
     bin_xy: tuple[float, float]
     bin_yaw: float
@@ -93,6 +91,8 @@ class GroundTruth(BaseModel):
     robot_fallen: bool
     joint_limit_violation: bool
     penetration: bool
+    robot_xy: tuple[float, float]
+    robot_yaw: float
 
 
 class Validation(BaseModel):

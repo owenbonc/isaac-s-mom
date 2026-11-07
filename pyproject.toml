@@ -5,6 +5,7 @@ description = "An Argon teacher that finds the gaps in a robot's skills and crea
 requires-python = ">=3.12,<3.13"
 dependencies = [
     "google-genai>=3.0.0",
+    "httpx2>=2.16.0",
     "mujoco>=3.3",
     "numpy>=2.0",
     "pillow>=11.0",
