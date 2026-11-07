@@ -310,7 +310,7 @@ const press = (key) => S.keydown(v, { key }, now);
 const look = () => {
   const ep = S.episode(v, now);
   const shown = S.shown(v).eventCount;
-  return { shown, held: v.live.eventCount - shown, episode: ep && ep.id, focus: v.compare && v.compare.step };
+  return { shown, held: S.buffered(v), episode: ep && ep.id, focus: S.stageStep(v) };
 };
 """
 
@@ -327,6 +327,25 @@ def test_pausing_holds_the_shown_view_and_buffers_new_events_until_resume() -> N
     )
     assert out[0] == {"shown": 2, "held": 3, "episode": "a", "focus": None}
     assert out[1] == {"shown": 5, "held": 0, "episode": "b", "focus": None}
+
+
+def test_the_pause_key_counts_events_buffered_since_the_pause_and_never_below_zero() -> None:
+    events = stream(started("a"), decision(0), started("b"), decision(0))
+    out = presenter(
+        """
+        const all = [...events];
+        feed(2); press(" ");
+        const counts = [S.buffered(v)];
+        feed(2); counts.push(S.buffered(v));
+        S.reconnect(v); counts.push(S.buffered(v));  // the replay starts from nothing
+        for (const e of all) S.receive(v, e, now);
+        counts.push(S.buffered(v));
+        press(" "); counts.push(S.buffered(v));
+        return counts;
+        """,
+        events,
+    )
+    assert out == [0, 2, 0, 2, 0]
 
 
 def test_a_reconnect_while_paused_keeps_the_frozen_view_and_resumes_onto_the_replayed_run() -> None:
@@ -667,6 +686,38 @@ def test_navigation_targets_say_where_each_key_leads_and_minus_one_for_nowhere_n
     )
     assert out[0] == {"ArrowLeft": 5, "ArrowRight": -1, "d": 3, "t": 4, "m": 5, "End": -1}
     assert out[1] == {"ArrowLeft": 0, "ArrowRight": 2, "d": 3, "t": 4, "m": 5, "End": 6}
+
+
+def test_m_opens_the_moved_episode_at_the_first_frame_after_the_move_and_p_pressed_twice_returns_there() -> None:
+    events = stream(
+        started("a"),
+        *[x for step in range(6) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))],
+        ("perturbation", {"kind": "move_box", "step": 2}),
+        *trial("b"),
+    )
+    events.insert(5, events.pop(-4))  # the perturbation arrives before decision 2
+    out = presenter(
+        """
+        feed(events.length);
+        const stage = () => S.filmstrip(S.episode(v, now), S.stageStep(v))
+          .filter((f) => f.now).map((f) => [f.step, f.moved]);
+        press("m");
+        const opened = [look(), stage()];
+        press("p"); press("p");
+        const back = [look(), stage()];
+        press("End");
+        return [opened, back, look()];
+        """,
+        events,
+    )
+    opened = [{"shown": len(events), "held": 0, "episode": "a", "focus": 2}, [[2, True]]]
+    assert out[0] == opened and out[1] == opened
+    assert out[2] == {"shown": len(events), "held": 0, "episode": "b", "focus": None}
+
+
+def test_the_judged_take_is_marked_on_its_episode() -> None:
+    out = fold(("episode_started", {**started("take")[1], "demo": True}), started("trial"))
+    assert [e["demo"] for e in out["state"]["episodes"]] == [True, False]
 
 
 def test_the_move_pairs_the_last_frame_before_it_with_the_first_after_and_finds_the_first_decision_after() -> None:

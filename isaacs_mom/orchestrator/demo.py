@@ -89,6 +89,7 @@ def run_demo(
         instruction=INSTRUCTION,
         takeover=ArgonPolicy(None, make_argon(events)),
         perturb_at=perturb_at,
+        demo=True,
     )
     episode_dir = run_dir / "episodes" / manifest.episode_id
     record(

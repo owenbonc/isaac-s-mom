@@ -53,6 +53,7 @@ const skillText = (row) => (row.skill ? esc(row.skill) + amount(row) : '<span cl
 // An episode is over once judged, or once the view has moved past it or the run has stopped.
 const finished = (ep) => ep.verdict !== null || ep !== MomState.current(MomState.shown(view)) || !MomState.following(view, now());
 const kindOf = (ep) => {
+  if (ep.demo) return ["Judged take", `unseen scene, seed ${esc(ep.seed ?? "")}`];
   if (ep.split === "heldout") return ["Held-out test", `seed ${esc(ep.seed ?? "")}`];
   const first = ep.rows.find((r) => r.kind === "decision");
   return [first && first.controller === "teacher" ? "Teacher demonstration" : "Student trial", `development seed ${esc(ep.seed ?? "")}`];
@@ -125,7 +126,7 @@ function renderCamera() {
     return;
   }
   const ep = MomState.episode(view, now());
-  const frames = MomState.filmstrip(ep, view.compare && view.compare.step);
+  const frames = MomState.filmstrip(ep, MomState.stageStep(view));
   $("chip-camera").innerHTML = panelChip(frames.length > 0, ep);
   if (!frames.length) {
     $("stage").innerHTML = `<div class="empty">${ep && finished(ep) ? "This episode recorded no head-camera frame." : "No head-camera frame yet. The latest frame appears here after each executed skill."}</div>`;
@@ -214,8 +215,9 @@ function renderEpisode() {
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) < 0;
   $("b-p").disabled = !view.compare && (!ep || ep.perturbedStep === null);
   $("b-p").setAttribute("aria-pressed", String(view.compare !== null));
+  // The name stays "Pause" and aria-pressed carries the state; the visible label says what Space does next.
   $("b-pause").setAttribute("aria-pressed", String(view.frozen !== null));
-  $("b-pause").lastElementChild.textContent = view.frozen ? "Resume" : "Pause";
+  $("b-pause").lastElementChild.textContent = view.frozen ? `Resume · ${MomState.buffered(view)} new` : "Pause";
   // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when rejected.
   $("rail").style.setProperty("--n", s.episodes.length);
   $("rail").innerHTML = s.episodes
@@ -236,17 +238,19 @@ function renderLog() {
   }
   const move = MomState.move(ep);
   const done = finished(ep);
-  const stage = MomState.filmstrip(ep, view.compare && view.compare.step).find((f) => f.now);
+  const step = MomState.stageStep(view);
+  const stage = MomState.filmstrip(ep, step).find((f) => f.now);
   const full = (r) => !stage || stage.step === null || (r.step !== null && r.step >= stage.step);
   const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision, done, full(r)) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
-  const focus = view.compare && `${ep.id}@${view.compare.step}`;
+  const focus = step === null ? null : `${ep.id}@${step}`;
   // Letting go of P drops the scroll it set, so the log follows new rows again.
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows || (renderedFocus !== null && focus === null);
   if (fromStart) logFollowing = true;
   list.innerHTML = html.join("");
   if (!fromStart) [...list.children].slice(renderedRows).forEach((li) => li.classList.add("fresh"));
   if (logFollowing) list.scrollTop = list.scrollHeight;
-  const row = list.querySelector(".focus");
+  // M and P park the log with the move row a third of the way down.
+  const row = list.querySelector("li.event.moved");
   if (focus !== renderedFocus && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
   renderedFocus = focus;
   renderedRows = html.length;

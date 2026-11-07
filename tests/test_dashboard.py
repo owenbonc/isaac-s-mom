@@ -160,6 +160,7 @@ def test_each_teacher_demonstration_names_the_failed_episode_whose_diagnosis_it_
     assert len(diagnosed) == 2 and len(teacher) == 3  # the stand-in student fails both trials
     assert [starts[t]["acting_on"] for t in sorted(teacher, key=list(starts).index)] == [*diagnosed, diagnosed[0]]
     assert all(start["acting_on"] is None for episode_id, start in starts.items() if episode_id not in teacher)
+    assert not any(start["demo"] for start in starts.values())  # only `mom demo` runs the judged take
 
 
 def test_page_and_its_scripts_are_served_without_caching(tmp_path: Path) -> None:

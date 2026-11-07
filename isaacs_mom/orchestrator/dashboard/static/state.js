@@ -20,9 +20,10 @@
 
   // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing and when
   // it was paused; `selected` pins an episode (null follows the run: its latest episode while live, its story once
-  // finished); `compare` is the box or bin move P shows, with the selection to return to when P is pressed again;
+  // finished); `step` holds the shown episode at a step (M: the first frame after its move), null at its latest;
+  // `compare` is the box or bin move P shows, with the selection to return to when P is pressed again;
   // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down.
-  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false });
+  const view = () => ({ live: initial(), frozen: null, selected: null, step: null, compare: null, followed: false, lost: false });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
@@ -67,6 +68,7 @@
           round: num(d.round),
           sim: text(d.sim_version) ? { version: d.sim_version, robot: text(d.robot_config) } : null,
           actingOn: text(d.acting_on) || null,
+          demo: d.demo === true,
           rows: [],
           frames: [],
           verdict: null,
@@ -228,6 +230,8 @@
   function togglePause(v, now) {
     v.frozen = v.frozen ? null : { state: structuredClone(v.live), at: now };
   }
+  // Events that arrived since the pause; a reconnect's replay starts from none.
+  const buffered = (v) => (v.frozen ? Math.max(0, v.live.eventCount - v.frozen.state.eventCount) : 0);
   // A paused view judges the run as it was when paused, so it stays put if the run ends meanwhile.
   const following = (v, now) => running(v.live, v.frozen ? v.frozen.at : now);
 
@@ -263,19 +267,23 @@
     if (at < 0) return -1;
     if (key === "ArrowLeft") return at > 0 ? at - 1 : -1;
     if (key === "ArrowRight") return at < last ? at + 1 : -1;
-    if (key === "End") return at < last || v.compare ? last : -1;
+    if (key === "End") return at < last || v.compare || v.step !== null ? last : -1;
     for (let d = 1; d <= last; d++) for (const i of [at + d, at - d]) if (episodes[i] && BEATS[key](episodes[i])) return i;
     return -1;
   }
 
-  // Landing on a live run's last episode follows the run again.
+  // Landing on a live run's last episode follows the run again; M holds its episode at the move instead.
   function go(v, now, key) {
     const i = target(v, now, key);
     if (i < 0) return;
     const episodes = shown(v).episodes;
-    v.selected = i === episodes.length - 1 && following(v, now) ? null : episodes[i].id;
+    v.selected = key !== "m" && i === episodes.length - 1 && following(v, now) ? null : episodes[i].id;
+    v.step = key === "m" ? episodes[i].perturbedStep : null;
     v.compare = null;
   }
+
+  // The step the stage holds the shown episode at: its move under P or after M, null for its latest frame.
+  const stageStep = (v) => (v.compare ? v.compare.step : v.step);
 
   // Shows the shown episode's box or bin move; pressing again returns to the selection from before.
   function compareMove(v, now) {
@@ -301,7 +309,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, following, accepted, teacherDrove, episode, finetuning, target, keydown };
+  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, following, accepted, teacherDrove, episode, finetuning, target, stageStep, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

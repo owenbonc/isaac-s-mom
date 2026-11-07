@@ -62,6 +62,7 @@ def test_demo_records_every_step_and_the_perturbation(tmp_path: Path) -> None:
     events = [Event.model_validate_json(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
     perturbations = [e for e in events if e.type == "perturbation"]
     assert [e.data["step"] for e in perturbations] == [3]
+    assert [e.data["demo"] for e in events if e.type == "episode_started"] == [True]
 
 
 def test_demo_refuses_a_heldout_seed(tmp_path: Path) -> None:
