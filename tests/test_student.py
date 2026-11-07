@@ -1,13 +1,15 @@
+import json
 import logging
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
 
-from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget
+from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget, TrainingExample
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, resolve_adapter
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
+from isaacs_mom.student.tuning import finetune
 
 PUSH_5 = SkillCall(skill="push_forward", params={"distance_cm": 5})
 
@@ -123,3 +125,66 @@ def test_reobserve_streak_starts_over_in_a_new_episode() -> None:
 def test_missing_checkpoint_fails_before_any_model_call(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError, match="ckpt-r2"):
         StudentPolicy("ckpt-r2", checkpoint_dir=tmp_path, generate=scripted())
+
+
+ADAPTER = {"adapter_config.json": b"{}", "adapter_model.safetensors": b"weights", "metrics.json": b"{}"}
+
+
+def training_set(tmp_path: Path, rows: list[TrainingExample]) -> Path:
+    path = tmp_path / "training_r1.jsonl"
+    path.write_text("".join(row.model_dump_json() + "\n" for row in rows))
+    return path
+
+
+def example(tmp_path: Path, target: SkillTarget, feedback: str = "start") -> TrainingExample:
+    image = tmp_path / "0000.jpg"
+    image.write_bytes(b"frame-bytes")
+    return TrainingExample(image=str(image), instruction="push", feedback=feedback, target=target)
+
+
+def test_empty_training_set_keeps_the_previous_checkpoint(tmp_path: Path) -> None:
+    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+        raise AssertionError("nothing to train on")
+
+    checkpoints = tmp_path / "ckpts"
+    assert finetune(training_set(tmp_path, []), "ckpt-r1", 2, checkpoint_dir=checkpoints, trainer=trainer) == "ckpt-r1"
+    assert not checkpoints.exists()
+
+
+def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: Path) -> None:
+    rows = [
+        example(tmp_path, SkillTarget(skill="push_forward", params={"distance_cm": 12.34})),
+        example(tmp_path, SkillTarget(skill="reobserve"), feedback="push_forward: ok"),
+    ]
+    shipped_examples: list[dict[str, str]] = []
+    shipped_images: dict[str, bytes] = {}
+
+    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+        shipped_examples.extend(examples)
+        shipped_images.update(images)
+        return ADAPTER
+
+    checkpoints = tmp_path / "ckpts"
+    assert (
+        finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=checkpoints, trainer=trainer) == "ckpt-r1"
+    )
+    assert list(shipped_images.values()) == [b"frame-bytes"]
+    assert [e["target"] for e in shipped_examples] == [
+        '{"skill":"push_forward","params":{"distance_cm":12.3}}',
+        '{"skill":"reobserve","params":{}}',
+    ]
+    assert {e["image"] for e in shipped_examples} == set(shipped_images)
+    assert resolve_adapter("ckpt-r1", checkpoints) == checkpoints / "ckpt-r1"
+    meta = json.loads((checkpoints / "ckpt-r1" / "meta.json").read_text())
+    assert (meta["examples"], meta["frames"], meta["previous"]) == (2, 1, "ckpt-r0")
+
+
+def test_trainer_without_adapter_weights_leaves_no_checkpoint(tmp_path: Path) -> None:
+    rows = [example(tmp_path, SkillTarget(skill="retract"))]
+
+    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+        return {"adapter_config.json": b"{}"}
+
+    with pytest.raises(RuntimeError, match="adapter_model.safetensors"):
+        finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=tmp_path / "ckpts", trainer=trainer)
+    assert not (tmp_path / "ckpts").exists()

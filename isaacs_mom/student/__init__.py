@@ -3,7 +3,6 @@
 from isaacs_mom.student.checkpoints import BASE_CHECKPOINT
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.stub import StubStudent, stub_finetune
-
-finetune = stub_finetune
+from isaacs_mom.student.tuning import finetune
 
 __all__ = ["BASE_CHECKPOINT", "StubStudent", "StudentPolicy", "finetune", "stub_finetune"]
