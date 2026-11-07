@@ -1,9 +1,9 @@
 """Workstream 2: the Argon teacher (SPEC §3.3, rules 1 and 5). A fake Argon client; no network calls."""
 
+import ast
 import json
 import subprocess
 import sys
-from collections.abc import Callable
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -22,8 +22,16 @@ from isaacs_mom.contracts import (
 )
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
-from isaacs_mom.teacher import OFFLINE_REOBSERVES, PARSE_ATTEMPTS, ArgonPolicy, choose_scenes, diagnose
-from isaacs_mom.teacher.argon import Argon, ArgonUnavailable, MissingKey, Part, env_value, gemini_generate
+from isaacs_mom.teacher import ATTEMPTS, ArgonPolicy, choose_scenes, diagnose
+from isaacs_mom.teacher.argon import (
+    Argon,
+    ArgonUnavailable,
+    MissingKey,
+    Part,
+    env_value,
+    gemini_generate,
+    stub_generate,
+)
 
 MOVE: Skill = next(s for s in SKILLS if s != "reobserve")
 STEP = json.dumps({"skill": MOVE, "params": {"distance_cm": 5}, "reason": "box is left of centre"})
@@ -38,7 +46,7 @@ class FakeArgon:
         self.answers = list(answers)
         self.prompts: list[list[Part]] = []
 
-    def __call__(self, parts: list[Part]) -> str:
+    def __call__(self, purpose: str, parts: list[Part]) -> str:
         self.prompts.append(parts)
         answer = self.answers.pop(0)
         if isinstance(answer, Exception):
@@ -120,6 +128,7 @@ def test_a_second_look_in_a_row_ends_the_demo_instead_of_recording_it(tmp_path: 
         json.dumps({"done": True, "skill": MOVE}),  # done alongside a skill
         json.dumps({"done": "yes"}),
         "[" * 100_000 + "]" * 100_000,  # RecursionError in json.loads
+        json.dumps({"skill": MOVE}).replace("}", ', "params": {"distance_cm": ' + "9" * 5000 + "}}"),  # ValueError
     ],
 )
 def test_unparseable_answers_are_asked_again_not_recorded_and_logged_raw(tmp_path: Path, bad: str) -> None:
@@ -131,30 +140,57 @@ def test_unparseable_answers_are_asked_again_not_recorded_and_logged_raw(tmp_pat
 
 
 def test_an_answer_that_never_parses_ends_the_demo_with_one_reobserve(tmp_path: Path) -> None:
-    a, fake = argon(tmp_path, *["nonsense"] * PARSE_ATTEMPTS)
+    a, fake = argon(tmp_path, *["nonsense"] * ATTEMPTS)
     assert demo(ArgonPolicy(None, a)) == ["reobserve"]
-    assert len(fake.prompts) == PARSE_ATTEMPTS
+    assert len(fake.prompts) == ATTEMPTS
 
 
-# --- unreachable, missing key, our own bugs ---
+def test_a_huge_integer_in_a_diagnosis_is_unparseable_not_a_crash(tmp_path: Path) -> None:
+    a, _ = argon(tmp_path, '{"hypothesis": "x", "evidence": "y", "confidence": ' + "9" * 5000 + ', "lesson": "z"}')
+    assert diagnose(failed_episode(), [b"f"], a).confidence == 0.0
 
 
-def test_unreachable_argon_holds_and_reobserves_then_stops(tmp_path: Path) -> None:
-    a, _ = argon(tmp_path, *[ArgonUnavailable("offline")] * (OFFLINE_REOBSERVES + 1))
-    assert demo(ArgonPolicy(None, a)) == ["reobserve"] * OFFLINE_REOBSERVES
+# --- unreachable: hold on the same frame, never two reobserves in a row mid-demo ---
+
+
+def test_an_unreachable_argon_is_asked_again_without_recording_a_step(tmp_path: Path) -> None:
+    down = ArgonUnavailable("offline")
+    a, fake = argon(tmp_path, down, down, STEP, DONE)
+    assert demo(ArgonPolicy(None, a)) == [MOVE, "reobserve"]
+    assert len(fake.prompts) == 4
+
+
+def test_argon_down_for_a_whole_step_ends_the_demo_with_one_reobserve(tmp_path: Path) -> None:
+    a, _ = argon(tmp_path, STEP, LOOK, *[ArgonUnavailable("offline")] * ATTEMPTS)
+    assert demo(ArgonPolicy(None, a)) == [MOVE, "reobserve"]
+
+
+def test_no_two_reobserves_in_a_row_before_the_end_whatever_argon_does(tmp_path: Path) -> None:
+    down = ArgonUnavailable("offline")
+    a, _ = argon(tmp_path, LOOK, down, "junk", LOOK, STEP, LOOK, "", LOOK, DONE, budget=50)
+    skills = demo(ArgonPolicy(None, a))
+    assert not any(x == y == "reobserve" for x, y in zip(skills[:-1], skills[1:], strict=False))
+    assert skills[-1] == "reobserve"
 
 
 def test_an_empty_answer_is_a_failed_call_not_ok(tmp_path: Path) -> None:
-    a, _ = argon(tmp_path, *[""] * (OFFLINE_REOBSERVES + 1))
-    assert demo(ArgonPolicy(None, a)) == ["reobserve"] * OFFLINE_REOBSERVES
+    a, _ = argon(tmp_path, *[""] * ATTEMPTS)
+    assert demo(ArgonPolicy(None, a)) == ["reobserve"]
     assert all(not e["ok"] and e["error"] == "empty answer" for e in events(tmp_path, "argon_call"))
 
 
-def test_a_missing_key_fails_fast(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def test_over_budget_ends_the_demo_without_another_call(tmp_path: Path) -> None:
+    a, fake = argon(tmp_path, STEP, budget=1)
+    assert demo(ArgonPolicy(None, a)) == [MOVE, "reobserve"]
+    assert len(fake.prompts) == 1
+    assert not events(tmp_path, "error")  # it stopped, rather than knocking on a closed budget three times
+
+
+def test_a_missing_key_fails_when_the_generator_is_built(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(argon_module, "ENV_PATH", tmp_path / "no.env")
     with pytest.raises(MissingKey):
-        Argon(EventLog(tmp_path, "run"), budget=5).ask("act", ["hi"])
+        Argon(EventLog(tmp_path, "run"), budget=5)
 
 
 def test_a_bug_in_our_code_is_not_mistaken_for_unreachable(tmp_path: Path) -> None:
@@ -163,43 +199,85 @@ def test_a_bug_in_our_code_is_not_mistaken_for_unreachable(tmp_path: Path) -> No
         ArgonPolicy(None, a).act(obs(), "task", "start")
 
 
-def test_the_sdk_client_has_a_timeout_and_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+def fake_client(monkeypatch: pytest.MonkeyPatch, made: list[dict[str, object]], answer: object) -> None:
     from google import genai
 
-    made: list[dict[str, object]] = []
+    def generate_content(**_: object) -> SimpleNamespace:
+        if isinstance(answer, Exception):
+            raise answer
+        return SimpleNamespace(text=answer)
 
-    class Client:
-        def __init__(self, **kwargs: object) -> None:
-            made.append(kwargs)
-            self.models = SimpleNamespace(generate_content=lambda **_: SimpleNamespace(text=STEP))
+    def client(**kwargs: object) -> SimpleNamespace:
+        made.append(kwargs)
+        return SimpleNamespace(models=SimpleNamespace(generate_content=generate_content))
 
     monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    monkeypatch.setattr(genai, "Client", Client)
+    monkeypatch.setattr(genai, "Client", client)
+
+
+def test_the_sdk_client_has_a_timeout_and_is_reused(monkeypatch: pytest.MonkeyPatch) -> None:
+    made: list[dict[str, object]] = []
+    fake_client(monkeypatch, made, STEP)
     generate = gemini_generate()
-    assert generate(["a"]) == generate(["b"]) == STEP
+    assert generate("act", ["a"]) == generate("act", ["b"]) == STEP
     assert len(made) == 1
     assert made[0]["http_options"].timeout == argon_module.TIMEOUT_S * 1000  # type: ignore[union-attr]
 
 
-def test_only_sdk_and_network_errors_count_as_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+def unreachable_errors() -> list[Exception]:
     import httpx2
-    from google import genai
     from google.genai import errors
 
-    def client_raising(error: Exception) -> Callable[..., object]:
-        def boom(**_: object) -> None:
-            raise error
+    return [
+        errors.ServerError(503, {"error": {"message": "overloaded"}}),
+        errors.ClientError(429, {"error": {"message": "rate limited"}}),
+        errors.UnknownApiResponseError("not json"),
+        httpx2.ConnectError("down"),
+        httpx2.ReadTimeout("slow"),
+    ]
 
-        return lambda **_: SimpleNamespace(models=SimpleNamespace(generate_content=boom))
 
-    monkeypatch.setenv("GEMINI_API_KEY", "test-key")
-    for error in (errors.ClientError(429, {"error": {"message": "quota"}}), httpx2.ConnectError("down")):
-        monkeypatch.setattr(genai, "Client", client_raising(error))
-        with pytest.raises(ArgonUnavailable):
-            gemini_generate()(["hi"])
-    monkeypatch.setattr(genai, "Client", client_raising(KeyError("our bug")))
+@pytest.mark.parametrize("error", unreachable_errors(), ids=lambda e: type(e).__name__)
+def test_server_rate_limit_transport_and_non_json_errors_count_as_unreachable(
+    monkeypatch: pytest.MonkeyPatch, error: Exception
+) -> None:
+    fake_client(monkeypatch, [], error)
+    with pytest.raises(ArgonUnavailable):
+        gemini_generate()("act", ["hi"])
+
+
+@pytest.mark.parametrize("code", [400, 401, 403, 404])
+def test_other_4xx_errors_fail_fast(monkeypatch: pytest.MonkeyPatch, code: int) -> None:
+    from google.genai import errors
+
+    fake_client(monkeypatch, [], errors.ClientError(code, {"error": {"message": "bad request"}}))
+    with pytest.raises(errors.ClientError):
+        gemini_generate()("act", ["hi"])
+
+
+def test_our_own_bug_inside_the_sdk_call_is_not_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    fake_client(monkeypatch, [], KeyError("our bug"))
     with pytest.raises(KeyError):
-        gemini_generate()(["hi"])
+        gemini_generate()("act", ["hi"])
+
+
+def test_tests_cannot_build_a_live_client(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", "a-real-looking-key")
+    with pytest.raises(RuntimeError, match="live Gemini client"):
+        gemini_generate()
+
+
+def test_the_stub_teacher_needs_no_key_and_ends_each_demo_at_once(tmp_path: Path) -> None:
+    a = Argon(EventLog(tmp_path, "run"), budget=5, generate=stub_generate)
+    assert demo(ArgonPolicy(None, a)) == ["reobserve"]
+    assert diagnose(failed_episode(), [b"f"], a).confidence == 0.0
+    assert "argon: 2/5 calls, 0 unavailable" in a.summary()
+
+
+def test_the_summary_reports_failures_and_a_used_up_budget(tmp_path: Path) -> None:
+    a, _ = argon(tmp_path, ArgonUnavailable("offline"), budget=1)
+    a.ask("act", ["x"])
+    assert a.summary() == "argon: 1/1 calls, 1 unavailable or empty, budget used up"
 
 
 # --- rule 5: the budget and the call log ---
@@ -207,9 +285,7 @@ def test_only_sdk_and_network_errors_count_as_unreachable(monkeypatch: pytest.Mo
 
 def test_every_call_counts_and_is_logged_even_when_it_fails_and_the_cap_stops_calls(tmp_path: Path) -> None:
     a, fake = argon(tmp_path, ArgonUnavailable("offline"), "", STEP, budget=2)
-    policy = ArgonPolicy(None, a)
-    for i in range(3):
-        policy.act(obs(i), "task", "x")
+    assert [a.ask("act", ["x"]) for _ in range(3)] == [None, None, None]
     assert len(fake.prompts) == 2
     logged = events(tmp_path, "argon_call")
     assert [e["ok"] for e in logged] == [False, False]
@@ -296,8 +372,29 @@ def test_the_teacher_never_loads_the_simulator() -> None:
     assert out.strip() == "[]"
 
 
+def test_no_teacher_code_imports_the_simulator_even_inside_a_function() -> None:
+    folder = Path(__file__).resolve().parent.parent / "isaacs_mom" / "teacher"
+    for path in folder.glob("*.py"):
+        for node in ast.walk(ast.parse(path.read_text())):
+            if isinstance(node, ast.Import):
+                assert not any(a.name.startswith("isaacs_mom.sim") for a in node.names), path
+            if isinstance(node, ast.ImportFrom):
+                names = [node.module or "", *(f"{node.module}.{a.name}" for a in node.names)]
+                assert not any(n.split(".")[-1] == "sim" or ".sim." in f"{n}." for n in names), path
+            if isinstance(node, ast.Call):  # importlib.import_module("isaacs_mom.sim..."), __import__(...)
+                strings = [x.value for x in node.args if isinstance(x, ast.Constant) and isinstance(x.value, str)]
+                assert not any(v.startswith("isaacs_mom.sim") or v == ".sim" for v in strings), path
+
+
 @pytest.mark.parametrize(
-    "line", ["GEMINI_API_KEY=abc", "export GEMINI_API_KEY=abc", "GEMINI_API_KEY=abc # note", "GEMINI_API_KEY='abc'"]
+    "line",
+    [
+        "GEMINI_API_KEY=abc",
+        "export GEMINI_API_KEY=abc",
+        "GEMINI_API_KEY=abc # note",
+        "GEMINI_API_KEY='abc'",
+        'GEMINI_API_KEY="abc',  # unmatched quote
+    ],
 )
 def test_the_key_is_read_from_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, line: str) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
