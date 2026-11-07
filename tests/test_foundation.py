@@ -5,14 +5,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCall
+from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCall, SkillTarget
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import PLACE_X, FakeSim
 from isaacs_mom.teacher import choose_scenes
-from isaacs_mom.validator.training import build_training_set
+from isaacs_mom.validator.training import build_training_set, training_examples
 
 
 class ScriptedPolicy:
@@ -121,7 +121,7 @@ def test_training_set_takes_only_accepted_teacher_steps_from_dev(tmp_path: Path)
     lines = build_training_set(tmp_path, 1).read_text().splitlines()
     teacher_steps = [s for s in accepted.steps if s.controller == "teacher"]
     assert len(lines) == len(teacher_steps) > 0
-    assert all(f"/{accepted.episode_id}/" in json.loads(line)["image"] for line in lines)
+    assert all(accepted.episode_id in Path(json.loads(line)["image"]).parts for line in lines)
 
 
 def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
@@ -130,3 +130,33 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
     assert all(r.n == len(heldout_seeds()) for r in results)
     event_types = {json.loads(line)["type"] for line in (tmp_path / "events.jsonl").read_text().splitlines()}
     assert {"evaluation_result", "finetune_completed", "validation"} <= event_types
+
+
+def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason(tmp_path: Path) -> None:
+    class Explains(ScriptedPolicy):
+        def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+            call = super().act(obs, instruction, feedback)
+            return call.model_copy(update={"reason": "block is right of the hand"}) if call else None
+
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    manifest = run_episode(
+        sim,
+        GiveUp(),
+        takeover=Explains(sim),
+        run_dir=tmp_path,
+        events=events,
+        seed=1504,
+        split="dev",
+        round_=0,
+        instruction="push",
+    )
+    events_seen = [json.loads(line) for line in events.path.read_text().splitlines()]
+    decisions = [e["data"] for e in events_seen if e["type"] == "decision"]
+    assert all("latency_ms" in d for d in decisions if not d.get("takeover"))
+    assert all("reason" in d for d in decisions)
+    assert any(d["reason"] == "block is right of the hand" for d in decisions)
+    examples = training_examples(tmp_path / "episodes" / manifest.episode_id, manifest)
+    assert examples and all(type(e.target) is SkillTarget for e in examples)
+    lines = build_training_set(tmp_path, 1).read_text().splitlines()
+    assert lines and all("reason" not in json.loads(line)["target"] for line in lines)

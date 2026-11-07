@@ -1,10 +1,14 @@
 """Workstream 1: the real MuJoCo scene (SPEC §6 Gate A, rule 7). Skipped with a reason where nothing can render."""
 
+from pathlib import Path
+
 import numpy as np
 import pytest
 
 from isaacs_mom.contracts import Perturbation, SkillCall
-from isaacs_mom.validator import validate
+from isaacs_mom.orchestrator.episode import run_episode
+from isaacs_mom.orchestrator.events import EventLog
+from isaacs_mom.validator import replay, validate
 
 try:
     from isaacs_mom.sim.mujoco import MujocoSim
@@ -58,3 +62,19 @@ def test_out_of_reach_skills_are_refused_not_executed(sim: MujocoSim) -> None:
     assert not result.ok and result.error and not result.executed_actions
     assert sim.observe().joint_state == before
     assert not sim.ground_truth().joint_limit_violation
+
+
+def test_a_recorded_episode_replays_exactly(sim: MujocoSim, tmp_path: Path) -> None:
+    manifest = run_episode(
+        sim,
+        OraclePolicy(sim),
+        run_dir=tmp_path,
+        events=EventLog(tmp_path, "t"),
+        seed=SEED,
+        split="dev",
+        round_=0,
+        instruction="hug",
+        perturb_at=1,
+    )
+    assert manifest.validation and manifest.validation.accepted, manifest.validation
+    assert replay(sim, tmp_path / "episodes" / manifest.episode_id / "manifest.json")

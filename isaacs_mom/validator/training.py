@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from isaacs_mom.contracts import EpisodeManifest, TrainingExample
+from isaacs_mom.contracts import EpisodeManifest, SkillTarget, TrainingExample
 from isaacs_mom.seeds import assert_not_heldout
 
 
@@ -18,7 +18,7 @@ def training_examples(episode_dir: Path, manifest: EpisodeManifest) -> list[Trai
                     image=str(episode_dir / record.frame),
                     instruction=manifest.instruction,
                     feedback=feedback,
-                    target=record.skill_call,
+                    target=SkillTarget(skill=record.skill_call.skill, params=record.skill_call.params),
                 )
             )
         feedback = f"{record.skill_call.skill}: {'ok' if record.ok else record.error}"

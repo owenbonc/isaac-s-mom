@@ -45,7 +45,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration.
 - Recorder writes `runs/<run_id>/episodes/<episode_id>/` (manifest §4.2, frames as JPEG, actions as `.npy`) and `runs/<run_id>/events.jsonl`.
 - `build_training_set(run_id, round) -> path` applies rules 2 and 3.
-- `replay(episode_id)` re-executes stored actions from the stored seed and reports whether the final state validates.
+- `replay(sim, manifest_path)` re-executes the stored skill calls and perturbations from the stored seed and reports whether the executed actions and the final verdict reproduce; it sets `replay_valid`.
 
 ### 3.5 Orchestrator, dashboard, demo (workstream 5)
 - One command, `uv run mom run`, executes the loop (§3.6) and writes events.
@@ -79,16 +79,16 @@ class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
     def render_third_person(self) -> bytes: ...  # JPEG, for the video
 ```
 - `Observation{episode_id, step, sim_time, head_rgb_jpeg: bytes, joint_state: list[float]}`
-- `SkillCall{skill: Skill, params: dict[str, float]}`; `ExecResult{ok, error, executed_actions: list[list[float]], timestamps: list[float]}`
+- `SkillTarget{skill: Skill, params: dict[str, float]}`; `SkillCall(SkillTarget){reason: str}`, where `reason` is shown on the dashboard and never trained on; `ExecResult{ok, error, executed_actions: list[list[float]], timestamps: list[float]}`
 - `Perturbation{kind: move_box | move_bin, seed}`
 - `GroundTruth{box_xyz, bin_xy, bin_yaw, bin_inner_half, box_on_bin_floor, box_at_rest, robot_fallen, joint_limit_violation, penetration}`
 - `Validation{task_success, physics_valid, reason}` is computed by the validator from `GroundTruth`.
 
 ### 4.2 Episode manifest (`manifest.json`)
-`{episode_id, run_id, seed, split: dev|heldout, round, instruction, sim_version, robot_config, steps: [{step, sim_time, frame: "frames/0003.jpg", joint_state, skill_call, controller: student|teacher, checkpoint, actions: "actions/0003.npy", timestamps}], takeover_step: int|null, diagnosis: Diagnosis|null, validation: Validation, replay_valid: bool|null}`
+`{episode_id, run_id, seed, split: dev|heldout, round, instruction, sim_version, robot_config, steps: [{step, sim_time, frame: "frames/0003.jpg", joint_state, skill_call, controller: student|teacher, checkpoint, actions: "actions/0003.npy", timestamps}], perturbations: [{before_step, perturbation: Perturbation}], takeover_step: int|null, diagnosis: Diagnosis|null, validation: Validation, replay_valid: bool|null}`
 
 ### 4.3 Training example (one JSON line)
-`{image: "<path to frame>", instruction, feedback, target: SkillCall}` from teacher steps of accepted dev episodes only.
+`{image: "<path to frame>", instruction, feedback, target: SkillTarget}` (skill and params only, never the reason) from teacher steps of accepted dev episodes only.
 
 ### 4.4 Events (`events.jsonl`)
 `{t, run_id, type, data}` with `type` in `episode_started, observation, decision, action_executed, perturbation, validation, diagnosis, finetune_started, finetune_completed, evaluation_result, argon_call, error`.

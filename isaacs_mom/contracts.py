@@ -28,7 +28,9 @@ EventType = Literal[
 ]
 
 
-class SkillCall(BaseModel):
+class SkillTarget(BaseModel):
+    """A skill and its parameters: what the student is trained to output (SPEC §4.3)."""
+
     skill: Skill
     params: dict[str, float] = Field(default_factory=dict)
 
@@ -39,6 +41,12 @@ class SkillCall(BaseModel):
         if unknown:
             raise ValueError(f"unknown skill params: {sorted(unknown)}")
         return {k: min(max(v, 0.0), PARAM_LIMITS[k]) for k, v in params.items()}
+
+
+class SkillCall(SkillTarget):
+    """A policy's decision. `reason` is shown on the dashboard and never trained on."""
+
+    reason: str = ""
 
 
 class Observation(BaseModel):
@@ -109,6 +117,11 @@ class StepRecord(BaseModel):
     error: str | None = None
 
 
+class PerturbationRecord(BaseModel):
+    before_step: int
+    perturbation: Perturbation
+
+
 class EpisodeManifest(BaseModel):
     episode_id: str
     run_id: str
@@ -119,6 +132,7 @@ class EpisodeManifest(BaseModel):
     sim_version: str
     robot_config: str
     steps: list[StepRecord] = Field(default_factory=list)
+    perturbations: list[PerturbationRecord] = Field(default_factory=list)
     takeover_step: int | None = None
     diagnosis: Diagnosis | None = None
     validation: Validation | None = None
@@ -129,7 +143,7 @@ class TrainingExample(BaseModel):
     image: str
     instruction: str
     feedback: str
-    target: SkillCall
+    target: SkillTarget
 
 
 class EvaluationResult(BaseModel):
