@@ -183,7 +183,7 @@
   }
 
   // The head-camera frames to show around the stage frame (`now`): the latest, or the first at or after `focus`.
-  // The first frame after the box or bin moved is flagged.
+  // The first frame after the box or bin moved is flagged `moved`, it and every later one `after`.
   function filmstrip(ep, focus = null) {
     if (!ep || !ep.frames.length) return [];
     const frames = ep.frames;
@@ -191,7 +191,8 @@
     const stage = (focus !== null && frames.find((f) => f.step >= focus)) || frames[frames.length - 1];
     const at = frames.indexOf(stage);
     const start = Math.max(0, Math.min(at - (FILMSTRIP >> 1), frames.length - FILMSTRIP));
-    return frames.slice(start, start + FILMSTRIP).map((f) => ({ ...f, moved: f === moved, now: f === stage }));
+    const after = (f) => ep.perturbedStep !== null && f.step !== null && f.step >= ep.perturbedStep;
+    return frames.slice(start, start + FILMSTRIP).map((f) => ({ ...f, moved: f === moved, after: after(f), now: f === stage }));
   }
 
   // The shown episode's box or bin move: the last frame before it, the first frame that shows it, and the first

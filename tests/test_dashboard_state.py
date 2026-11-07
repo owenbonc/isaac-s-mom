@@ -105,7 +105,7 @@ def test_missing_or_bad_latency_is_not_counted() -> None:
     assert out["summary"]["student"] is None
 
 
-def test_the_first_frame_after_the_perturbation_is_flagged() -> None:
+def test_the_first_frame_after_the_perturbation_is_flagged_and_every_later_one_marked_after_it() -> None:
     out = fold(
         ("episode_started", {"episode_id": "e"}),
         decision(0),
@@ -115,8 +115,11 @@ def test_the_first_frame_after_the_perturbation_is_flagged() -> None:
         decision(2),
         executed(1),
         executed(2),
+        decision(3),
+        executed(3),
     )
-    assert [f["moved"] for f in out["filmstrip"]] == [False, False, True]
+    assert [f["moved"] for f in out["filmstrip"]] == [False, False, True, False]
+    assert [f["after"] for f in out["filmstrip"]] == [False, False, True, True]
 
 
 def test_rounds_keep_their_n_and_a_new_episode_replaces_the_current_one() -> None:

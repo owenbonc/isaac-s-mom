@@ -103,7 +103,7 @@ footer.models .v{color:var(--muted)}
 .cell{min-height:0;display:grid;place-items:center;container-type:size}
 .shot{position:relative;width:min(100cqw,133.33cqh);aspect-ratio:4/3;background:var(--frame-bg);border-radius:3px;box-shadow:var(--shadow);overflow:hidden}
 .shot img{display:block;width:100%;height:100%;object-fit:contain}
-.shot .over{position:absolute;left:.6rem;top:.6rem;display:flex;gap:.5rem;align-items:center}
+.shot .over{position:absolute;left:.6rem;right:.6rem;top:.6rem;display:flex;flex-wrap:wrap;gap:.4rem .5rem;align-items:center}
 .over .step{background:var(--ink);color:var(--panel);font-weight:600;padding:.12rem .5rem;border-radius:3px}
 /* The skill the shown frame led to, large enough to read from the back of the room; smaller in P's half-width pair. */
 .shot .said{position:absolute;left:.6rem;bottom:.6rem;background:var(--panel);box-shadow:var(--shadow);border-radius:3px;padding:.05rem .5rem;font:700 var(--step-3)/1.15 var(--mono)}
@@ -111,6 +111,7 @@ footer.models .v{color:var(--muted)}
 .said.teacher{color:var(--teacher)}
 @container (width < 24rem){.shot .said{font-size:var(--step-1)}}
 .over .tag{background:var(--panel);box-shadow:var(--shadow)}
+.over .tag.ink{background:var(--ink);color:var(--panel)}
 .empty{display:grid;place-items:center;text-align:center;color:var(--ph);padding:1rem;max-width:30ch;margin:auto}
 .tuning{margin:auto;text-align:center}
 .tuning p{margin:0}
@@ -118,7 +119,8 @@ footer.models .v{color:var(--muted)}
 .tuning .fig{margin:.5rem 0 .2rem}
 
 .strip{list-style:none;margin:0;padding:.1rem .7rem .7rem;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.4rem;flex:none}
-.strip:empty{display:none}
+/* P's pair is the peak, so no thumbnail competes with it at any size. */
+.strip:empty,#stage:has(.cell + .cell) + .strip{display:none}
 .strip li{display:flex;flex-direction:column;gap:.15rem;min-width:0}
 .thumb{position:relative;aspect-ratio:4/3;background:var(--frame-bg);border-radius:3px;overflow:hidden}
 .strip img{display:block;width:100%;height:100%;object-fit:cover}

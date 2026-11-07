@@ -162,7 +162,9 @@ function renderCamera() {
     const next = first ? ` First decision after the move: <span class="mono">${skillText(first)}</span>.${first.reason ? ` ${esc(first.reason)}` : ""}` : "";
     caption = `<p class="caption moved">${what} between ${move.before && move.before.step !== null ? `step ${esc(move.before.step)} and ` : "these frames, before "}step ${esc(move.step)}.${next}</p>`;
   } else {
-    frame = cell(ep, last, tag(last.controller, last.checkpoint), last.moved);
+    // The move stays marked for the rest of its episode, so P still finds it after the moment has passed.
+    const mark = last.after ? `<span class="tag ink">${what} at step ${esc(move.step)} · <kbd>P</kbd></span>` : "";
+    frame = cell(ep, last, tag(last.controller, last.checkpoint) + mark, last.moved);
     caption = last.moved
       ? `<p class="caption moved">${what} just before this frame, the first to show it.</p>`
       : `<p class="caption">${last.step === null ? "Head-camera frame." : `What the ${last.controller || "robot"} saw at step ${esc(last.step)}, before choosing.`}</p>`;
