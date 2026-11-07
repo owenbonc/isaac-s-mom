@@ -477,7 +477,9 @@ def test_the_documented_fake_run_needs_no_key_and_asking_for_argon_without_one_s
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(argon_module, "ENV_PATH", tmp_path / "no.env")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--rounds", "0", "--run-id", "doc"])
+    monkeypatch.setattr(
+        sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", "--rounds", "0", "--run-id", "doc"]
+    )
     cli.main()
     out = capsys.readouterr().out
     assert "(stub teacher)" in out and "argon: 0/" in out  # the stub spends nothing, not even a startup check
