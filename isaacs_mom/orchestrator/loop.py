@@ -1,5 +1,6 @@
 """The teach -> fine-tune loop (SPEC §3.6)."""
 
+import time
 from collections.abc import Callable
 from pathlib import Path
 
@@ -9,7 +10,7 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
-from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
+from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, adapter_dir, finetune
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.validator.training import build_training_set
 
@@ -106,6 +107,18 @@ def run_loop(
             )
         training_set = build_training_set(run_dir, round_ + 1)
         events.emit("finetune_started", round=round_ + 1, training_set=str(training_set))
+        started = time.monotonic()
         previous, checkpoint = checkpoint, train_student(training_set, checkpoint, round_ + 1)
-        events.emit("finetune_completed", round=round_ + 1, checkpoint=checkpoint, skipped=checkpoint == previous)
+        duration_s = round(time.monotonic() - started, 1)
+        skipped = checkpoint == previous
+        path = None if skipped else adapter_dir(checkpoint)
+        events.emit(
+            "finetune_completed",
+            round=round_ + 1,
+            checkpoint=checkpoint,
+            skipped=skipped,
+            examples=len(training_set.read_text().splitlines()),
+            duration_s=duration_s,
+            checkpoint_path=str(path) if path else None,
+        )
     return results

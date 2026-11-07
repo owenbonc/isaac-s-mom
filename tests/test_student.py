@@ -7,7 +7,7 @@ import pytest
 
 from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget, TrainingExample
 from isaacs_mom.orchestrator.loop import INSTRUCTION
-from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, resolve_adapter
+from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, adapter_dir, resolve_adapter
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
 from isaacs_mom.student.tuning import finetune
@@ -103,6 +103,12 @@ def test_fine_tuned_checkpoint_needs_a_complete_adapter(tmp_path: Path) -> None:
         resolve_adapter("run-a/ckpt-r1", tmp_path)
     (adapter / ADAPTER_FILES[1]).write_bytes(b"weights")
     assert resolve_adapter("run-a/ckpt-r1", tmp_path) == adapter
+
+
+def test_adapter_dir_places_a_checkpoint_inside_its_run_without_touching_disk(tmp_path: Path) -> None:
+    assert adapter_dir("run-a/ckpt-r2", tmp_path) == tmp_path / "run-a" / "checkpoints" / "ckpt-r2"
+    assert adapter_dir(BASE_CHECKPOINT, tmp_path) is None
+    assert adapter_dir("../ckpt-r1", tmp_path) is None
 
 
 @pytest.mark.parametrize("checkpoint", ["ckpt-r1", "run-a/ckpt-rx", "run-a/ckpt-r1/x", "../ckpt-r1", "/ckpt-r1"])

@@ -233,13 +233,7 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
     assert "trained-1" in built
 
 
-@pytest.mark.parametrize(
-    ("train_student", "skipped"),
-    [(stub_finetune, True), (lambda training_set, previous, round_: f"t/ckpt-r{round_}", False)],
-)
-def test_finetune_completed_says_whether_training_was_skipped(
-    tmp_path: Path, train_student: Callable[[Path, str, int], str], skipped: bool
-) -> None:
+def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int], str]) -> tuple[dict, dict]:
     run_loop(
         FakeSim(),
         tmp_path,
@@ -251,4 +245,20 @@ def test_finetune_completed_says_whether_training_was_skipped(
         train_student=train_student,
     )
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
-    assert [e["data"]["skipped"] for e in events if e["type"] == "finetune_completed"] == [skipped]
+    [started] = [e["data"] for e in events if e["type"] == "finetune_started"]
+    [completed] = [e["data"] for e in events if e["type"] == "finetune_completed"]
+    return started, completed
+
+
+def test_a_skipped_finetune_says_so_and_names_no_adapter(tmp_path: Path) -> None:
+    _, completed = finetune_events(tmp_path, stub_finetune)
+    assert (completed["skipped"], completed["examples"], completed["checkpoint_path"]) == (True, 0, None)
+    assert isinstance(completed["duration_s"], float)
+
+
+def test_a_finetune_reports_what_it_trained_on_how_long_and_where(tmp_path: Path) -> None:
+    started, completed = finetune_events(tmp_path, lambda training_set, previous, round_: f"t/ckpt-r{round_}")
+    assert (completed["checkpoint"], completed["skipped"]) == ("t/ckpt-r1", False)
+    assert completed["examples"] == len(Path(started["training_set"]).read_text().splitlines())
+    assert isinstance(completed["duration_s"], float) and completed["duration_s"] >= 0
+    assert Path(completed["checkpoint_path"]).parts[-3:] == ("t", "checkpoints", "ckpt-r1")
