@@ -2,18 +2,24 @@
 
 Argon sees only head-camera JPEGs, the instruction, the skill history and the validator's reason, never simulator
 ground truth (rule 1), so nothing here imports `isaacs_mom.sim`.
+
+Done rule (agreed in #7): a demo ends with exactly one `reobserve`, then None; the student reads two `reobserve`s in a
+row as done. So the teacher never records a stray `reobserve` for an answer it could not parse; it asks again.
 """
 
 import json
+from typing import Literal
 
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from isaacs_mom.contracts import Controller, Diagnosis, EpisodeManifest, Observation, SkillCall
 from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
 from isaacs_mom.teacher.argon import Argon
 
 OFFLINE_REOBSERVES = 3  # holds this many times when Argon is unreachable or over budget, then gives up (SPEC §3.3)
+PARSE_ATTEMPTS = 3  # asks this many times for an answer it can parse, then ends the demo
 DIAGNOSIS_FRAMES = 4  # the first frame and the last three: the start and how it went wrong, at a bounded cost
+RAW_LOG_CHARS = 500
 
 SKILL_SCHEMA = json.dumps(SkillCall.model_json_schema())
 
@@ -21,8 +27,37 @@ ROBOT = """You control a simulated Unitree G1 robot. Your only sensor is the hea
 You act by choosing one whitelisted skill at a time; a controller turns it into joint motion.
 Skills are refused with a reason if they would go out of reach; the next feedback tells you."""
 
+Done = Literal["done"]
 
-def diagnose(failed: EpisodeManifest, frames: list[bytes], argon: Argon | None = None) -> Diagnosis:
+
+def _strict(model: type[BaseModel], answer: str) -> BaseModel | None:
+    """The answer as `model`, or None if it is not exactly that object: no extra keys, no "7" for 7."""
+    try:
+        raw = json.loads(answer)
+    except (json.JSONDecodeError, RecursionError):
+        return None
+    if not isinstance(raw, dict) or set(raw) - set(model.model_fields):
+        return None
+    try:
+        return model.model_validate(raw, strict=True)
+    except ValidationError:
+        return None
+
+
+def parse_step(answer: str) -> SkillCall | Done | None:
+    """A skill call, "done", or None for anything else (including "done" alongside a skill)."""
+    try:
+        raw = json.loads(answer)
+    except (json.JSONDecodeError, RecursionError):
+        return None
+    if isinstance(raw, dict) and "done" in raw:
+        ok = raw["done"] is True and set(raw) <= {"done", "reason"} and isinstance(raw.get("reason", ""), str)
+        return "done" if ok else None
+    call = _strict(SkillCall, answer)
+    return call if isinstance(call, SkillCall) else None
+
+
+def diagnose(failed: EpisodeManifest, frames: list[bytes], argon: Argon) -> Diagnosis:
     """From a failed episode's frames, skill calls and validator reason, a failure hypothesis."""
     reason = failed.validation.reason if failed.validation else "no validation"
     steps = [
@@ -38,28 +73,27 @@ Its skill calls, in order:
 The independent validator's verdict: {reason}
 The images are head-camera frames from the start and the end of the episode.
 
-Diagnose the most likely cause of the failure from this evidence only. Answer with JSON:
+Diagnose the most likely cause of the failure from this evidence only. Answer with exactly this JSON object:
 {{"hypothesis": str, "evidence": str, "confidence": number 0-1, "lesson": str}}
 `lesson` is one sentence the teacher should apply when demonstrating this task."""
     shown = frames if len(frames) <= DIAGNOSIS_FRAMES else [frames[0], *frames[-(DIAGNOSIS_FRAMES - 1) :]]
-    answer = (argon or Argon()).ask("diagnose", [prompt, *shown])
+    answer = argon.ask("diagnose", [prompt, *shown])
     if answer is None:
         return Diagnosis(hypothesis="not diagnosed: Argon unavailable", evidence=reason, confidence=0.0, lesson="")
-    try:
-        return Diagnosis.model_validate_json(answer)
-    except ValidationError as e:
-        return Diagnosis(
-            hypothesis="not diagnosed: unparseable Argon answer",
-            evidence=f"{reason}; {e.error_count()} validation errors",
-            confidence=0.0,
-            lesson="",
-        )
+    diagnosis = _strict(Diagnosis, answer)
+    if isinstance(diagnosis, Diagnosis):
+        return diagnosis
+    argon.error("diagnose", "unparseable Argon answer", raw=answer[:RAW_LOG_CHARS])
+    return Diagnosis(hypothesis="not diagnosed: unparseable Argon answer", evidence=reason, confidence=0.0, lesson="")
 
 
-def choose_scenes(diagnoses: list[Diagnosis], n: int, start: int = DEV_SEED_START) -> list[int]:
-    """Development seeds for the next demonstrations. A seed's layout is ground truth the teacher may not see
-    (rule 1), so for now these are the next n dev seeds; each diagnosis still shapes how they are demonstrated."""
-    seeds = [s for s in range(start, start + n + len(heldout_seeds())) if s not in heldout_seeds()][:n]
+def choose_scenes(failures: list[EpisodeManifest], n: int, start: int = DEV_SEED_START) -> list[int]:
+    """Owen's option D: re-teach the dev seeds whose trials the validator rejected, in order, then fresh dev seeds up
+    to n. Pass or fail is validator output, so no layout or ground truth is read (rule 1)."""
+    rejected = [m.seed for m in failures if m.split == "dev" and m.validation and not m.validation.accepted]
+    seeds = list(dict.fromkeys(s for s in rejected if s not in heldout_seeds()))[:n]
+    fresh = (s for s in range(start, start + 10 * n + len(heldout_seeds())) if s not in heldout_seeds())
+    seeds += [s for s in fresh if s not in seeds][: n - len(seeds)]
     for seed in seeds:
         assert_not_heldout(seed)
     return seeds
@@ -72,33 +106,53 @@ class ArgonPolicy:
     controller: Controller = "teacher"
     checkpoint: str | None = None
 
-    def __init__(self, diagnosis: Diagnosis | None, argon: Argon | None = None) -> None:
+    def __init__(self, diagnosis: Diagnosis | None, argon: Argon) -> None:
         self.diagnosis = diagnosis
-        self.argon = argon or Argon()
-        self.history: list[str] = []
+        self.argon = argon
+        self.history: list[SkillCall] = []
+        self.results: list[str] = []
         self.offline = 0
+        self.finished = False
 
     def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
         if self.history:
-            self.history[-1] += f" -> {feedback}"
-        answer = self.argon.ask("act", [self._prompt(obs, instruction), obs.head_rgb_jpeg])
-        if answer is None:
-            self.offline += 1
-            if self.offline > OFFLINE_REOBSERVES:
-                return None
-            return self._record(SkillCall(skill="reobserve", reason="Argon unavailable: holding and re-observing"))
-        self.offline = 0
-        try:
-            raw = json.loads(answer)
-            if isinstance(raw, dict) and raw.get("done") is True:
-                return None
-            call = SkillCall.model_validate(raw)
-        except (json.JSONDecodeError, ValidationError):
-            call = SkillCall(skill="reobserve", reason="unparseable or non-whitelisted Argon answer")
-        return self._record(call)
+            self.results.append(feedback)
+        if self.finished:
+            return None
+        for _ in range(PARSE_ATTEMPTS):
+            answer = self.argon.ask("act", [self._prompt(obs, instruction), obs.head_rgb_jpeg])
+            if answer is None:
+                return self._hold()
+            self.offline = 0
+            step = parse_step(answer)
+            if step == "done":
+                return self._finish("Argon: the task looks complete")
+            if isinstance(step, SkillCall):
+                if step.skill == "reobserve" and self._last_was_reobserve():
+                    return self._finish(step.reason)  # a second look in a row would read as "done" to the student
+                self.history.append(step)
+                return step
+            self.argon.error("act", "unparseable or non-whitelisted Argon answer", raw=answer[:RAW_LOG_CHARS])
+        return self._finish("ended: no parseable Argon answer")
 
-    def _record(self, call: SkillCall) -> SkillCall:
-        self.history.append(call.model_dump_json(exclude={"reason"}))
+    def _last_was_reobserve(self) -> bool:
+        return bool(self.history) and self.history[-1].skill == "reobserve"
+
+    def _finish(self, reason: str) -> SkillCall | None:
+        """The one closing `reobserve` of the done rule, unless the last step already was one."""
+        self.finished = True
+        if self._last_was_reobserve():
+            return None
+        call = SkillCall(skill="reobserve", reason=reason or "done")
+        self.history.append(call)
+        return call
+
+    def _hold(self) -> SkillCall | None:
+        self.offline += 1
+        if self.offline > OFFLINE_REOBSERVES:
+            return None
+        call = SkillCall(skill="reobserve", reason="Argon unavailable: holding and re-observing")
+        self.history.append(call)
         return call
 
     def _prompt(self, obs: Observation, instruction: str) -> str:
@@ -107,14 +161,18 @@ class ArgonPolicy:
             if self.diagnosis and self.diagnosis.lesson
             else ""
         )
+        done = [
+            f"{c.model_dump_json(exclude={'reason'})} -> {r}" for c, r in zip(self.history, self.results, strict=False)
+        ]
         return f"""{ROBOT}
 
 Task: {instruction}{lesson}
 Skills you have used so far, each with its result:
-{chr(10).join(self.history) or "(none yet)"}
+{chr(10).join(done) or "(none yet)"}
 This is step {obs.step}. Look at the new camera image: if the scene changed, re-plan from what you see now.
+Use `reobserve` only to look again after something may have moved, never twice in a row.
 
-Answer with exactly one JSON object. Either the next skill, matching this schema, with a short `reason` saying
-what in the image led to it:
+Answer with exactly one JSON object and no other keys. Either the next skill, matching this schema, with a short
+`reason` saying what in the image led to it:
 {SKILL_SCHEMA}
-or, only if the image shows the task is complete: {{"done": true}}"""
+or, only if the image shows the task is complete: {{"done": true, "reason": str}}"""

@@ -14,7 +14,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 2. **Held-out seeds stay sealed.** `configs/heldout_seeds.json` is fixed at the start of the run. The teacher refuses a held-out seed, and the recorder refuses to put a held-out episode into a training set. Both have tests.
 3. **Only accepted teacher steps train the student.** Student steps before the teacher's takeover are stored but labelled `controller="student"` and excluded from training. Only episodes the validator accepts (`task_success and physics_valid`) enter a training set.
 4. **Executed actions, not intentions.** The recorder stores the joint targets the simulator actually executed at each step, with timestamps, alongside the skill call that produced them.
-5. **Secrets.** Keys live in `.env` (gitignored) and never in code, logs, or the dashboard. Argon calls are capped per run (`ARGON_CALL_BUDGET`, default 200) and every call is logged with latency.
+5. **Secrets.** Keys live in `.env` (gitignored) and never in code, logs, or the dashboard. Argon calls are capped per run (`ARGON_CALL_BUDGET`, default 800) and every call is logged with latency.
 6. **No fabricated results.** Every number shown comes from saved run files and carries its sample size. The dashboard labels each panel live, recorded, or placeholder.
 7. **Safe motion.** The controller accepts only whitelisted skills, clamps to joint limits, and reports a violation instead of executing it.
 
