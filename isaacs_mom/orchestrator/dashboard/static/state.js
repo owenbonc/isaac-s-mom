@@ -13,7 +13,6 @@
       episodes: [],
       rounds: [],
       latency: { student: [], teacher: [] },
-      argon: [],
       finetune: { pending: null, durations: [] },
       errorCount: 0,
     };
@@ -138,11 +137,6 @@
         if (s.finetune.pending) s.finetune.durations.push((event.t - s.finetune.pending.t) * 1000);
         s.finetune.pending = null;
         break;
-      case "argon_call": {
-        const latency = num(d.latency_ms);
-        if (latency !== null) s.argon.push(latency);
-        break;
-      }
       case "error":
         s.errorCount += 1;
         if (ep) ep.rows.push({ kind: "error", text: text(d.message) || text(d.error) || "error event" });
@@ -174,7 +168,7 @@
   const stat = (values) => (values.length ? { median: median(values), n: values.length } : null);
 
   function summary(s) {
-    return { student: stat(s.latency.student), teacher: stat(s.latency.teacher), argon: stat(s.argon), finetune: stat(s.finetune.durations) };
+    return { student: stat(s.latency.student), teacher: stat(s.latency.teacher), finetune: stat(s.finetune.durations) };
   }
 
   // The head-camera frames to show around the stage frame (`now`): the latest, or the first at or after `focus`.
@@ -218,7 +212,6 @@
 
   // Presenter controls (SPEC §3.5). Events keep folding into `live` while paused; resuming shows them all.
   const shown = (v) => (v.frozen ? v.frozen.state : v.live);
-  const held = (v) => (v.frozen ? Math.max(0, v.live.eventCount - v.frozen.state.eventCount) : 0);
   function togglePause(v, now) {
     v.frozen = v.frozen ? null : { state: structuredClone(v.live), at: now };
   }
@@ -227,7 +220,7 @@
 
   const accepted = (ep) => ep.verdict !== null && ep.verdict.task && ep.verdict.physics;
   // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
-  const story = (s) => s.episodes.findLast((e) => accepted(e) && (actedOn(s, e) || {}).diagnosis) || current(s);
+  const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || current(s);
 
   function episode(v, now) {
     const s = shown(v);
@@ -286,7 +279,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, move, actedOn, median, shown, held, following, accepted, teacherDrove, episode, target, keydown };
+  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, move, actedOn, median, shown, following, accepted, teacherDrove, episode, target, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

@@ -83,12 +83,9 @@ def test_median_latency_carries_its_sample_size_per_controller() -> None:
         decision(1, latency=30.0),
         decision(2, latency=20.0),
         decision(3, controller="teacher", latency=500.0),
-        ("argon_call", {"latency_ms": 900.0}),
-        ("argon_call", {"latency_ms": 1100.0}),
     )
     assert out["summary"]["student"] == {"median": 20.0, "n": 3}
     assert out["summary"]["teacher"] == {"median": 500.0, "n": 1}
-    assert out["summary"]["argon"] == {"median": 1000.0, "n": 2}
     assert out["summary"]["finetune"] is None
 
 
@@ -163,7 +160,6 @@ def test_a_reconnect_replays_the_stream_into_a_fresh_state_not_on_top_of_the_old
         started("b"),
         decision(0, latency=50.0),
         ("evaluation_result", {"checkpoint": "ckpt-r0", "round": 0, "successes": 0, "n": 20}),
-        ("argon_call", {"latency_ms": 900.0}),
     )
     script = """
     const v = S.view();
@@ -177,7 +173,6 @@ def test_a_reconnect_replays_the_stream_into_a_fresh_state_not_on_top_of_the_old
     assert [e["id"] for e in out["state"]["episodes"]] == ["a", "b"]
     assert len(out["state"]["rounds"]) == 1
     assert out["summary"]["student"] == {"median": 75.0, "n": 2}
-    assert out["summary"]["argon"]["n"] == 1
 
 
 def test_a_diagnosis_stays_with_the_episode_it_diagnoses() -> None:
@@ -270,7 +265,8 @@ const feed = (n) => { for (const e of events.splice(0, n)) S.reduce(v.live, e); 
 const press = (key) => S.keydown(v, { key }, now);
 const look = () => {
   const ep = S.episode(v, now);
-  return { shown: S.shown(v).eventCount, held: S.held(v), episode: ep && ep.id, focus: v.compare && v.compare.step };
+  const shown = S.shown(v).eventCount;
+  return { shown, held: v.live.eventCount - shown, episode: ep && ep.id, focus: v.compare && v.compare.step };
 };
 """
 
