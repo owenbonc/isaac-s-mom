@@ -42,6 +42,16 @@ def test_a_reply_without_a_whitelisted_skill_call_is_unparseable(text: str) -> N
         parse_reply(text)
 
 
+@pytest.mark.parametrize("distance", ["NaN", '"nan"', "Infinity", "-Infinity"])
+def test_a_non_finite_distance_is_unparseable(distance: str) -> None:
+    with pytest.raises(UnparseableReply):
+        parse_reply(f'{{"skill": "push_forward", "params": {{"distance_cm": {distance}}}}}')
+
+
+def test_a_reason_in_the_reply_is_dropped() -> None:
+    assert parse_reply('{"skill": "retract", "params": {}, "reason": "x"}').reason == ""
+
+
 def test_reply_distance_is_clamped_to_the_skill_limit() -> None:
     assert parse_reply('{"skill": "push_forward", "params": {"distance_cm": 90}}').params == {"distance_cm": 20.0}
 
@@ -100,6 +110,13 @@ def test_reply_becomes_the_skill_call_and_its_latency_is_logged(caplog: pytest.L
 
 def test_unparseable_reply_reobserves_and_is_logged(caplog: pytest.LogCaptureFixture) -> None:
     policy = StudentPolicy(generate=scripted("I would push the block"))
+    with caplog.at_level(logging.WARNING, logger="isaacs_mom.student"):
+        assert policy.act(frame(), "push", "start") == SkillCall(skill="reobserve")
+    assert "unparseable" in caplog.text
+
+
+def test_non_finite_reply_reobserves_and_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+    policy = StudentPolicy(generate=scripted('{"skill": "push_forward", "params": {"distance_cm": NaN}}'))
     with caplog.at_level(logging.WARNING, logger="isaacs_mom.student"):
         assert policy.act(frame(), "push", "start") == SkillCall(skill="reobserve")
     assert "unparseable" in caplog.text
