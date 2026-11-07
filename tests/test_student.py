@@ -1,6 +1,9 @@
+from pathlib import Path
+
 import pytest
 
 from isaacs_mom.contracts import SKILLS, SkillCall
+from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, resolve_adapter
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
 
 PUSH_5 = SkillCall(skill="push_forward", params={"distance_cm": 5})
@@ -48,3 +51,18 @@ def test_prompt_names_the_task_the_last_result_and_every_skill() -> None:
     assert "Push the red block into the green target zone." in text
     assert "push_forward: ok" in text
     assert all(skill in text for skill in SKILLS)
+
+
+def test_base_checkpoint_is_the_plain_model(tmp_path: Path) -> None:
+    assert resolve_adapter(BASE_CHECKPOINT, tmp_path) is None
+
+
+def test_fine_tuned_checkpoint_needs_a_complete_adapter(tmp_path: Path) -> None:
+    with pytest.raises(FileNotFoundError, match="ckpt-r1"):
+        resolve_adapter("ckpt-r1", tmp_path)
+    (tmp_path / "ckpt-r1").mkdir()
+    (tmp_path / "ckpt-r1" / ADAPTER_FILES[0]).write_text("{}")
+    with pytest.raises(FileNotFoundError, match=ADAPTER_FILES[1]):
+        resolve_adapter("ckpt-r1", tmp_path)
+    (tmp_path / "ckpt-r1" / ADAPTER_FILES[1]).write_bytes(b"weights")
+    assert resolve_adapter("ckpt-r1", tmp_path) == tmp_path / "ckpt-r1"

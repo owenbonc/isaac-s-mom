@@ -4,8 +4,7 @@ import random
 from pathlib import Path
 
 from isaacs_mom.contracts import SKILLS, Controller, Observation, SkillCall
-
-BASE_CHECKPOINT = "ckpt-r0"
+from isaacs_mom.student.checkpoints import BASE_CHECKPOINT
 
 
 class StudentPolicy:
