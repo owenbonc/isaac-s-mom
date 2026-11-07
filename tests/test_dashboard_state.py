@@ -478,6 +478,11 @@ def test_a_finished_run_opens_on_its_latest_accepted_demonstration_that_acted_on
     assert out == "demo-2"
 
 
+def test_the_story_skips_a_demonstration_whose_diagnosis_is_not_in_the_run() -> None:
+    events = stream(*STORY[:-3], *demo("orphan", "not-in-this-run", accepted=True), *STORY[-3:])
+    assert presenter("feed(events.length); now += 60; return look().episode;", events) == "demo-2"
+
+
 def test_a_finished_run_without_such_a_demonstration_opens_on_its_latest_episode() -> None:
     events = stream(*[e for e in STORY if e[0] != "episode_started" or e[1]["episode_id"] not in {"demo-1", "demo-2"}])
     assert presenter("feed(events.length); now += 60; return look().episode;", events) == "heldout"

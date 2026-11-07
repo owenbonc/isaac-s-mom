@@ -49,6 +49,8 @@ const tag = (controller, checkpoint) => {
 const amount = (row) => (row.distance !== null ? ` ${+row.distance.toFixed(1)} cm` : row.angle !== null ? ` ${Math.round(row.angle)}°` : "");
 const skillText = (row) => (row.skill ? esc(row.skill) + amount(row) : '<span class="stop">Stopped, no skill chosen</span>');
 // What an episode is, named without the loop's round index, which reads like a checkpoint number and is not one.
+// An episode is over once judged, or once the view has moved past it or the run has stopped.
+const finished = (ep) => ep.verdict !== null || ep !== MomState.current(MomState.shown(view)) || !MomState.following(view, now());
 const kindOf = (ep) => {
   if (ep.split === "heldout") return ["Held-out test", `seed ${esc(ep.seed ?? "")}`];
   const first = ep.rows.find((r) => r.kind === "decision");
@@ -96,7 +98,7 @@ function renderControl() {
     return;
   }
   const took = ep.rows.find((r) => r.kind === "takeover");
-  const done = ep.verdict !== null;
+  const done = finished(ep);
   // The controller tag is the sentence's subject.
   const detail = took
     ? `took over when the student stopped${took.step === null ? "" : " at step " + esc(took.step)}.`
@@ -105,8 +107,8 @@ function renderControl() {
       : `${done ? "demonstrated" : "is demonstrating"} from the head-camera frame.`;
   const [kind, where] = kindOf(ep);
   el.className = "control " + ep.controller;
-  el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}<span class="note">${detail}</span>${done ? verdictChip(ep.verdict) : ""}`;
-  announce(`${WHO[ep.controller]} ${done ? "was" : "is"} in control.${done ? ` The validator ${isAccepted(ep.verdict) ? "accepted" : "rejected"} this episode.` : ""}`);
+  el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}<span class="note">${detail}</span>${ep.verdict ? verdictChip(ep.verdict) : ""}`;
+  announce(`${WHO[ep.controller]} ${done ? "was" : "is"} in control.${ep.verdict ? ` The validator ${isAccepted(ep.verdict) ? "accepted" : "rejected"} this episode.` : ""}`);
 }
 
 function renderCamera() {
@@ -114,7 +116,7 @@ function renderCamera() {
   const frames = MomState.filmstrip(ep, view.compare && view.compare.step);
   $("chip-camera").innerHTML = panelChip(frames.length > 0, ep);
   if (!frames.length) {
-    $("stage").innerHTML = '<div class="empty">No head-camera frame yet. The latest frame appears here after each executed skill.</div>';
+    $("stage").innerHTML = `<div class="empty">${ep && finished(ep) ? "This episode recorded no head-camera frame." : "No head-camera frame yet. The latest frame appears here after each executed skill."}</div>`;
     $("strip").innerHTML = "";
     return;
   }
@@ -137,10 +139,11 @@ function renderCamera() {
   $("strip").innerHTML = frames
     .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (the scene moved before this frame)</span>' : ""}</span></li>`)
     .join("");
-  // Flash once when the first frame after the move reaches the stage; added outside the HTML so later
-  // identical writes are skipped and the animation runs to its end.
+  // Flash once when the first frame after the move arrives live, never on a key press; added outside the HTML so
+  // later identical writes are skipped and the animation runs to its end.
   const key = `${ep.id}@${last.step}`;
-  if (last.moved && !view.compare && key !== flashedFrame) {
+  const arriving = view.selected === null && !view.frozen && MomState.following(view, now());
+  if (last.moved && arriving && key !== flashedFrame) {
     const shot = $("stage").querySelector(".shot");
     shot.classList.add("flash");
     shot.addEventListener("animationend", () => shot.classList.remove("flash"), { once: true });
@@ -171,8 +174,8 @@ function logRow(row) {
   }
 }
 
-function decisionRow(row, after) {
-  const outcome = !row.skill ? "" : row.ok === null ? '<span class="lat">running</span>' : row.ok ? `<span class="ok">${CHECK}<span class="sr">executed</span></span>` : '<span class="no">failed</span>';
+function decisionRow(row, after, done) {
+  const outcome = !row.skill ? "" : row.ok === null ? (done ? "" : '<span class="lat">running</span>') : row.ok ? `<span class="ok">${CHECK}<span class="sr">executed</span></span>` : '<span class="no">failed</span>';
   const latency = row.latency === null ? "" : `<span class="lat">${duration(row.latency)}</span>`;
   const reason = row.reason ? `<div class="reason" title="${esc(row.reason)}">${esc(row.reason)}</div>` : "";
   const error = row.error ? `<div class="err">${esc(row.error)}</div>` : "";
@@ -201,6 +204,7 @@ function renderEpisode() {
   $("b-pause").setAttribute("aria-pressed", String(view.frozen !== null));
   $("b-pause").lastElementChild.textContent = view.frozen ? "Resume" : "Pause";
   // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when rejected.
+  $("rail").style.setProperty("--n", s.episodes.length);
   $("rail").innerHTML = s.episodes
     .map((e) => `<li class="${MomState.teacherDrove(e) ? "teacher" : "student"} ${e.verdict ? (MomState.accepted(e) ? "accepted" : "rejected") : "open"}${e === ep ? " here" : ""}"></li>`)
     .join("");
@@ -218,7 +222,8 @@ function renderLog() {
     return;
   }
   const move = MomState.move(ep);
-  const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
+  const done = finished(ep);
+  const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision, done) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
   const focus = view.compare && `${ep.id}@${view.compare.step}`;
   // Letting go of P drops the scroll it set, so the log follows new rows again.
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows || (renderedFocus !== null && focus === null);
@@ -264,8 +269,9 @@ function renderModels() {
     panelChip(Boolean(any));
 }
 
-const evidenceText = (d) => `${d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : ""}${d.confidence === null ? "" : `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>`}`;
-const diagnosisText = (d) => `<div>${esc(d.hypothesis)}</div>${evidenceText(d)}`;
+const evidenceText = (d) => (d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : "");
+const confidenceText = (d) => (d.confidence === null ? "" : `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>`);
+const diagnosisText = (d) => `<div>${esc(d.hypothesis)}</div>${evidenceText(d)}${confidenceText(d)}`;
 
 // A teacher demonstration shows the diagnosis it acts on, named by the diagnosed episode, with that episode's last frame.
 function actingOnBody(a) {
@@ -275,7 +281,9 @@ function actingOnBody(a) {
   const shot = a.frame && a.frame.url
     ? `<figure class="cited"><div class="thumb"><img src="${esc(a.frame.url)}" alt="Episode ${a.number}'s last head-camera frame"></div><figcaption class="note">Episode ${a.number}${a.frame.step === null ? "" : `, step ${esc(a.frame.step)}`}</figcaption></figure>`
     : "";
-  return `<div class="body stack">${head}<div>${esc(a.diagnosis.hypothesis)}</div><div class="cited-row">${shot}<div class="stack">${evidenceText(a.diagnosis)}</div></div></div>`;
+  // The frame and who is acted on lead, so a long hypothesis never pushes the evidence out of view.
+  const lead = shot ? `<div class="cited-row">${shot}<div class="stack">${head}${confidenceText(a.diagnosis)}</div></div>` : head + confidenceText(a.diagnosis);
+  return `<div class="body stack">${lead}<div>${esc(a.diagnosis.hypothesis)}</div>${evidenceText(a.diagnosis)}</div>`;
 }
 
 function renderDiagnosis() {

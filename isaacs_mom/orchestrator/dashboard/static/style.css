@@ -30,8 +30,9 @@ header.bar h1{font-size:var(--step-2)}
 #episode-line{margin:0;font-weight:600;white-space:nowrap}
 #episode-line .lost{color:var(--bad)}
 /* The run at a glance: one mark per episode, tall for the teacher, short for the student, hollow when rejected. */
-.rail{list-style:none;margin:0;padding:3px;flex:1 1 14rem;min-width:0;overflow:hidden;display:flex;align-items:flex-end;gap:2px;height:1.2rem}
-.rail li{flex:1 1 0;min-width:1px;height:45%;border-radius:1px;background:var(--student)}
+/* Marks shrink to fit any run, and the gap with them, so the outlined mark is never clipped. */
+.rail{list-style:none;margin:0;padding:3px;flex:1 1 14rem;min-width:0;overflow:hidden;display:flex;align-items:flex-end;gap:min(2px,calc(33% / var(--n,1)));height:1.2rem}
+.rail li{flex:0 1 1rem;min-width:0;height:45%;border-radius:1px;background:var(--student)}
 .rail li.teacher{height:100%;background:var(--teacher)}
 .rail li.rejected{background:none;box-shadow:inset 0 0 0 2px var(--student)}
 .rail li.teacher.rejected{box-shadow:inset 0 0 0 2px var(--teacher)}

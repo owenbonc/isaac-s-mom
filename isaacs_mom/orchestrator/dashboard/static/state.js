@@ -226,8 +226,8 @@
   const following = (v, now) => running(v.live, v.frozen ? v.frozen.at : now);
 
   const accepted = (ep) => ep.verdict !== null && ep.verdict.task && ep.verdict.physics;
-  // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration that acted on a diagnosis.
-  const story = (s) => s.episodes.findLast((e) => e.actingOn && accepted(e)) || current(s);
+  // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
+  const story = (s) => s.episodes.findLast((e) => accepted(e) && (actedOn(s, e) || {}).diagnosis) || current(s);
 
   function episode(v, now) {
     const s = shown(v);
