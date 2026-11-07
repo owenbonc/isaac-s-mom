@@ -151,7 +151,10 @@ function renderCamera() {
   if (view.compare && move) {
     const step = (f) => (f && f.step !== null ? `<span class="step">step ${esc(f.step)}</span>` : "");
     frame = cell(ep, move.before, `<span class="tag">Before the move</span>${step(move.before)}`, false) + cell(ep, move.after, `<span class="tag">After</span>${step(move.after)}`, true);
-    caption = `<p class="caption moved">${what} between ${move.before && move.before.step !== null ? `step ${esc(move.before.step)} and ` : "these frames, before "}step ${esc(move.step)}.</p>`;
+    // The pair covers the log, so the caption carries its marked row: the first decision after the move, its reason in full.
+    const first = move.decision;
+    const next = first ? ` First decision after the move: <span class="mono">${skillText(first)}</span>.${first.reason ? ` ${esc(first.reason)}` : ""}` : "";
+    caption = `<p class="caption moved">${what} between ${move.before && move.before.step !== null ? `step ${esc(move.before.step)} and ` : "these frames, before "}step ${esc(move.step)}.${next}</p>`;
   } else {
     frame = cell(ep, last, tag(last.controller, last.checkpoint), last.moved);
     caption = last.moved
@@ -252,7 +255,8 @@ function renderLog() {
   const stage = MomState.filmstrip(ep, step).find((f) => f.now);
   const full = (r) => !stage || stage.step === null || (r.step !== null && r.step >= stage.step);
   const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision, done, full(r)) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
-  const focus = step === null ? null : `${ep.id}@${step}`;
+  // P hides the log in the two-column layout, so letting go of P parks it at the move row again.
+  const focus = step === null ? null : `${ep.id}@${step}${view.compare ? " P" : ""}`;
   // Letting go of P drops the scroll it set, so the log follows new rows again.
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows || (renderedFocus !== null && focus === null);
   if (fromStart) logFollowing = true;
@@ -261,7 +265,7 @@ function renderLog() {
   if (logFollowing) list.scrollTop = list.scrollHeight;
   // M and P park the log with the move row a third of the way down.
   const row = list.querySelector("li.event.moved");
-  if (focus !== renderedFocus && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
+  if (focus !== null && focus !== renderedFocus && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
   renderedFocus = focus;
   renderedRows = html.length;
   renderedEpisode = ep.id;

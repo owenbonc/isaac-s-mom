@@ -537,6 +537,12 @@ def test_a_finished_run_opens_on_its_latest_accepted_demonstration_that_acted_on
     assert out == "demo-2"
 
 
+def test_a_page_opened_minutes_after_a_run_with_a_fine_tune_lands_on_the_story() -> None:
+    finetune = [("finetune_started", {"round": 1}), ("finetune_completed", {"round": 1})]
+    events = stream(*STORY[:-3], *finetune, *STORY[-3:])
+    assert presenter("open(); return look().episode;", events) == "demo-2"
+
+
 def test_the_story_skips_a_demonstration_whose_diagnosis_is_not_in_the_run() -> None:
     events = stream(*STORY[:-3], *demo("orphan", "not-in-this-run", accepted=True), *STORY[-3:])
     assert presenter("open(); return look().episode;", events) == "demo-2"

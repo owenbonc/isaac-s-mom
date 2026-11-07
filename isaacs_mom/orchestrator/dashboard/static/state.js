@@ -219,10 +219,11 @@
     };
   }
 
-  // One event from the stream, arriving at `now`.
+  // One event from the stream, arriving at `now`. An event that arrives fresh means the view saw the run live; a
+  // replayed one does not, even inside a replayed fine-tune.
   function receive(v, event, now) {
     reduce(v.live, event);
-    if (running(v.live, now)) v.followed = true;
+    if (now - event.t < FRESH_SECONDS) v.followed = true;
   }
 
   // Presenter controls (SPEC §3.5). Events keep folding into `live` while paused; resuming shows them all.

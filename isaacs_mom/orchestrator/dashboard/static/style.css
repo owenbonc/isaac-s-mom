@@ -129,7 +129,31 @@ footer.models .v{color:var(--muted)}
 [data-missing] img{visibility:hidden}
 [data-missing]::after{content:"Frame missing";position:absolute;inset:0;display:grid;place-items:center;color:var(--ph)}
 .caption{flex:none;margin:0;padding:.35rem .6rem;border-radius:3px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
-.caption.moved{background:var(--ink);color:var(--panel);font-weight:600}
+.caption.moved{background:var(--ink);color:var(--panel);font-weight:600;white-space:normal;text-wrap:pretty}
+/* Two columns: the stage takes the left half at full height; the side column folds into a band over the decisions. */
+@media (min-width:1001px){
+  main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:fit-content(60%) minmax(0,1fr);grid-template-areas:"cam side" "cam log"}
+  .camera{grid-area:cam}
+  .decisions{grid-area:log}
+  /* The held-out column is as wide as its heading and chip on one line; the diagnosis takes the rest. */
+  .side{grid-area:side;display:grid;grid-template-columns:min-content minmax(0,1fr);align-items:start}
+  .side>.panel>header{flex-wrap:nowrap}
+  .side>.panel>header h2{white-space:nowrap}
+  .side .cited-row{grid-template-columns:minmax(0,6rem) minmax(0,1fr)}
+  /* P is the take's peak: the pair fills the whole width, and the caption carries the log's marked row. */
+  main:has(#stage .cell + .cell){grid-template-areas:"cam cam" "cam cam"}
+  main:has(#stage .cell + .cell) :is(.side,.decisions){display:none}
+}
+/* Narrower than the projector's 1280 px the band has no room for two panels side by side, so they stack. */
+@media (min-width:1001px) and (max-width:1279px){.side{grid-template-columns:minmax(0,1fr)}}
+/* At a projector's 720 px the frame takes the camera panel's height: the filmstrip gives way and the panel's label joins the caption line. */
+@media (min-width:1001px) and (max-height:760px){
+  .strip{display:none}
+  .camera{position:relative}
+  .camera>header{position:absolute;right:.7rem;bottom:.7rem;padding:0;border:0;min-height:calc(1.4em + .7rem);align-items:center}
+  .camera>header h2{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  .camera .caption{margin-right:8rem}
+}
 /* The box or bin move is the take's peak: the frame that first shows it stays outlined in ink, and flashes once on arrival. */
 .shot.moved{outline:.3rem solid var(--ink);outline-offset:.15rem}
 /* Rare (a few times a take) and aimed at the back of the room, so it runs longer than UI feedback would. */
