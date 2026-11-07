@@ -1,6 +1,6 @@
 # Workstreams: what each owner builds
 
-Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everything else changes only through a PR that says why. The foundation ships each module as a working stand-in with its final signature, so `uv run mom run --sim fake --student stub` runs end to end without the model. Replace the stand-in, keep the signature, and keep that command working.
+Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everything else changes only through a PR that says why. The foundation ships each module as a working stand-in with its final signature, so `uv run mom run --sim fake --student stub` runs end to end without the student model, given `GEMINI_API_KEY` in `.env` for the teacher. Replace the stand-in, keep the signature, and keep that command working.
 
 Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run --sim fake --student stub --rounds 1`. Agents in a worktree run `scripts/agent-setup.sh origin/phase-1` instead.
 
