@@ -240,20 +240,21 @@ def test_heartbeats_stop_when_a_decision_raises(tmp_path: Path) -> None:
     assert beats >= 2 and sum(e["type"] == "heartbeat" for e in logged(tmp_path)) == beats
 
 
-def test_two_threads_emitting_at_once_write_whole_lines_in_time_order(tmp_path: Path) -> None:
-    log = EventLog(tmp_path, "r1")
+def test_two_event_logs_on_one_file_write_whole_lines_in_time_order_from_two_threads(tmp_path: Path) -> None:
+    # The CLI's Argon logs through its own EventLog on the run's file, beside the loop's and its heartbeat thread.
+    logs = [EventLog(tmp_path, "r1"), EventLog(tmp_path, "r1")]
     padding = "x" * 20_000  # longer than one buffered write, so unlocked writes would interleave
 
-    def emit() -> None:
+    def emit(log: EventLog) -> None:
         for _ in range(50):
             log.emit("heartbeat", padding=padding)
 
-    threads = [threading.Thread(target=emit) for _ in range(2)]
+    threads = [threading.Thread(target=emit, args=(log,)) for log in logs]
     for thread in threads:
         thread.start()
     for thread in threads:
         thread.join()
-    times = [Event.model_validate_json(line).t for line in log.path.read_text().splitlines()]
+    times = [Event.model_validate_json(line).t for line in logs[0].path.read_text().splitlines()]
     assert len(times) == 100 and times == sorted(times)
 
 
