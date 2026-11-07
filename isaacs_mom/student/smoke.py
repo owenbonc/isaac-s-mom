@@ -20,7 +20,7 @@ def main() -> None:
     parser.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     parser.add_argument("--seed", type=int, default=1000)
     parser.add_argument("--steps", type=int, default=5)
-    parser.add_argument("--ckpt", default=BASE_CHECKPOINT)
+    parser.add_argument("--ckpt", default=BASE_CHECKPOINT, help="ckpt-r0 or <run_id>/ckpt-r<round> under runs/")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(message)s")
 

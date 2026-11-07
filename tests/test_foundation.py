@@ -161,7 +161,7 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
         built.append(checkpoint)
         return StubStudent(checkpoint)
 
-    def train_student(training_set: Path, base_checkpoint: str, round_: int) -> str:
+    def train_student(training_set: Path, previous_checkpoint: str, round_: int) -> str:
         return f"trained-{round_}"
 
     run_loop(

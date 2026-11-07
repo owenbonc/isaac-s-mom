@@ -6,7 +6,7 @@ from collections.abc import Callable
 from pathlib import Path
 
 from isaacs_mom.contracts import Controller, Observation, Skill, SkillCall
-from isaacs_mom.student.checkpoints import BASE_CHECKPOINT, CHECKPOINT_DIR, resolve_adapter
+from isaacs_mom.student.checkpoints import BASE_CHECKPOINT, RUNS_DIR, resolve_adapter
 from isaacs_mom.student.prompt import UnparseableReply, parse_reply
 
 Generate = Callable[[bytes, str, str], str]
@@ -20,11 +20,11 @@ class StudentPolicy:
         self,
         checkpoint: str = BASE_CHECKPOINT,
         *,
-        checkpoint_dir: Path = CHECKPOINT_DIR,
+        runs_dir: Path = RUNS_DIR,
         generate: Generate | None = None,
     ) -> None:
         self.checkpoint: str | None = checkpoint
-        self._adapter = resolve_adapter(checkpoint, checkpoint_dir)
+        self._adapter = resolve_adapter(checkpoint, runs_dir)
         self._generate = generate
         self._episode_id: str | None = None
         self._last_skill: Skill | None = None

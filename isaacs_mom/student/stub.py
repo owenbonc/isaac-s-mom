@@ -19,6 +19,6 @@ class StubStudent:
         return SkillCall(skill=self._rng.choice(SKILLS))
 
 
-def stub_finetune(training_set: Path, base_checkpoint: str, round_: int) -> str:
+def stub_finetune(training_set: Path, previous_checkpoint: str, round_: int) -> str:
     """No training, so the student keeps its checkpoint."""
-    return base_checkpoint
+    return previous_checkpoint

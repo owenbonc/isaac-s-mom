@@ -77,14 +77,21 @@ def test_base_checkpoint_is_the_plain_model(tmp_path: Path) -> None:
 
 
 def test_fine_tuned_checkpoint_needs_a_complete_adapter(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="ckpt-r1"):
-        resolve_adapter("ckpt-r1", tmp_path)
-    (tmp_path / "ckpt-r1").mkdir()
-    (tmp_path / "ckpt-r1" / ADAPTER_FILES[0]).write_text("{}")
+    adapter = tmp_path / "run-a" / "checkpoints" / "ckpt-r1"
+    with pytest.raises(FileNotFoundError, match="run-a/ckpt-r1"):
+        resolve_adapter("run-a/ckpt-r1", tmp_path)
+    adapter.mkdir(parents=True)
+    (adapter / ADAPTER_FILES[0]).write_text("{}")
     with pytest.raises(FileNotFoundError, match=ADAPTER_FILES[1]):
-        resolve_adapter("ckpt-r1", tmp_path)
-    (tmp_path / "ckpt-r1" / ADAPTER_FILES[1]).write_bytes(b"weights")
-    assert resolve_adapter("ckpt-r1", tmp_path) == tmp_path / "ckpt-r1"
+        resolve_adapter("run-a/ckpt-r1", tmp_path)
+    (adapter / ADAPTER_FILES[1]).write_bytes(b"weights")
+    assert resolve_adapter("run-a/ckpt-r1", tmp_path) == adapter
+
+
+@pytest.mark.parametrize("checkpoint", ["ckpt-r1", "run-a/ckpt-rx", "run-a/ckpt-r1/x", "../ckpt-r1", "/ckpt-r1"])
+def test_a_checkpoint_id_without_its_run_is_rejected(tmp_path: Path, checkpoint: str) -> None:
+    with pytest.raises(ValueError, match="checkpoint id"):
+        resolve_adapter(checkpoint, tmp_path)
 
 
 REOBSERVE = '{"skill": "reobserve", "params": {}}'
@@ -140,15 +147,16 @@ def test_reobserve_streak_starts_over_in_a_new_episode() -> None:
 
 
 def test_missing_checkpoint_fails_before_any_model_call(tmp_path: Path) -> None:
-    with pytest.raises(FileNotFoundError, match="ckpt-r2"):
-        StudentPolicy("ckpt-r2", checkpoint_dir=tmp_path, generate=scripted())
+    with pytest.raises(FileNotFoundError, match="run-a/ckpt-r2"):
+        StudentPolicy("run-a/ckpt-r2", runs_dir=tmp_path, generate=scripted())
 
 
 ADAPTER = {"adapter_config.json": b"{}", "adapter_model.safetensors": b"weights", "metrics.json": b"{}"}
 
 
-def training_set(tmp_path: Path, rows: list[TrainingExample]) -> Path:
-    path = tmp_path / "training_r1.jsonl"
+def training_set(runs: Path, rows: list[TrainingExample], run_id: str = "run-a") -> Path:
+    path = runs / run_id / "training_r1.jsonl"
+    path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text("".join(row.model_dump_json() + "\n" for row in rows))
     return path
 
@@ -163,9 +171,8 @@ def test_empty_training_set_keeps_the_previous_checkpoint(tmp_path: Path) -> Non
     def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
         raise AssertionError("nothing to train on")
 
-    checkpoints = tmp_path / "ckpts"
-    assert finetune(training_set(tmp_path, []), "ckpt-r1", 2, checkpoint_dir=checkpoints, trainer=trainer) == "ckpt-r1"
-    assert not checkpoints.exists()
+    assert finetune(training_set(tmp_path, []), "run-a/ckpt-r1", 2, trainer=trainer) == "run-a/ckpt-r1"
+    assert not (tmp_path / "run-a" / "checkpoints").exists()
 
 
 def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: Path) -> None:
@@ -181,19 +188,32 @@ def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: P
         shipped_images.update(images)
         return ADAPTER
 
-    checkpoints = tmp_path / "ckpts"
-    assert (
-        finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=checkpoints, trainer=trainer) == "ckpt-r1"
-    )
+    assert finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=trainer) == "run-a/ckpt-r1"
     assert list(shipped_images.values()) == [b"frame-bytes"]
     assert [e["target"] for e in shipped_examples] == [
         '{"skill":"push_forward","params":{"distance_cm":12.3}}',
         '{"skill":"reobserve","params":{}}',
     ]
     assert {e["image"] for e in shipped_examples} == set(shipped_images)
-    assert resolve_adapter("ckpt-r1", checkpoints) == checkpoints / "ckpt-r1"
-    meta = json.loads((checkpoints / "ckpt-r1" / "meta.json").read_text())
+    adapter = tmp_path / "run-a" / "checkpoints" / "ckpt-r1"
+    assert resolve_adapter("run-a/ckpt-r1", tmp_path) == adapter
+    meta = json.loads((adapter / "meta.json").read_text())
     assert (meta["examples"], meta["frames"], meta["previous"]) == (2, 1, "ckpt-r0")
+
+
+def test_two_runs_keep_their_own_round_one_checkpoints(tmp_path: Path) -> None:
+    rows = [example(tmp_path, SkillTarget(skill="retract"))]
+
+    def trainer_for(run_id: str) -> Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]:
+        return lambda examples, images: {**ADAPTER, "adapter_model.safetensors": run_id.encode()}
+
+    first = finetune(training_set(tmp_path, rows, "run-a"), "ckpt-r0", 1, trainer=trainer_for("run-a"))
+    second = finetune(training_set(tmp_path, rows, "run-b"), "ckpt-r0", 1, trainer=trainer_for("run-b"))
+    assert (first, second) == ("run-a/ckpt-r1", "run-b/ckpt-r1")
+    for checkpoint in (first, second):
+        adapter = resolve_adapter(checkpoint, tmp_path)
+        assert adapter is not None
+        assert (adapter / "adapter_model.safetensors").read_bytes() == checkpoint.split("/")[0].encode()
 
 
 def test_trainer_without_adapter_weights_leaves_no_checkpoint(tmp_path: Path) -> None:
@@ -203,13 +223,13 @@ def test_trainer_without_adapter_weights_leaves_no_checkpoint(tmp_path: Path) ->
         return {"adapter_config.json": b"{}"}
 
     with pytest.raises(RuntimeError, match="adapter_model.safetensors"):
-        finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=tmp_path / "ckpts", trainer=trainer)
-    assert not (tmp_path / "ckpts").exists()
+        finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=trainer)
+    assert not (tmp_path / "run-a" / "checkpoints").exists()
 
 
 def test_rerunning_a_round_replaces_the_old_checkpoint(tmp_path: Path) -> None:
     rows = [example(tmp_path, SkillTarget(skill="retract"))]
-    checkpoints = tmp_path / "ckpts"
+    checkpoints = tmp_path / "run-a" / "checkpoints"
 
     def first(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
         return {**ADAPTER, "stale.bin": b"old"}
@@ -217,12 +237,12 @@ def test_rerunning_a_round_replaces_the_old_checkpoint(tmp_path: Path) -> None:
     def second(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
         return {"adapter_config.json": b"{}", "adapter_model.safetensors": b"new"}
 
-    finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=checkpoints, trainer=first)
-    finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=checkpoints, trainer=second)
+    finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=first)
+    finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=second)
     out = checkpoints / "ckpt-r1"
     assert not (out / "stale.bin").exists()
     assert (out / "adapter_model.safetensors").read_bytes() == b"new"
-    assert not (checkpoints / "ckpt-r1.tmp").exists()
+    assert sorted(p.name for p in checkpoints.iterdir()) == ["ckpt-r1"]
 
 
 def test_nested_trainer_file_name_is_rejected_before_anything_is_written(tmp_path: Path) -> None:
@@ -232,5 +252,5 @@ def test_nested_trainer_file_name_is_rejected_before_anything_is_written(tmp_pat
         return {**ADAPTER, "sub/x.bin": b"x"}
 
     with pytest.raises(RuntimeError, match="not plain"):
-        finetune(training_set(tmp_path, rows), "ckpt-r0", 1, checkpoint_dir=tmp_path / "ckpts", trainer=trainer)
-    assert not (tmp_path / "ckpts").exists()
+        finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=trainer)
+    assert not (tmp_path / "run-a" / "checkpoints").exists()

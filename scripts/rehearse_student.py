@@ -19,6 +19,7 @@ from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
 from isaacs_mom.validator.training import build_training_set
 
 DEMO_SEED_START = 5000
+REHEARSAL_DIR = Path("rehearsal")
 
 
 class Oracle:
@@ -54,7 +55,7 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     run_id = time.strftime("rehearsal-%Y%m%d-%H%M%S")
-    run_dir = Path("rehearsal") / run_id
+    run_dir = REHEARSAL_DIR / run_id
     events = EventLog(run_dir, run_id)
     sim = FakeSim()
 
@@ -78,12 +79,11 @@ def main() -> None:
         f"oracle demos accepted {accepted}/{args.demos}, {len(training_set.read_text().splitlines())} training examples"
     )
 
-    checkpoint_dir = run_dir / "checkpoints"
-    checkpoint = finetune(training_set, BASE_CHECKPOINT, 1, checkpoint_dir=checkpoint_dir)
+    checkpoint = finetune(training_set, BASE_CHECKPOINT, 1)
     if checkpoint == BASE_CHECKPOINT:
         print("nothing to train on")
         return
-    print((checkpoint_dir / checkpoint / "metrics.json").read_text())
+    print((run_dir / "checkpoints" / "ckpt-r1" / "metrics.json").read_text())
 
     seeds = sorted(heldout_seeds())[: args.eval_seeds]
     for ckpt in (BASE_CHECKPOINT, checkpoint):
@@ -91,7 +91,7 @@ def main() -> None:
             succeeded(
                 run_episode(
                     sim,
-                    StudentPolicy(ckpt, checkpoint_dir=checkpoint_dir),
+                    StudentPolicy(ckpt, runs_dir=REHEARSAL_DIR),
                     run_dir=run_dir,
                     events=events,
                     seed=seed,

@@ -26,8 +26,8 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 
 ## 4. Student VLM and fine-tuning — `isaacs_mom/student/`
 - Replace `StudentPolicy.act` with SmolVLM2-500M-Video-Instruct (local, MPS on Macs). Prompt for one JSON `SkillCall`; parse with the pydantic model; anything unparseable becomes `reobserve` and is logged.
-- Replace `finetune` with LoRA on a Modal A10G over the `training_r<round>.jsonl` file (SPEC §4.3); return `ckpt-r<round>` and make `StudentPolicy(checkpoint)` load it. Weights stay out of git.
-- `checkpoints/ckpt-r<round>/` holds the most recent run's adapters (a later run's round N replaces them); `meta.json` there names the training set it came from. Run the real loop outside OneDrive so checkpoint swaps are not blocked by sync locks.
+- Replace `finetune` with LoRA on a Modal A10G over the `training_r<round>.jsonl` file (SPEC §4.3); return `<run_id>/ckpt-r<round>` and make `StudentPolicy(checkpoint)` load it. Weights stay out of git.
+- Adapters live in `runs/<run_id>/checkpoints/ckpt-r<round>/`, so every run keeps its own; the id is `<run_id>/ckpt-r<round>` and `ckpt-r0` is the base model. `meta.json` there names the training set it came from. Run the real loop outside OneDrive so checkpoint swaps (directory renames) are not blocked by sync locks.
 - Done: SPEC §6 criterion 2 (Gate B), then the fine-tune half of criterion 5.
 
 ## 5. Orchestrator, dashboard and demo — `isaacs_mom/orchestrator/`, `docs/`
