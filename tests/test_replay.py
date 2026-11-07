@@ -3,12 +3,12 @@ from pathlib import Path
 
 import numpy as np
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, SkillCall
+from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, ReplayReport, SkillCall
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
 from isaacs_mom.sim.fake import FakeSim
-from isaacs_mom.validator import replay
+from isaacs_mom.validator import replay, replay_accepted
 
 
 class GreedyPusher:
@@ -114,3 +114,18 @@ def test_replay_without_validation_is_false(tmp_path: Path) -> None:
     manifest.validation = None
     path.write_text(manifest.model_dump_json())
     assert not replay(FakeSim(), path)
+
+
+def test_replay_accepted_checks_every_accepted_episode_in_a_run(tmp_path: Path) -> None:
+    good = _record(tmp_path, GreedyPusher, seed=1606)
+    _record(tmp_path, lambda _: ReobserveOnce(), seed=1607)  # rejected, so not checked
+    tampered = _record(tmp_path, GreedyPusher, seed=1608)
+    assert _load(good).validation.accepted and _load(tampered).validation.accepted  # type: ignore[union-attr]
+    first = tampered.parent / _load(tampered).steps[0].actions
+    np.save(first, np.zeros_like(np.load(first)))
+
+    report = replay_accepted(FakeSim(), tmp_path)
+
+    assert report == ReplayReport(checked=2, reproduced=1, not_reproduced=[_load(tampered).episode_id])
+    assert ReplayReport.model_validate_json((tmp_path / "replay_report.json").read_text()) == report
+    assert _load(good).replay_valid is True

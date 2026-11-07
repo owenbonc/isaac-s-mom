@@ -140,6 +140,25 @@ class TrainingExample(BaseModel):
     target: SkillTarget
 
 
+class TrainingSetSummary(BaseModel):
+    """The counts behind one training set, so every number shown carries its sample size (SPEC §2 rule 6)."""
+
+    round: int
+    episodes_scanned: int
+    demonstrations: int
+    accepted: int
+    rejected: int
+    unfinished: int
+    rejected_by: dict[str, int]
+    examples: int
+
+
+class ReplayReport(BaseModel):
+    checked: int
+    reproduced: int
+    not_reproduced: list[str]
+
+
 class EvaluationResult(BaseModel):
     checkpoint: str
     round: int

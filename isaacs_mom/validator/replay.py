@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from isaacs_mom.contracts import EpisodeManifest
+from isaacs_mom.contracts import EpisodeManifest, ReplayReport
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.validator.rules import validate
 
@@ -42,3 +42,19 @@ def _perturb_before(sim: TruthSim, manifest: EpisodeManifest, step: int) -> None
     for record in manifest.perturbations:
         if record.before_step == step:
             sim.perturb(record.perturbation)
+
+
+def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
+    """Replay every accepted episode in a run (the ones that can become lessons); writes `replay_report.json`."""
+    not_reproduced: list[str] = []
+    checked = 0
+    for manifest_path in sorted((run_dir / "episodes").glob("*/manifest.json")):
+        manifest = EpisodeManifest.model_validate_json(manifest_path.read_text())
+        if manifest.validation is None or not manifest.validation.accepted:
+            continue
+        checked += 1
+        if not replay(sim, manifest_path):
+            not_reproduced.append(manifest.episode_id)
+    report = ReplayReport(checked=checked, reproduced=checked - len(not_reproduced), not_reproduced=not_reproduced)
+    (run_dir / "replay_report.json").write_text(report.model_dump_json(indent=2))
+    return report

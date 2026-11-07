@@ -1,5 +1,5 @@
 from isaacs_mom.contracts import GroundTruth
-from isaacs_mom.validator.rules import validate
+from isaacs_mom.validator.rules import failure_categories, validate
 
 
 def _truth(
@@ -47,3 +47,25 @@ def test_table_penetration_is_physics_invalid() -> None:
     verdict = validate(_truth(0.0, table_penetration=True))
     assert verdict.physics_valid is False
     assert verdict.reason == "block penetrated the table"
+
+
+def test_every_problem_is_listed_in_order() -> None:
+    verdict = validate(_truth(0.1, at_rest=False, joint_limit_violation=True, table_penetration=True))
+    assert verdict.reason.split("; ") == [
+        "joint limit violated",
+        "block penetrated the table",
+        "block 10.0 cm from target centre (radius 5.0 cm)",
+        "block still moving",
+    ]
+
+
+def test_failure_categories_name_each_problem() -> None:
+    every_problem = validate(_truth(0.1, at_rest=False, joint_limit_violation=True, table_penetration=True))
+    assert failure_categories(every_problem.reason) == [
+        "joint_limit",
+        "table_penetration",
+        "missed_target",
+        "still_moving",
+    ]
+    assert failure_categories(validate(_truth(0.0, at_rest=False)).reason) == ["still_moving"]
+    assert failure_categories(validate(_truth(0.0)).reason) == []
