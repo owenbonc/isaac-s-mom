@@ -26,7 +26,9 @@ EventType = Literal[
 ]
 
 
-class SkillCall(BaseModel):
+class SkillTarget(BaseModel):
+    """A skill and its parameters: what the student is trained to output (SPEC §4.3)."""
+
     skill: Skill
     params: dict[str, float] = Field(default_factory=dict)
 
@@ -39,6 +41,12 @@ class SkillCall(BaseModel):
         if "distance_cm" in params:
             params["distance_cm"] = min(max(params["distance_cm"], 0.0), MAX_DISTANCE_CM)
         return params
+
+
+class SkillCall(SkillTarget):
+    """A policy's decision. `reason` is shown on the dashboard and never trained on."""
+
+    reason: str = ""
 
 
 class Observation(BaseModel):
@@ -129,7 +137,7 @@ class TrainingExample(BaseModel):
     image: str
     instruction: str
     feedback: str
-    target: SkillCall
+    target: SkillTarget
 
 
 class EvaluationResult(BaseModel):
