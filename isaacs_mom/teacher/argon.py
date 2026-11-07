@@ -32,6 +32,8 @@ def env_value(name: str, env_path: Path = ENV_PATH) -> str | None:
 
 
 def gemini_generate(model: str = MODEL) -> Generate:
+    clients: list[object] = []  # one client kept alive for the run: a temporary one is closed before it sends
+
     def generate(parts: list[Part]) -> str:
         key = env_value("GEMINI_API_KEY")
         if not key:
@@ -39,10 +41,14 @@ def gemini_generate(model: str = MODEL) -> Generate:
         from google import genai  # imported on first call: CI and FakeSim runs never load the SDK
         from google.genai import types
 
+        if not clients:
+            clients.append(genai.Client(api_key=key))
+        client: genai.Client = clients[0]  # type: ignore[assignment]
+
         contents: list[types.Part | str] = [
             types.Part.from_bytes(data=p, mime_type="image/jpeg") if isinstance(p, bytes) else p for p in parts
         ]
-        response = genai.Client(api_key=key).models.generate_content(
+        response = client.models.generate_content(
             model=model,
             contents=contents,  # type: ignore[arg-type]
             config=types.GenerateContentConfig(response_mime_type="application/json"),
