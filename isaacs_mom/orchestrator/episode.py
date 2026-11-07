@@ -37,6 +37,7 @@ def run_episode(
         instruction=instruction,
         sim_version=sim.sim_version,
         robot_config=sim.robot_config,
+        driver=policy.controller,
     )
     events.emit("episode_started", episode_id=episode_id, seed=seed, split=split, round=round_)
     feedback = "start"

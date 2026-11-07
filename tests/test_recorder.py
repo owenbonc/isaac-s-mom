@@ -17,6 +17,7 @@ def _start(run_dir: Path) -> Recorder:
         instruction="push",
         sim_version="test",
         robot_config="test",
+        driver="student",
     )
 
 
@@ -72,3 +73,21 @@ def test_actions_and_timestamps_must_line_up(tmp_path: Path) -> None:
 def test_timestamps_must_not_go_backwards(tmp_path: Path) -> None:
     with pytest.raises(RecordingError, match="timestamps go backwards"):
         _start(tmp_path).add_step(_obs(0), HUG, _result(timestamps=(0.04, 0.02)), "teacher", None)
+
+
+def test_perturbation_and_takeover_are_saved_straight_away(tmp_path: Path) -> None:
+    recorder = _start(tmp_path)
+    recorder.add_perturbation(Perturbation(kind="move_box", seed=7))
+    assert [p.before_step for p in _saved(tmp_path).perturbations] == [0]
+    recorder.mark_takeover()
+    assert _saved(tmp_path).takeover_step == 0
+
+
+def test_timestamps_must_be_real_numbers(tmp_path: Path) -> None:
+    with pytest.raises(RecordingError, match="timestamps are not finite"):
+        _start(tmp_path).add_step(_obs(0), HUG, _result(timestamps=(0.02, float("nan"))), "teacher", None)
+
+
+def test_the_diary_records_who_drove_the_episode(tmp_path: Path) -> None:
+    _start(tmp_path)
+    assert _saved(tmp_path).driver == "student"

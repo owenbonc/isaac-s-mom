@@ -432,3 +432,12 @@ def test_moving_the_bin_onto_the_robot_is_refused(sim: MujocoSim, monkeypatch: p
     before = sim.ground_truth()
     assert not sim.perturb(Perturbation(kind="move_bin", seed=0))
     assert sim.ground_truth() == before
+
+
+def test_ground_truth_heading_follows_the_waist_twist(sim: MujocoSim) -> None:
+    before = sim.ground_truth()
+    assert before.robot_yaw == pytest.approx(0.0, abs=np.deg2rad(3))
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
+    after = sim.ground_truth()
+    assert after.robot_yaw - before.robot_yaw == pytest.approx(np.deg2rad(30), abs=np.deg2rad(3))
+    assert np.hypot(after.robot_xy[0] - before.robot_xy[0], after.robot_xy[1] - before.robot_xy[1]) < 0.02
