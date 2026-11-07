@@ -25,8 +25,8 @@ from isaacs_mom.validator import validate
 REACH_TOLERANCE = 0.015
 BACK_OFF_CM = 30.0
 AIM_TOLERANCE_DEG = 4.0
-PLACE_STANDOFF = 0.44  # pelvis to bin centre; the box lands ~5 cm short of the centre
-STANDOFF_TOLERANCE = 0.04
+PLACE_STANDOFF = 0.45  # pelvis to bin centre; the box lands ~6 cm short of the centre
+STANDOFF_TOLERANCE = 0.03
 PLACE_LATERAL_TOLERANCE = 0.05  # the bin is 7 cm wider than the box either side
 
 
@@ -63,12 +63,11 @@ class OraclePolicy:
             return SkillCall(skill="walk_back", params={"distance_cm": BACK_OFF_CM})
         to_bin = np.array(gt.bin_xy) - (x, y)
         dist = float(np.linalg.norm(to_bin))
-        aim = np.arctan2(to_bin[1], to_bin[0]) - np.arcsin(np.clip(sim.work_y / dist, -1, 1))
-        turn = np.degrees(wrap(aim - heading))
+        turn = np.degrees(wrap(np.arctan2(to_bin[1], to_bin[0]) - heading))
         ahead = dist - PLACE_STANDOFF
         close = abs(ahead) <= STANDOFF_TOLERANCE or "would walk into the bin" in feedback
         # Up close, a few degrees off is a few centimetres at the hands: re-aim only if the box would miss.
-        miss = abs(_local(to_bin, heading)[1] - sim.work_y)
+        miss = abs(_local(to_bin, heading)[1])
         if (abs(turn) > AIM_TOLERANCE_DEG and not close) or (close and miss > PLACE_LATERAL_TOLERANCE):
             return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
         if not close:

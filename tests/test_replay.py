@@ -37,8 +37,7 @@ class GreedyHugger:
         if abs(gt.box_xyz[0] - 0.4) < 0.2 and abs(gt.box_xyz[1]) < 0.25:  # still over the table
             return SkillCall(skill="walk_back", params={"distance_cm": 30})
         dist = math.hypot(gt.bin_xy[0] - x, gt.bin_xy[1] - y)
-        aim = math.atan2(gt.bin_xy[1] - y, gt.bin_xy[0] - x) - math.asin(work_y / dist)
-        turn = math.degrees(math.remainder(aim - heading, 2 * math.pi))
+        turn = math.degrees(math.remainder(math.atan2(gt.bin_xy[1] - y, gt.bin_xy[0] - x) - heading, math.tau))
         if abs(turn) > 2:
             return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
         if dist > PLACE_X + 0.05:

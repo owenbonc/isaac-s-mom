@@ -12,6 +12,7 @@ from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import PLACE_X, FakeSim
 from isaacs_mom.teacher import choose_scenes
+from isaacs_mom.validator import validate
 from isaacs_mom.validator.training import build_training_set, training_examples
 
 
@@ -40,8 +41,7 @@ class ScriptedPolicy:
         if abs(gt.box_xyz[0] - 0.4) < 0.2 and abs(gt.box_xyz[1]) < 0.25:  # still over the table
             return SkillCall(skill="walk_back", params={"distance_cm": 30})
         dist = math.hypot(gt.bin_xy[0] - x, gt.bin_xy[1] - y)
-        aim = math.atan2(gt.bin_xy[1] - y, gt.bin_xy[0] - x) - math.asin(work_y / dist)
-        turn = math.degrees(math.remainder(aim - heading, 2 * math.pi))
+        turn = math.degrees(math.remainder(math.atan2(gt.bin_xy[1] - y, gt.bin_xy[0] - x) - heading, math.tau))
         if abs(turn) > 2:
             return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
         if dist > PLACE_X + 0.05:
@@ -80,18 +80,57 @@ def test_skill_calls_are_whitelisted_and_clamped() -> None:
     assert SkillCall(skill="turn_left", params={"angle_deg": 500}).params["angle_deg"] == 180
 
 
-def test_fake_refuses_out_of_reach_and_into_the_table_without_moving() -> None:
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_non_finite_skill_params_are_rejected(value: float) -> None:
+    with pytest.raises(ValidationError):
+        SkillCall(skill="turn_left", params={"angle_deg": value})
+
+
+@pytest.mark.parametrize("text", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_params_in_model_output_are_rejected(text: str) -> None:
+    # json.loads accepts these, so a model's raw answer can carry them.
+    raw = json.loads(f'{{"skill": "reach_left", "params": {{"distance_cm": {text}}}}}')
+    with pytest.raises(ValidationError):
+        SkillCall.model_validate(raw)
+
+
+def test_fake_place_without_walking_drops_the_box_outside_the_bin() -> None:
     sim = FakeSim()
     sim.reset(1234)
-    assert sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 10})).ok
-    for call in (
-        SkillCall(skill="reach_left", params={"distance_cm": 5}),
-        SkillCall(skill="walk_forward", params={"distance_cm": 30}),
-    ):
-        before = (sim.observe().joint_state, sim.pose())
-        result = sim.execute(call)
-        assert not result.ok and result.error and not result.executed_actions
-        assert (sim.observe().joint_state, sim.pose()) == before
+    box_y = sim.ground_truth().box_xyz[1]
+    sim.execute(SkillCall(skill="reach_left" if box_y > 0 else "reach_right", params={"distance_cm": abs(box_y) * 100}))
+    for skill in ("hug", "lift", "place"):
+        assert sim.execute(SkillCall(skill=skill)).ok
+    gt = sim.ground_truth()
+    assert not gt.box_on_bin_floor
+    assert not validate(gt).accepted
+
+
+def test_fake_refuses_a_reach_past_the_limit_without_moving() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    before = sim.observe().joint_state
+    result = sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 20}))
+    assert not result.ok and result.error and not result.executed_actions
+    assert sim.observe().joint_state == before
+
+
+def test_fake_refuses_a_walk_into_the_table_without_moving() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    before = (sim.observe().joint_state, sim.pose())
+    result = sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 30}))
+    assert not result.ok and result.error and "table" in result.error and not result.executed_actions
+    assert (sim.observe().joint_state, sim.pose()) == before
+
+
+def test_fake_walks_and_turns_the_requested_amounts() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90}))
+    sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 50}))
+    assert sim.pose() == pytest.approx((-0.30, 0.50, math.pi / 2))
 
 
 def test_scripted_episode_succeeds_and_takeover_is_recorded(tmp_path: Path) -> None:

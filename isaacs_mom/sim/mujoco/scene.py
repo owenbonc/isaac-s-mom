@@ -42,7 +42,6 @@ BIN_INNER_HALF = 0.22  # wider than the box's 39 cm diagonal, so a tumbling box 
 BIN_WALL = 0.02
 BIN_FLOOR_Z = 0.30
 BIN_RIM_Z = 0.50  # below the hanging hands, so the arms clear it at rest
-BIN_STAND_HALF = 0.10  # a narrow pedestal, so the robot's toes fit under the bin from any side
 BIN_DIST = (1.0, 1.4)  # metres from the robot
 BIN_BEARING = (np.deg2rad(75), np.deg2rad(285))  # anywhere but ahead, where the table is
 TABLE_CLEARANCE = 0.45  # metres between the table top and the bin's walls, so the robot can walk between them
@@ -192,19 +191,19 @@ def _add_world(spec: mujoco.MjSpec) -> None:
     # A mocap body, so `reset` and `perturb` can place it anywhere without it being knocked about.
     green = [0.25, 0.62, 0.35, 1]
     bin_body = world.add_body(name="bin", mocap=True, pos=[0.0, 0.5, 0.0])
+    outer = BIN_INNER_HALF + BIN_WALL
     bin_body.add_geom(
         name="bin_stand",
         type=mujoco.mjtGeom.mjGEOM_BOX,
-        size=[BIN_STAND_HALF, BIN_STAND_HALF, BIN_FLOOR_Z / 2],
+        size=[outer, outer, BIN_FLOOR_Z / 2],  # as wide as the bin, so nothing can get under its floor
         pos=[0, 0, BIN_FLOOR_Z / 2],
         rgba=[0.35, 0.35, 0.38, 1],
     )
-    outer = BIN_INNER_HALF + BIN_WALL
     wall_h = (BIN_RIM_Z - BIN_FLOOR_Z) / 2
     bin_body.add_geom(
         name="bin_floor",
         type=mujoco.mjtGeom.mjGEOM_BOX,
-        size=[outer, outer, 0.01],
+        size=[BIN_INNER_HALF, BIN_INNER_HALF, 0.01],  # inside the walls, so only a box in the bin can touch it
         pos=[0, 0, BIN_FLOOR_Z + 0.01],
         rgba=green,
     )

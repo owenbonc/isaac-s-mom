@@ -40,6 +40,12 @@ def test_box_off_the_bin_floor_fails_with_its_offset_in_the_reason() -> None:
     assert "30 cm from its centre" in verdict.reason
 
 
+def test_box_touching_the_floor_with_its_centre_outside_the_walls_fails() -> None:
+    verdict = validate(_truth(0.30, on_floor=True))
+    assert verdict.accepted is False
+    assert "30 cm from its centre" in verdict.reason
+
+
 def test_offset_is_measured_in_the_turned_bins_frame() -> None:
     # 20 cm along x is 14 cm along each side of a bin turned by 45 degrees.
     verdict = validate(_truth(0.20, on_floor=False, bin_yaw=math.pi / 4))
