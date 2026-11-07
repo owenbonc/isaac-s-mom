@@ -1,6 +1,6 @@
 # Workstreams: what each owner builds
 
-Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everything else changes only through a PR that says why. The foundation ships each module as a working stand-in with its final signature, so `uv run mom run --sim fake` runs end to end today. Replace the stand-in, keep the signature, and keep that command working.
+Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everything else changes only through a PR that says why. The foundation ships each module as a working stand-in with its final signature, so `uv run mom run --sim fake --student stub` runs end to end without the model. Replace the stand-in, keep the signature, and keep that command working.
 
 Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run --sim fake --student stub --rounds 1`. Agents in a worktree run `scripts/agent-setup.sh origin/phase-1` instead.
 
@@ -16,6 +16,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 - Replace `diagnose`, `choose_scenes` and `ArgonPolicy.act` (SPEC §3.3). Model `gemini-4-argon` via the `google-genai` SDK; key from `GEMINI_API_KEY` in `.env`.
 - Input is only the head-camera JPEGs, the instruction, skill history and the validator's reason. Never import `isaacs_mom.sim` or call `ground_truth` (rule 1).
 - `choose_scenes` must keep calling `assert_not_heldout` (rule 2). Enforce `ARGON_CALL_BUDGET` and emit an `argon_call` event per call with latency (rule 5). When Argon is unreachable or over budget, `act` returns `reobserve` a few times, then `None`.
+- End every demonstration with exactly one `reobserve` once the block is in the zone, then return `None`. The student learns to stop from that recorded step and treats two `reobserve`s in a row as done. Re-observe between skills by reading the new frame, not by sending `reobserve`.
 - Done: SPEC §6 criterion 4 (Gate D). Tests use a fake Argon client; no live calls in CI.
 
 ## 3. Validator and dataset — `isaacs_mom/validator/`
@@ -26,6 +27,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 ## 4. Student VLM and fine-tuning — `isaacs_mom/student/`
 - Replace `StudentPolicy.act` with SmolVLM2-500M-Video-Instruct (local, MPS on Macs). Prompt for one JSON `SkillCall`; parse with the pydantic model; anything unparseable becomes `reobserve` and is logged.
 - Replace `finetune` with LoRA on a Modal A10G over the `training_r<round>.jsonl` file (SPEC §4.3); return `ckpt-r<round>` and make `StudentPolicy(checkpoint)` load it. Weights stay out of git.
+- `checkpoints/ckpt-r<round>/` holds the most recent run's adapters (a later run's round N replaces them); `meta.json` there names the training set it came from. Run the real loop outside OneDrive so checkpoint swaps are not blocked by sync locks.
 - Done: SPEC §6 criterion 2 (Gate B), then the fine-tune half of criterion 5.
 
 ## 5. Orchestrator, dashboard and demo — `isaacs_mom/orchestrator/`, `docs/`

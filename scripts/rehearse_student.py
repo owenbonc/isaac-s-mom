@@ -54,7 +54,7 @@ def main() -> None:
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     run_id = time.strftime("rehearsal-%Y%m%d-%H%M%S")
-    run_dir = Path("runs") / run_id
+    run_dir = Path("rehearsal") / run_id
     events = EventLog(run_dir, run_id)
     sim = FakeSim()
 

@@ -4,6 +4,7 @@ __pycache__/
 .pytest_cache/
 .ruff_cache/
 runs/
+rehearsal/
 checkpoints/
 *.safetensors
 .claude/worktrees/
