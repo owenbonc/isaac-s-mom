@@ -11,7 +11,15 @@
   <div class="meta" id="meta"></div>
 </header>
 <div class="control" id="control" aria-live="polite"></div>
-<div class="episode"><p id="episode-line"></p></div>
+<div class="episode">
+  <p id="episode-line"></p>
+  <nav class="presenter" aria-label="Presenter controls">
+    <button type="button" id="b-prev" data-key="ArrowLeft"><kbd>←</kbd> Previous</button>
+    <button type="button" id="b-next" data-key="ArrowRight">Next <kbd>→</kbd></button>
+    <button type="button" id="b-moved" data-key="p" aria-pressed="false"><kbd>P</kbd> Show block move</button>
+    <button type="button" id="b-pause" data-key=" "><kbd>Space</kbd> <span>Pause</span></button>
+  </nav>
+</div>
 <main>
   <section class="panel col camera">
     <header><h2>Head camera</h2><span id="chip-camera"></span></header>

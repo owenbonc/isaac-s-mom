@@ -224,3 +224,94 @@ def test_each_frame_keeps_the_controller_that_saw_it_after_a_takeover() -> None:
     (frame,) = out["ep"]["frames"]
     assert (frame["step"], frame["controller"], frame["checkpoint"]) == (4, "student", "ckpt-r0")
     assert out["ep"]["controller"] == "teacher"
+
+
+VIEW = """
+const v = S.view();
+const feed = (n) => { for (const e of events.splice(0, n)) S.reduce(v.live, e); };
+const look = () => {
+  const ep = S.episode(v);
+  return { shown: S.shown(v).eventCount, held: S.held(v), episode: ep && ep.id, focus: v.focus };
+};
+"""
+
+
+def presenter(script: str, events: list[dict]) -> Any:
+    return run(VIEW + script, events)
+
+
+def test_pausing_holds_the_shown_view_and_buffers_new_events_until_resume() -> None:
+    events = stream(started("a"), decision(0), started("b"), decision(0), decision(1))
+    out = presenter(
+        "feed(2); S.togglePause(v); feed(3); const paused = look(); S.togglePause(v); return [paused, look()];",
+        events,
+    )
+    assert out[0] == {"shown": 2, "held": 3, "episode": "a", "focus": None}
+    assert out[1] == {"shown": 5, "held": 0, "episode": "b", "focus": None}
+
+
+def test_a_reconnect_while_paused_keeps_the_frozen_view_and_resumes_onto_the_replayed_run() -> None:
+    events = stream(started("a"), decision(0), started("b"))
+    out = presenter(
+        """
+        const all = [...events];
+        feed(2); S.togglePause(v); S.reconnect(v);
+        for (const e of all) S.reduce(v.live, e);
+        const paused = look(); S.togglePause(v); return [paused, look()];
+        """,
+        events,
+    )
+    assert out[0] == {"shown": 2, "held": 1, "episode": "a", "focus": None}
+    assert out[1] == {"shown": 3, "held": 0, "episode": "b", "focus": None}
+
+
+def test_arrows_move_between_episodes_and_moving_past_the_last_follows_the_run_again() -> None:
+    events = stream(started("a"), started("b"), started("c"), started("d"))
+    out = presenter(
+        """
+        feed(3);
+        const seen = [];
+        for (const d of [-1, -1, -1, 1]) { S.move(v, d); seen.push(look().episode); }
+        feed(1); seen.push(look().episode);
+        S.move(v, 1); S.move(v, 1); seen.push(look().episode);
+        return seen;
+        """,
+        events,
+    )
+    # pinned to "b" while "d" starts; then two steps right reach the latest and follow it
+    assert out == ["b", "a", "a", "b", "b", "d"]
+
+
+def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_again() -> None:
+    events = stream(
+        started("a"),
+        *[x for step in range(6) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))],
+        ("perturbation", {"kind": "move_block", "step": 2}),
+        started("b"),
+    )
+    events.insert(5, events.pop(-2))  # the perturbation arrives before decision 2
+    out = presenter(
+        """
+        feed(events.length - 1);
+        S.jumpToPerturbation(v);
+        const jumped = look();
+        const strip = S.filmstrip(S.episode(v), v.focus).map((f) => [f.step, f.moved, f.now]);
+        feed(1);
+        const pinned = look();
+        S.jumpToPerturbation(v);
+        return { jumped, strip, pinned, again: look() };
+        """,
+        events,
+    )
+    assert out["jumped"]["focus"] == 2 and out["jumped"]["episode"] == "a"
+    assert [f for f in out["strip"] if f[2]] == [[2, True, True]]
+    assert out["pinned"]["episode"] == "a"
+    assert out["again"]["focus"] is None
+
+
+def test_p_does_nothing_on_an_episode_without_a_perturbation() -> None:
+    out = presenter(
+        "feed(3); const moved = S.jumpToPerturbation(v); return [moved, look()];",
+        stream(started("a"), decision(0), executed(0)),
+    )
+    assert out == [False, {"shown": 3, "held": 0, "episode": "a", "focus": None}]

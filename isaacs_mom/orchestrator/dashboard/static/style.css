@@ -24,8 +24,15 @@ header.bar h1{font-size:1.25rem}
 .control.teacher{background:var(--teacher-bg);border-bottom-color:#f0c3a8}
 .control .what{font-weight:700}
 
-.episode{flex:none;padding:.4rem 1.1rem;background:var(--panel);border-bottom:1px solid var(--rule)}
-#episode-line{margin:0;overflow-wrap:anywhere}
+.episode{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem 1rem;padding:.4rem 1.1rem;background:var(--panel);border-bottom:1px solid var(--rule)}
+#episode-line{margin:0;flex:1 1 20rem;overflow-wrap:anywhere}
+.presenter{display:flex;flex-wrap:wrap;gap:.4rem}
+.presenter button{font:inherit;font-weight:600;color:var(--ink);background:var(--panel);border:1px solid var(--rule-strong);border-radius:4px;padding:.2rem .6rem;display:inline-flex;align-items:center;gap:.4rem;cursor:pointer}
+.presenter button:hover:not(:disabled){background:var(--ground)}
+.presenter button:disabled{color:var(--ph);border-color:var(--rule);cursor:default}
+.presenter button[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
+kbd{font-family:var(--mono);font-weight:600;padding:0 .3rem;border:1px solid currentColor;border-radius:3px}
+.chip.paused{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,.9fr);gap:.8rem;padding:.8rem}
 .col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .side{display:flex;flex-direction:column;gap:.8rem;min-height:0;overflow-y:auto}
@@ -96,6 +103,7 @@ ol.log li.event.take{background:var(--teacher-bg);color:var(--teacher)}
 ol.log li.event.bad{background:var(--bad-bg);color:var(--bad)}
 ol.log li.event.good{background:var(--ok-bg);color:var(--ok)}
 ol.log li.empty{display:block;max-width:none;margin:0;text-align:left;border-bottom:0}
+ol.log li.focus{box-shadow:inset 0 0 0 3px var(--ink)}
 ol.log li.fresh{animation:in .16s var(--ease-out)}
 @keyframes in{from{opacity:0;transform:translateY(4px)}}
 ol.log .err{grid-column:2 / 4;color:var(--bad);overflow-wrap:anywhere}

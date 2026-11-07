@@ -18,8 +18,10 @@
     };
   }
 
-  // The page's view of the stream. Every connection replays events.jsonl from the start, so a reconnect starts over.
-  const view = () => ({ live: initial() });
+  // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing;
+  // `selected` pins an episode (null follows the latest); `focus` is a step to show instead of the latest frame.
+  const view = () => ({ live: initial(), frozen: null, selected: null, focus: null });
+  // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
   }
@@ -165,15 +167,50 @@
     return { student: stat(s.latency.student), teacher: stat(s.latency.teacher), argon: stat(s.argon), finetune: stat(s.finetune.durations) };
   }
 
-  // The head-camera frames to show: the last few of the episode, with the first one after the block moved flagged.
-  function filmstrip(ep) {
-    if (!ep) return [];
-    const shown = ep.frames.slice(-FILMSTRIP);
-    const moved = ep.perturbedStep === null ? null : ep.frames.find((f) => f.step >= ep.perturbedStep);
-    return shown.map((f) => ({ ...f, moved: f === moved }));
+  // The head-camera frames to show around the stage frame (`now`): the latest, or the first at or after `focus`.
+  // The first frame after the block moved is flagged.
+  function filmstrip(ep, focus = null) {
+    if (!ep || !ep.frames.length) return [];
+    const frames = ep.frames;
+    const moved = ep.perturbedStep === null ? null : frames.find((f) => f.step >= ep.perturbedStep);
+    const stage = (focus !== null && frames.find((f) => f.step >= focus)) || frames[frames.length - 1];
+    const at = frames.indexOf(stage);
+    const start = Math.max(0, Math.min(at - (FILMSTRIP >> 1), frames.length - FILMSTRIP));
+    return frames.slice(start, start + FILMSTRIP).map((f) => ({ ...f, moved: f === moved, now: f === stage }));
   }
 
-  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, median };
+  // Presenter controls (SPEC §3.5). Events keep folding into `live` while paused; resuming shows them all.
+  const shown = (v) => v.frozen || v.live;
+  const held = (v) => (v.frozen ? Math.max(0, v.live.eventCount - v.frozen.eventCount) : 0);
+  function togglePause(v) {
+    v.frozen = v.frozen ? null : structuredClone(v.live);
+  }
+
+  function episode(v) {
+    const s = shown(v);
+    return (v.selected !== null && s.episodes.find((e) => e.id === v.selected)) || current(s);
+  }
+
+  // Moving onto the run's last episode follows the run again.
+  function move(v, delta) {
+    const episodes = shown(v).episodes;
+    const at = episodes.indexOf(episode(v));
+    if (at < 0) return;
+    const next = Math.min(episodes.length - 1, Math.max(0, at + delta));
+    v.selected = next === episodes.length - 1 ? null : episodes[next].id;
+    v.focus = null;
+  }
+
+  // Shows the first frame after the shown episode's perturbation and pins the episode; pressing again lets go.
+  function jumpToPerturbation(v) {
+    const ep = episode(v);
+    if (!ep || ep.perturbedStep === null) return false;
+    v.selected = ep.id;
+    v.focus = v.focus === null ? ep.perturbedStep : null;
+    return true;
+  }
+
+  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, median, shown, held, togglePause, episode, move, jumpToPerturbation };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

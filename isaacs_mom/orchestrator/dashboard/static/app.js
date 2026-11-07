@@ -4,6 +4,7 @@ let connection = "open";
 let renderQueued = false;
 let renderedRows = 0;
 let renderedEpisode = null;
+let renderedFocus = null;
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
 const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "gemini-4-argon, Gemini API", finetune: "LoRA on Modal A10G" };
 
@@ -27,7 +28,11 @@ const now = () => Date.now() / 1000;
 const label = (kind) => kind[0].toUpperCase() + kind.slice(1);
 const chip = (kind, text = label(kind)) => `<span class="chip ${kind}">${text}</span>`;
 // The label for a panel: placeholder when it has no data, else the run's (or its episode's) provenance.
-const panelChip = (hasData, ep = null) => chip(hasData ? MomState.provenance(view.live, now(), ep) : "placeholder");
+const panelChip = (hasData, ep = null) => {
+  if (!hasData) return chip("placeholder");
+  const kind = MomState.provenance(MomState.shown(view), now(), ep);
+  return chip(view.frozen && kind === "live" ? "recorded" : kind); // a paused view is not live
+};
 const simName = (s) => {
   const sims = s.episodes.map((e) => e.sim);
   if (sims.some((sim) => sim === null)) return "simulator not stated";
@@ -46,20 +51,22 @@ const pct = (k, n) => (n ? Math.round((100 * k) / n) + "%" : "n/a");
 const stat = (s) => (s ? `${ms(s.median)} <span class="note">n=${s.n}</span>` : '<span class="ph-text">no data</span>');
 
 function renderHeader() {
-  const s = view.live;
-  const kind = MomState.provenance(s, now());
-  const status = s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, kind === "placeholder" ? `Placeholder · ${simName(s)}` : `${label(kind)} · ${simName(s)}`);
-  $("status").innerHTML = status + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
+  const run = view.live;
+  const kind = MomState.provenance(run, now());
+  const status = run.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)} · ${simName(run)}`);
+  const paused = view.frozen ? " " + chip("paused", `Paused · ${MomState.held(view)} new events`) : "";
+  $("status").innerHTML = status + paused + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
+  const s = MomState.shown(view);
   $("meta").innerHTML = s.eventCount
     ? `<span>Run <b class="mono">${esc(s.runId)}</b></span><span>${s.episodes.length} episodes</span><span>${s.eventCount} events</span>`
     : "";
 }
 
 function renderControl() {
-  const s = view.live;
-  const ep = MomState.current(s);
+  const s = MomState.shown(view);
+  const ep = MomState.episode(view);
   const el = $("control");
-  if (s.finetune.pending) {
+  if (s.finetune.pending && view.selected === null) {
     el.className = "control";
     el.innerHTML = `<span class="what">Fine-tuning the student, round ${esc(s.finetune.pending.round ?? "")}</span><span class="note">No robot is moving. Held-out evaluation starts when the new checkpoint is ready.</span>`;
     return;
@@ -77,25 +84,25 @@ function renderControl() {
       ? "Choosing each skill from the head-camera frame."
       : "Demonstrating from the head-camera frame.";
   el.className = "control " + ep.controller;
-  el.innerHTML = `<span class="what">In control:</span>${tag(ep.controller, ep.checkpoint)}<span class="note" style="color:var(--ink)">${detail}${result}</span>`;
+  el.innerHTML = `<span class="what">${ep.verdict ? "Last in control:" : "In control:"}</span>${tag(ep.controller, ep.checkpoint)}<span class="note" style="color:var(--ink)">${detail}${result}</span>`;
 }
 
 function renderCamera() {
-  const ep = MomState.current(view.live);
-  const frames = MomState.filmstrip(ep);
+  const ep = MomState.episode(view);
+  const frames = MomState.filmstrip(ep, view.focus);
   $("chip-camera").innerHTML = panelChip(frames.length > 0, ep);
   if (!frames.length) {
     $("stage").innerHTML = '<div class="empty">No head-camera frame yet. The latest frame appears here after each executed skill.</div>';
     $("strip").innerHTML = "";
     return;
   }
-  const last = frames[frames.length - 1];
+  const last = frames.find((f) => f.now);
   const seen = last.step === null ? "" : `Seen by step ${esc(last.step)}`;
   const shot = last.url ? `<img src="${esc(last.url)}" alt="Head camera frame${seen ? ", " + seen.toLowerCase() : ""}">` : "";
   const moved = last.moved ? `<p class="caption moved">${esc(MOVED[ep.rows.findLast((r) => r.kind === "perturbation").what] || "Scene changed")} just before this frame. This is the first frame that shows it.</p>` : "";
   $("stage").innerHTML = `<div class="frame"><div class="shot"${last.url ? "" : " data-missing"}>${shot}<div class="over">${tag(last.controller, last.checkpoint)}${seen ? `<span class="step">${seen}</span>` : ""}</div></div></div>${moved}`;
   $("strip").innerHTML = frames
-    .map((f) => `<li class="${[f === last ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (block moved before this frame)</span>' : ""}</span></li>`)
+    .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (block moved before this frame)</span>' : ""}</span></li>`)
     .join("");
 }
 
@@ -103,7 +110,7 @@ function logRow(row) {
   const step = row.step === null ? "" : esc(row.step);
   switch (row.kind) {
     case "perturbation":
-      return `<li class="event moved"><span class="n">${step}</span><span>${esc(MOVED[row.what] || "Scene changed")} <span class="d">by the orchestrator. The robot learns of it only from its camera${row.step === null ? "" : `, in the frame seen by step ${step}`}.</span></span></li>`;
+      return `<li class="event moved${row.step === view.focus ? " focus" : ""}"><span class="n">${step}</span><span>${esc(MOVED[row.what] || "Scene changed")} <span class="d">by the orchestrator. The robot learns of it only from its camera${row.step === null ? "" : `, in the frame seen by step ${step}`}.</span></span></li>`;
     case "takeover":
       return `<li class="event take"><span class="n">${step}</span><span>Teacher takes over</span></li>`;
     case "error":
@@ -126,31 +133,46 @@ function verdictRow(ep) {
   return `<li class="event ${ok ? "good" : "bad"}"><span class="n"></span><span>Validator: ${ok ? "accepted" : "rejected"} <span class="d">${esc(ep.verdict.reason)}</span></span></li>`;
 }
 
+function renderEpisode() {
+  const s = MomState.shown(view);
+  const ep = MomState.episode(view);
+  const at = s.episodes.indexOf(ep);
+  $("episode-line").innerHTML = ep
+    ? `<b>Episode ${at + 1} of ${s.episodes.length}${view.selected === null ? "" : ", pinned"}.</b> ${esc(SCENES[ep.split] || "Scene")}, seed ${esc(ep.seed ?? "")}, round ${esc(ep.round ?? "")} <span class="mono">${esc(ep.id)}</span>`
+    : "";
+  $("b-prev").disabled = at <= 0;
+  $("b-next").disabled = at < 0 || at === s.episodes.length - 1;
+  $("b-moved").disabled = !ep || ep.perturbedStep === null;
+  $("b-moved").setAttribute("aria-pressed", String(view.focus !== null));
+  $("b-pause").lastElementChild.textContent = view.frozen ? "Resume" : "Pause";
+}
+
 function renderLog() {
-  const ep = MomState.current(view.live);
+  const ep = MomState.episode(view);
   const list = $("log");
   $("chip-log").innerHTML = panelChip(ep !== null, ep);
   if (!ep) {
-    $("episode-line").innerHTML = "";
     list.innerHTML = '<li class="empty">No decisions yet. Each decision appears with its reason and latency.</li>';
     renderedEpisode = null;
     return;
   }
-  $("episode-line").innerHTML = `${esc(SCENES[ep.split] || "Scene")}, seed ${esc(ep.seed ?? "")}, round ${esc(ep.round ?? "")} <span class="mono">${esc(ep.id)}</span>`;
   const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows;
-  const added = html.length > renderedRows;
-  // Follow new rows only when the reader is already at the bottom, so scrolling back to point at a row holds.
+  // Stay at the bottom only when the reader is already there, so scrolling back to point at a row holds.
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 8;
   list.innerHTML = html.join("");
   if (!fromStart) [...list.children].slice(renderedRows).forEach((li) => li.classList.add("fresh"));
-  if (fromStart || (added && atBottom)) list.scrollTop = list.scrollHeight;
+  if (fromStart || atBottom) list.scrollTop = list.scrollHeight;
+  const focus = view.focus === null ? null : `${ep.id}@${view.focus}`;
+  const row = list.querySelector(".focus");
+  if (focus !== renderedFocus && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
+  renderedFocus = focus;
   renderedRows = html.length;
   renderedEpisode = ep.id;
 }
 
 function renderVerdict() {
-  const ep = MomState.current(view.live);
+  const ep = MomState.episode(view);
   const v = ep && ep.verdict;
   const body = v
     ? `<div class="stack"><span class="verdict ${v.task && v.physics ? "good" : "bad"}">${v.task && v.physics ? CHECK + "Accepted" : X + "Rejected"}</span><div>${esc(v.reason)}</div><div class="note">Task ${v.task ? "succeeded" : "not met"}. Physics ${v.physics ? "valid" : "violated"}.</div></div>`
@@ -159,7 +181,7 @@ function renderVerdict() {
 }
 
 function renderRounds() {
-  const rounds = view.live.rounds;
+  const rounds = MomState.shown(view).rounds;
   let body = '<div class="ph-text">No held-out evaluation in the events yet.</div>';
   if (rounds.length) {
     const first = rounds[0];
@@ -172,7 +194,7 @@ function renderRounds() {
 }
 
 function renderModels() {
-  const s = MomState.summary(view.live);
+  const s = MomState.summary(MomState.shown(view));
   const any = s.student || s.teacher || s.argon || s.finetune;
   const row = (who, where, measured) => `<tr><td><b>${who}</b> ${where}</td><td class="num">${stat(measured)}</td></tr>`;
   const head = (what, measure) => `<tr><th>${what} <span class="chip config">Configured</span></th><th class="num">${measure}</th></tr>`;
@@ -181,7 +203,7 @@ function renderModels() {
 }
 
 function renderDiagnosis() {
-  const ep = MomState.current(view.live);
+  const ep = MomState.episode(view);
   const d = ep && ep.diagnosis;
   const conf = d && d.confidence !== null ? `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>` : "";
   const body = d
@@ -194,6 +216,7 @@ function render() {
   renderQueued = false;
   renderHeader();
   renderControl();
+  renderEpisode();
   renderCamera();
   renderLog();
   renderVerdict();
@@ -216,6 +239,29 @@ document.addEventListener(
   },
   true,
 );
+
+// Presenter controls (SPEC §3.5): the same actions from the keyboard and from the buttons that label them.
+const ACTIONS = {
+  " ": () => MomState.togglePause(view),
+  ArrowLeft: () => MomState.move(view, -1),
+  ArrowRight: () => MomState.move(view, 1),
+  p: () => MomState.jumpToPerturbation(view),
+};
+document.addEventListener("keydown", (e) => {
+  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  if (!ACTIONS[key] || e.metaKey || e.ctrlKey || e.altKey) return;
+  if (key === " " && e.target.closest("button")) return; // a focused button handles its own Space
+  e.preventDefault();
+  if (e.repeat) return;
+  ACTIONS[key]();
+  schedule();
+});
+document.querySelector(".presenter").addEventListener("click", (e) => {
+  const button = e.target.closest("button[data-key]");
+  if (!button) return;
+  ACTIONS[button.dataset.key]();
+  schedule();
+});
 
 const source = new EventSource("/events");
 // The server replays the whole run on every connection, so the view starts over instead of adding to what is shown.
