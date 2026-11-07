@@ -311,7 +311,7 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
 
 def test_p_does_nothing_on_an_episode_without_a_perturbation() -> None:
     out = presenter(
-        "feed(3); const moved = S.jumpToPerturbation(v); return [moved, look()];",
+        "feed(3); S.jumpToPerturbation(v); return look();",
         stream(started("a"), decision(0), executed(0)),
     )
-    assert out == [False, {"shown": 3, "held": 0, "episode": "a", "focus": None}]
+    assert out == {"shown": 3, "held": 0, "episode": "a", "focus": None}

@@ -204,10 +204,9 @@
   // Shows the first frame after the shown episode's perturbation and pins the episode; pressing again lets go.
   function jumpToPerturbation(v) {
     const ep = episode(v);
-    if (!ep || ep.perturbedStep === null) return false;
+    if (!ep || ep.perturbedStep === null) return;
     v.selected = ep.id;
     v.focus = v.focus === null ? ep.perturbedStep : null;
-    return true;
   }
 
   const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, median, shown, held, togglePause, episode, move, jumpToPerturbation };

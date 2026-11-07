@@ -59,8 +59,10 @@ function renderHeader() {
   const paused = view.frozen ? " " + chip("paused", `Paused · ${MomState.held(view)} new events`) : "";
   $("status").innerHTML = status + paused + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
   const s = MomState.shown(view);
+  const ep = MomState.current(s);
+  const robot = ep && ep.sim && ep.sim.robot;
   $("meta").innerHTML = s.eventCount
-    ? `<span>Run <b class="mono">${esc(s.runId)}</b></span><span>${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}</span><span>${s.eventCount} events</span>`
+    ? `<span>Run <b class="mono">${esc(s.runId)}</b></span>${robot ? `<span>Robot <span class="mono">${esc(robot)}</span></span>` : ""}<span>${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}</span><span>${s.eventCount} events</span>`
     : "";
 }
 
