@@ -16,7 +16,7 @@ from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
-from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.teacher.argon import Argon, stub_generate
 from isaacs_mom.validator import validate
 from isaacs_mom.validator.training import build_training_set, training_examples
 
@@ -221,7 +221,7 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
 
 def silent_argon(events: EventLog) -> Argon:
     """No live Gemini call: these tests are about the student seams."""
-    return Argon(events, generate=lambda parts: '{"done": true}')
+    return Argon(events, generate=stub_generate)
 
 
 def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
