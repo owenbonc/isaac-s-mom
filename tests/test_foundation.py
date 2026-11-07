@@ -16,6 +16,7 @@ from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
+from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator import validate
 from isaacs_mom.validator.training import build_training_set, training_examples
 
@@ -165,6 +166,11 @@ def test_training_set_takes_only_accepted_teacher_steps_from_dev(tmp_path: Path)
 
 
 def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
+    calls: list[object] = []
+
+    def fake_argon(events: EventLog) -> Argon:
+        return Argon(events, generate=lambda parts: calls.append(parts) or '{"done": true}')
+
     results = run_loop(
         FakeSim(),
         tmp_path,
@@ -174,7 +180,9 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
         dev_trials=2,
         make_student=StubStudent,
         train_student=stub_finetune,
+        make_argon=fake_argon,
     )
+    assert calls  # the teacher ran, on the fake: no live Gemini call even with a key in .env
     assert [r.round for r in results] == [0, 1]
     assert all(r.n == len(heldout_seeds()) for r in results)
     event_types = {json.loads(line)["type"] for line in (tmp_path / "events.jsonl").read_text().splitlines()}

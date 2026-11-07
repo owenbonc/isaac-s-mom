@@ -4,12 +4,12 @@ from pathlib import Path
 
 import numpy as np
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, SkillCall
+from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, ReplayFailure, ReplayReport, SkillCall
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
 from isaacs_mom.sim.fake import FakeSim
-from isaacs_mom.validator import replay
+from isaacs_mom.validator import replay, replay_accepted
 
 
 class GreedyHugger:
@@ -119,3 +119,36 @@ def test_replay_without_validation_is_false(tmp_path: Path) -> None:
     manifest.validation = None
     path.write_text(manifest.model_dump_json())
     assert not replay(FakeSim(), path)
+
+
+def test_replay_accepted_checks_every_accepted_episode_in_a_run(tmp_path: Path) -> None:
+    good = _record(tmp_path, GreedyHugger, seed=1606)
+    _record(tmp_path, lambda _: ReobserveOnce(), seed=1607)  # rejected, so not checked
+    tampered = _record(tmp_path, GreedyHugger, seed=1608)
+    assert _load(good).validation.accepted and _load(tampered).validation.accepted  # type: ignore[union-attr]
+    first = tampered.parent / _load(tampered).steps[0].actions
+    np.save(first, np.zeros_like(np.load(first)))
+
+    report = replay_accepted(FakeSim(), tmp_path)
+
+    assert report == ReplayReport(
+        replayed=2,
+        reproduced=1,
+        failures=[ReplayFailure(episode_id=_load(tampered).episode_id, reason="step 0: executed actions differ")],
+    )
+    assert ReplayReport.model_validate_json((tmp_path / "replay_report.json").read_text()) == report
+    assert _load(good).replay_valid is True
+
+
+def test_one_broken_episode_does_not_stop_the_whole_run_replay(tmp_path: Path) -> None:
+    broken = _record(tmp_path, GreedyHugger, seed=1609)
+    good = _record(tmp_path, GreedyHugger, seed=1610)
+    (broken.parent / _load(broken).steps[0].actions).unlink()
+
+    report = replay_accepted(FakeSim(), tmp_path)
+
+    assert (report.replayed, report.reproduced) == (2, 1)
+    assert [f.episode_id for f in report.failures] == [_load(broken).episode_id]
+    assert report.failures[0].reason.startswith("replay raised FileNotFoundError")
+    assert _load(broken).replay_valid is False
+    assert _load(good).replay_valid is True
