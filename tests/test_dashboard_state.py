@@ -262,6 +262,47 @@ def test_a_run_stops_being_live_20_s_after_its_last_event() -> None:
     assert provenance(events, now=20.1) == "recorded"
 
 
+def beats(*times: float) -> list[dict]:
+    return [{"t": t, "run_id": "r", "type": "heartbeat", "data": {"episode_id": "a"}} for t in times]
+
+
+def test_heartbeats_keep_a_slow_step_live_and_a_run_whose_heartbeats_stop_goes_recorded_after_20_s() -> None:
+    step = [*stream(started("a"), decision(0)), *beats(10, 20, 30, 40), {**stream(executed(0))[0], "t": 45.0}]
+    every_second = """
+    const seen = new Set();
+    for (let now = 1; now <= 45; now++) {
+      const v = S.view();
+      for (const e of events) if (e.t <= now) S.reduce(v.live, e);
+      seen.add(S.provenance(v, now, S.shown(v).episodes[0]));
+    }
+    return [...seen];
+    """
+    assert run(every_second, step) == ["live"]
+    assert run(every_second, [e for e in step if e["type"] != "heartbeat"]) == ["live", "recorded"]
+    dead = [*stream(started("a"), decision(0)), *beats(10, 20)]
+    assert provenance(dead, now=39.9) == "live"
+    assert provenance(dead, now=40.1) == "recorded"
+
+
+def test_a_heartbeat_is_no_row_no_buffered_event_and_never_moves_the_view() -> None:
+    events = [*stream(started("a"), decision(0), executed(0)), *beats(10, 20, 30)]
+    out = presenter(
+        """
+        feed(3);
+        const before = [look(), S.shown(v).episodes[0].rows.length];
+        press(" "); feed(3);
+        const paused = look();
+        press(" ");
+        return [before, paused, look(), S.shown(v).episodes[0].rows.length, S.shown(v).eventCount];
+        """,
+        events,
+    )
+    before, paused, resumed, rows, count = out
+    assert before[0] == {"shown": 3, "held": 0, "episode": "a", "focus": None} and before[1] == 1
+    assert paused == {"shown": 3, "held": 0, "episode": "a", "focus": None}
+    assert (resumed, rows, count) == (before[0], 1, 3)
+
+
 def test_a_pending_finetune_keeps_a_run_live_for_at_most_30_minutes() -> None:
     pending = stream(started("a"), ("finetune_started", {"round": 1}))  # started at t=1
     assert provenance(pending, now=1 + 1799.9) == "live"

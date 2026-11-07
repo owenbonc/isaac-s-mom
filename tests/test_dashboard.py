@@ -1,11 +1,13 @@
 import asyncio
 import json
+import threading
+import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
 
-from isaacs_mom.contracts import Event
+from isaacs_mom.contracts import Controller, Event, ExecResult, Observation, SkillCall
 from isaacs_mom.orchestrator.dashboard.server import create_app, tail_events
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
@@ -169,3 +171,89 @@ def test_page_and_its_scripts_are_served_without_caching(tmp_path: Path) -> None
     assert "/static/app.js" in page.text and page.headers["cache-control"] == "no-cache"
     assert "new EventSource" in client.get("/static/app.js").text
     assert client.get("/static/style.css").headers["cache-control"] == "no-cache"
+
+
+class SlowSim(FakeSim):
+    """A sim whose every skill takes 0.2 s, as a long MuJoCo motion does."""
+
+    def execute(self, call: SkillCall) -> ExecResult:
+        time.sleep(0.2)
+        return super().execute(call)
+
+
+class SlowPolicy:
+    """Decides once in 0.2 s, as a slow Argon call does, then stops; `fail` raises instead of deciding."""
+
+    controller: Controller = "teacher"
+    checkpoint: str | None = None
+
+    def __init__(self, fail: bool = False) -> None:
+        self.fail = fail
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        if obs.step:
+            return None
+        time.sleep(0.2)
+        if self.fail:
+            raise RuntimeError("Argon unreachable")
+        return SkillCall(skill="reobserve")
+
+
+def logged(run_dir: Path) -> list[dict]:
+    return [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+
+
+def test_a_slow_decision_or_skill_sends_heartbeats_while_it_runs_and_none_after(tmp_path: Path) -> None:
+    manifest = run_episode(
+        SlowSim(),
+        SlowPolicy(),
+        run_dir=tmp_path,
+        events=EventLog(tmp_path, "r1"),
+        seed=1,
+        split="dev",
+        round_=0,
+        instruction="hug",
+        heartbeat_seconds=0.05,
+    )
+    time.sleep(0.15)
+    types = [e["type"] for e in logged(tmp_path)]
+    first, executed = types.index("decision"), types.index("action_executed")
+    assert types[1:first].count("heartbeat") >= 2  # while deciding
+    assert types[first:executed].count("heartbeat") >= 2  # while the skill executes
+    assert "heartbeat" not in types[types.index("decision", executed) :]
+    assert {e["data"]["episode_id"] for e in logged(tmp_path) if e["type"] == "heartbeat"} == {manifest.episode_id}
+
+
+def test_heartbeats_stop_when_a_decision_raises(tmp_path: Path) -> None:
+    with pytest.raises(RuntimeError, match="Argon unreachable"):
+        run_episode(
+            FakeSim(),
+            SlowPolicy(fail=True),
+            run_dir=tmp_path,
+            events=EventLog(tmp_path, "r1"),
+            seed=1,
+            split="dev",
+            round_=0,
+            instruction="hug",
+            heartbeat_seconds=0.05,
+        )
+    beats = sum(e["type"] == "heartbeat" for e in logged(tmp_path))
+    time.sleep(0.15)
+    assert beats >= 2 and sum(e["type"] == "heartbeat" for e in logged(tmp_path)) == beats
+
+
+def test_two_threads_emitting_at_once_write_whole_lines_in_time_order(tmp_path: Path) -> None:
+    log = EventLog(tmp_path, "r1")
+    padding = "x" * 20_000  # longer than one buffered write, so unlocked writes would interleave
+
+    def emit() -> None:
+        for _ in range(50):
+            log.emit("heartbeat", padding=padding)
+
+    threads = [threading.Thread(target=emit) for _ in range(2)]
+    for thread in threads:
+        thread.start()
+    for thread in threads:
+        thread.join()
+    times = [Event.model_validate_json(line).t for line in log.path.read_text().splitlines()]
+    assert len(times) == 100 and times == sorted(times)

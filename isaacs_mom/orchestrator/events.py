@@ -1,3 +1,4 @@
+import threading
 import time
 from pathlib import Path
 
@@ -11,8 +12,10 @@ class EventLog:
         run_dir.mkdir(parents=True, exist_ok=True)
         self.path = run_dir / "events.jsonl"
         self.run_id = run_id
+        self._lock = threading.Lock()  # run_episode's heartbeat thread emits beside the loop
 
     def emit(self, type_: EventType, **data: object) -> None:
-        event = Event(t=time.time(), run_id=self.run_id, type=type_, data=data)
-        with self.path.open("a") as f:
-            f.write(event.model_dump_json() + "\n")
+        with self._lock:
+            event = Event(t=time.time(), run_id=self.run_id, type=type_, data=data)
+            with self.path.open("a") as f:
+                f.write(event.model_dump_json() + "\n")

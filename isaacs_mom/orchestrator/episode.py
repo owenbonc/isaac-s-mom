@@ -1,4 +1,7 @@
+import threading
 import time
+from collections.abc import Iterator
+from contextlib import contextmanager
 from pathlib import Path
 
 from isaacs_mom.contracts import EpisodeManifest, Perturbation, Split
@@ -9,6 +12,25 @@ from isaacs_mom.validator import Recorder, validate
 
 MAX_STEPS = 20
 PERTURB_SEED_OFFSET = 7919
+HEARTBEAT_SECONDS = 10.0
+
+
+@contextmanager
+def heartbeat(events: EventLog, episode_id: str, every: float) -> Iterator[None]:
+    """A `heartbeat` event every `every` seconds while the block runs, so a slow step keeps the run live (SPEC §3.5)."""
+    stop = threading.Event()
+
+    def beat() -> None:
+        while not stop.wait(every):
+            events.emit("heartbeat", episode_id=episode_id)
+
+    thread = threading.Thread(target=beat, daemon=True)
+    thread.start()
+    try:
+        yield
+    finally:
+        stop.set()
+        thread.join()
 
 
 def run_episode(
@@ -26,6 +48,7 @@ def run_episode(
     max_steps: int = MAX_STEPS,
     acting_on: str | None = None,
     demo: bool = False,
+    heartbeat_seconds: float = HEARTBEAT_SECONDS,
 ) -> EpisodeManifest:
     """One recorded episode. If `policy` stops without success, `takeover` (when given) continues from there.
 
@@ -87,7 +110,8 @@ def run_episode(
                     )
             obs = sim.observe()
             started = time.perf_counter()
-            call = active.act(obs, instruction, feedback)
+            with heartbeat(events, episode_id, heartbeat_seconds):
+                call = active.act(obs, instruction, feedback)
             events.emit(
                 "decision",
                 episode_id=episode_id,
@@ -100,7 +124,8 @@ def run_episode(
             )
             if call is None:
                 break
-            result = sim.execute(call)
+            with heartbeat(events, episode_id, heartbeat_seconds):
+                result = sim.execute(call)
             recorder.add_step(obs, call, result, active.controller, active.checkpoint)
             events.emit(
                 "action_executed",

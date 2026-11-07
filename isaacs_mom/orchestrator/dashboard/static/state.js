@@ -55,9 +55,11 @@
 
   function reduce(s, event) {
     const d = event.data || {};
-    s.eventCount += 1;
     s.lastT = event.t;
     s.runId = event.run_id;
+    // A heartbeat only says the run is alive (SPEC §3.5): no row, not counted, so it never moves the view.
+    if (event.type === "heartbeat") return s;
+    s.eventCount += 1;
     const ep = current(s);
     switch (event.type) {
       case "episode_started":
