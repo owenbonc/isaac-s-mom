@@ -5,17 +5,18 @@ from pathlib import Path
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
+from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.teacher.argon import Argon, stub_generate
 
 
-def make_sim(name: str) -> TruthSim:
+def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
     if name == "fake":
         from isaacs_mom.sim.fake import FakeSim
 
         return FakeSim()
     from isaacs_mom.sim.mujoco import MujocoSim
 
-    return MujocoSim()
+    return MujocoSim(TASKS[task])
 
 
 def main() -> None:
@@ -41,13 +42,17 @@ def main() -> None:
             choices=["argon", "stub"],
             help="stub: no Argon calls and no key; the default on --sim fake, so the skeleton run needs no key",
         )
+        command.add_argument(
+            "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)"
+        )
     args = parser.parse_args()
-
     if args.command == "dashboard":
         from isaacs_mom.orchestrator.dashboard.server import serve
 
         serve(args.run, args.port)
         return
+    if args.sim == "fake" and args.task != DEFAULT_TASK.name:
+        parser.error(f"--sim fake plays only the default task, {DEFAULT_TASK.name}")
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
     run_dir = Path("runs") / args.run_id
     # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
@@ -58,7 +63,7 @@ def main() -> None:
         from isaacs_mom.orchestrator.demo import run_demo
 
         manifest = run_demo(
-            make_sim(args.sim),
+            make_sim(args.sim, args.task),
             ckpt=args.ckpt,
             seed=args.seed,
             perturb_at=args.perturb_at,
@@ -70,7 +75,7 @@ def main() -> None:
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
-    results = run_loop(make_sim(args.sim), run_dir, args.run_id, max_rounds=args.rounds, argon=argon)
+    results = run_loop(make_sim(args.sim, args.task), run_dir, args.run_id, max_rounds=args.rounds, argon=argon)
     for r in results:
         print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")
     print(argon.summary() + (" (stub teacher)" if teacher == "stub" else ""))
