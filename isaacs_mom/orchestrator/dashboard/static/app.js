@@ -279,10 +279,11 @@ function actingOnBody(a) {
   const head = `<p class="acting-on">Acting on diagnosis from episode ${a.number}</p>`;
   if (!a.diagnosis) return `<div class="body stack">${head}<div class="ph-text">Episode ${a.number} has no diagnosis in the events yet.</div></div>`;
   const shot = a.frame && a.frame.url
-    ? `<figure class="cited"><div class="thumb"><img src="${esc(a.frame.url)}" alt="Episode ${a.number}'s last head-camera frame"></div><figcaption class="note">Episode ${a.number}${a.frame.step === null ? "" : `, step ${esc(a.frame.step)}`}</figcaption></figure>`
+    ? `<div class="cited"><img src="${esc(a.frame.url)}" alt="Episode ${a.number}'s last head-camera frame"></div>`
     : "";
+  const last = shot && a.frame.step !== null ? `<div class="note">Its last frame, step ${esc(a.frame.step)}</div>` : "";
   // The frame and who is acted on lead, so a long hypothesis never pushes the evidence out of view.
-  const lead = shot ? `<div class="cited-row">${shot}<div class="stack">${head}${confidenceText(a.diagnosis)}</div></div>` : head + confidenceText(a.diagnosis);
+  const lead = shot ? `<div class="cited-row">${shot}<div class="stack">${head}${last}${confidenceText(a.diagnosis)}</div></div>` : head + confidenceText(a.diagnosis);
   return `<div class="body stack">${lead}<div>${esc(a.diagnosis.hypothesis)}</div>${evidenceText(a.diagnosis)}</div>`;
 }
 
