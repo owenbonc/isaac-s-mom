@@ -497,3 +497,93 @@ def test_a_live_run_follows_its_latest_episode_and_a_paused_view_stays_put_when_
         stream(*STORY),
     )
     assert out == ["heldout", "heldout", "demo-2"]
+
+
+def trial(episode_id: str, diagnosed: bool = False, moved: bool = False) -> list[tuple[str, dict]]:
+    events = [started(episode_id), decision(0)]
+    if moved:
+        events.append(("perturbation", {"kind": "move_box", "step": 1}))
+    events.append(verdict(False))
+    if diagnosed:
+        events.append(
+            ("diagnosis", {"episode_id": episode_id, "hypothesis": "h", "evidence": "", "confidence": 1, "lesson": ""})
+        )
+    return events
+
+
+BEATS = [
+    *trial("t0"),
+    *trial("t1", diagnosed=True),
+    *trial("t2"),
+    *trial("t3", diagnosed=True),
+    *demo("d4", "t3", accepted=False),
+    *trial("t5", moved=True),
+    *trial("t6"),
+]
+
+
+def test_story_keys_jump_to_the_nearest_other_episode_with_that_beat_and_ties_go_forward() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        const seen = [];
+        for (const key of ["d", "d", "d", "t", "m", "ArrowLeft", "ArrowLeft", "d", "t", "t"]) {
+          press(key);
+          seen.push(look().episode);
+        }
+        return seen;
+        """,
+        stream(*BEATS),
+    )
+    # from t6: D t3, D t1, D t3, T d4, M t5, <- d4, <- t3, D t1, T d4; T again finds no other demonstration
+    assert out == ["t3", "t1", "t3", "d4", "t5", "d4", "t3", "t1", "d4", "d4"]
+
+
+def test_d_from_between_two_diagnoses_goes_forward_on_a_tie() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        for (const key of ["ArrowLeft", "ArrowLeft", "ArrowLeft", "ArrowLeft"]) press(key);
+        const at = look().episode;
+        press("d");
+        return [at, look().episode];
+        """,
+        stream(*BEATS),
+    )
+    assert out == ["t2", "t3"]
+
+
+def test_end_follows_a_live_run_and_lands_on_a_finished_runs_latest_episode() -> None:
+    out = presenter(
+        """
+        const tail = events.splice(events.length - 3);
+        feed(events.length);
+        press("ArrowLeft"); press("End");
+        const live = look().episode;
+        events.push(...tail); feed(3);
+        const followed = look().episode;
+        now += 60;
+        press("ArrowLeft");
+        const back = look().episode;
+        press("End");
+        return [live, followed, back, look().episode];
+        """,
+        stream(*BEATS),
+    )
+    assert out == ["t5", "t6", "t5", "t6"]
+
+
+def test_navigation_targets_say_where_each_key_leads_and_minus_one_for_nowhere_new() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        const keys = ["ArrowLeft", "ArrowRight", "d", "t", "m", "End"];
+        const at = () => Object.fromEntries(keys.map((k) => [k, S.target(v, now, k)]));
+        const latest = at();
+        press("d"); press("d");
+        return [latest, at()];
+        """,
+        stream(*BEATS),
+    )
+    assert out[0] == {"ArrowLeft": 5, "ArrowRight": -1, "d": 3, "t": 4, "m": 5, "End": -1}
+    assert out[1] == {"ArrowLeft": 0, "ArrowRight": 2, "d": 3, "t": 4, "m": 5, "End": 6}

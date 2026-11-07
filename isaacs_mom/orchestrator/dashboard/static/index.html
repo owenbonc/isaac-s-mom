@@ -6,20 +6,22 @@
 <link rel="stylesheet" href="/static/style.css">
 <body>
 <header class="bar">
-  <h1>Isaac's Mom</h1>
-  <span id="status"></span>
-  <div class="meta" id="meta"></div>
+  <div class="top">
+    <h1>Isaac's Mom</h1>
+    <span id="status"></span>
+    <nav class="presenter" aria-label="Presenter keys">
+      <span class="pair"><button type="button" id="b-prev" data-key="ArrowLeft" aria-label="Previous episode"><kbd>←</kbd></button><button type="button" id="b-next" data-key="ArrowRight" aria-label="Next episode"><kbd>→</kbd></button> Episode</span>
+      <button type="button" id="b-d" data-key="d"><kbd>D</kbd> Diagnosis</button>
+      <button type="button" id="b-t" data-key="t"><kbd>T</kbd> Teacher</button>
+      <button type="button" id="b-m" data-key="m"><kbd>M</kbd> Move</button>
+      <button type="button" id="b-p" data-key="p" aria-pressed="false"><kbd>P</kbd> Before/after</button>
+      <button type="button" id="b-end" data-key="End"><kbd>End</kbd> Latest</button>
+      <button type="button" id="b-pause" data-key=" " aria-pressed="false"><kbd>Space</kbd> <span>Pause</span></button>
+    </nav>
+  </div>
+  <div class="where"><p id="episode-line"></p><ol class="rail" id="rail" aria-hidden="true"></ol></div>
 </header>
-<div class="control" id="control" aria-live="polite"></div>
-<div class="episode">
-  <p id="episode-line"></p>
-  <nav class="presenter" aria-label="Presenter controls">
-    <button type="button" id="b-prev" data-key="ArrowLeft"><kbd>←</kbd> Previous</button>
-    <button type="button" id="b-next" data-key="ArrowRight">Next <kbd>→</kbd></button>
-    <button type="button" id="b-moved" data-key="p" aria-pressed="false"><kbd>P</kbd> Show the move</button>
-    <button type="button" id="b-pause" data-key=" "><kbd>Space</kbd> <span>Pause</span></button>
-  </nav>
-</div>
+<div class="control" id="control"></div>
 <main>
   <section class="panel col camera">
     <header><h2>Head camera</h2><span id="chip-camera"></span></header>
@@ -30,13 +32,12 @@
     <header><h2>Decisions</h2><span id="chip-log"></span></header>
     <ol class="log" id="log" tabindex="0" aria-label="Decision log"></ol>
   </section>
-  <div class="col side" tabindex="0" role="region" aria-label="Did it work">
+  <div class="col side" id="side" tabindex="0" role="region" aria-label="Did it work">
     <section class="panel" id="p-rounds"></section>
-    <section class="panel" id="p-verdict"></section>
     <section class="panel" id="p-diagnosis"></section>
-    <section class="panel" id="p-models"></section>
   </div>
 </main>
+<footer class="models" id="models" aria-label="Where models run"></footer>
 <script src="/static/state.js"></script>
 <script src="/static/app.js"></script>
 </body>

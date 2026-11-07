@@ -5,9 +5,10 @@ let renderQueued = false;
 let renderedRows = 0;
 let renderedEpisode = null;
 let renderedFocus = null;
+let renderedSide = null;
 let flashedFrame = null;
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
-const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "gemini-4-argon, Gemini API", finetune: "LoRA on Modal A10G" };
+const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Gemini API", finetune: "Modal A10G" };
 
 const $ = (id) => document.getElementById(id);
 // Assigning identical HTML would reload every image and reset scrolling, so panels skip unchanged writes.
@@ -43,6 +44,8 @@ const tag = (controller, checkpoint) => {
 const amount = (row) => (row.distance !== null ? ` ${+row.distance.toFixed(1)} cm` : row.angle !== null ? ` ${Math.round(row.angle)}°` : "");
 const skillText = (row) => (row.skill ? esc(row.skill) + amount(row) : '<span class="stop">Stopped, no skill chosen</span>');
 const SCENES = { dev: "Development scene", heldout: "Held-out test scene" };
+const isAccepted = (v) => v.task && v.physics;
+const verdictChip = (v) => `<span class="verdict ${isAccepted(v) ? "good" : "bad"}">${isAccepted(v) ? CHECK + "Accepted" : X + "Rejected"}</span>`;
 const MOVED = { move_box: "Box moved", move_bin: "Bin moved" };
 // Durations read at a glance from the back of the room: ms under a second, then seconds, then minutes.
 const duration = (v) => (v < 1000 ? `${v >= 100 ? Math.round(v) : v.toFixed(1)} ms` : v < 120000 ? `${(v / 1000).toFixed(1)} s` : `${(v / 60000).toFixed(1)} min`);
@@ -54,11 +57,6 @@ function renderHeader() {
   const kind = MomState.provenance(view, now());
   const status = s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)} · ${simName(s)}`);
   $("status").innerHTML = status + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
-  const ep = MomState.current(s);
-  const robot = ep && ep.sim && ep.sim.robot;
-  $("meta").innerHTML = s.eventCount
-    ? `<span>Run <b class="mono">${esc(s.runId)}</b></span>${robot ? `<span>Robot <span class="mono">${esc(robot)}</span></span>` : ""}<span>${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}</span><span>${s.eventCount} events</span>`
-    : "";
 }
 
 function renderControl() {
@@ -76,14 +74,13 @@ function renderControl() {
     return;
   }
   const took = ep.rows.find((r) => r.kind === "takeover");
-  const result = ep.verdict ? ` Validator: ${ep.verdict.task && ep.verdict.physics ? "accepted" : "rejected"}.` : "";
   const detail = took
     ? `The student stopped without succeeding${took.step === null ? "" : " at step " + took.step}, so the teacher took over.`
     : ep.controller === "student"
       ? "Choosing each skill from the head-camera frame."
       : "Demonstrating from the head-camera frame.";
   el.className = "control " + ep.controller;
-  el.innerHTML = `<span class="what">${ep.verdict ? "Last in control:" : "In control:"}</span>${tag(ep.controller, ep.checkpoint)}<span class="note">${detail}${result}</span>`;
+  el.innerHTML = `<span class="what">${esc(SCENES[ep.split] || "Scene")}</span><span class="note">seed ${esc(ep.seed ?? "")}, round ${esc(ep.round ?? "")}</span>${tag(ep.controller, ep.checkpoint)}<span class="note">${detail}</span>${ep.verdict ? verdictChip(ep.verdict) : ""}`;
 }
 
 function renderCamera() {
@@ -137,23 +134,26 @@ function decisionRow(row) {
 }
 
 function verdictRow(ep) {
-  const ok = ep.verdict.task && ep.verdict.physics;
-  return `<li class="event ${ok ? "good" : "bad"}"><span class="n"></span><span>Validator: ${ok ? "accepted" : "rejected"} <span class="d">${esc(ep.verdict.reason)}</span></span></li>`;
+  const v = ep.verdict;
+  return `<li class="event ${isAccepted(v) ? "good" : "bad"}"><span class="n"></span><span>Validator: ${isAccepted(v) ? "accepted" : "rejected"}. <span class="d">${esc(v.reason)}. Task ${v.task ? "succeeded" : "not met"}; physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
 }
+
+const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m", "b-end": "End" };
 
 function renderEpisode() {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
   const at = s.episodes.indexOf(ep);
-  $("episode-line").innerHTML = ep
-    ? `<b>Episode ${at + 1} of ${s.episodes.length}${view.selected === null ? "" : ", pinned"}.</b> ${esc(SCENES[ep.split] || "Scene")}, seed ${esc(ep.seed ?? "")}, round ${esc(ep.round ?? "")} <span class="mono">${esc(ep.id)}</span>`
-    : "";
-  $("b-prev").disabled = at <= 0;
-  $("b-next").disabled = at < 0 || at === s.episodes.length - 1;
-  $("b-moved").disabled = !ep || ep.perturbedStep === null;
-  $("b-moved").setAttribute("aria-pressed", String(view.compare !== null));
+  $("episode-line").innerHTML = ep ? `Episode ${at + 1} of ${s.episodes.length}` : "";
+  for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) < 0;
+  $("b-p").disabled = !view.compare && (!ep || ep.perturbedStep === null);
+  $("b-p").setAttribute("aria-pressed", String(view.compare !== null));
   $("b-pause").setAttribute("aria-pressed", String(view.frozen !== null));
-  $("b-pause").lastElementChild.textContent = view.frozen ? `Resume · ${MomState.held(view)} new events` : "Pause";
+  $("b-pause").lastElementChild.textContent = view.frozen ? "Resume" : "Pause";
+  // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when rejected.
+  $("rail").innerHTML = s.episodes
+    .map((e) => `<li class="${MomState.teacherDrove(e) ? "teacher" : "student"} ${e.verdict ? (MomState.accepted(e) ? "accepted" : "rejected") : "open"}${e === ep ? " here" : ""}"></li>`)
+    .join("");
 }
 
 function renderLog() {
@@ -181,15 +181,6 @@ function renderLog() {
   renderedEpisode = ep.id;
 }
 
-function renderVerdict() {
-  const ep = MomState.episode(view, now());
-  const v = ep && ep.verdict;
-  const body = v
-    ? `<div class="stack"><span class="verdict ${v.task && v.physics ? "good" : "bad"}">${v.task && v.physics ? CHECK + "Accepted" : X + "Rejected"}</span><div>${esc(v.reason)}</div><div class="note">Task ${v.task ? "succeeded" : "not met"}. Physics ${v.physics ? "valid" : "violated"}.</div></div>`
-    : `<div class="ph-text">${ep ? "No verdict yet for this episode." : "No episode yet."}</div>`;
-  $("p-verdict").innerHTML = `<header><h2>Validator</h2>${panelChip(Boolean(v), ep)}</header><div class="body">${body}</div>`;
-}
-
 function renderRounds() {
   const rounds = MomState.shown(view).rounds;
   let body = '<div class="ph-text">No held-out evaluation in the events yet.</div>';
@@ -207,17 +198,21 @@ function renderRounds() {
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip(rounds.length > 0)}</header><div class="body">${body}</div>`;
 }
 
+// One line: each model, where it runs (configured), and its measured median latency or fine-tune duration.
 function renderModels() {
   const s = MomState.summary(MomState.shown(view));
-  const any = s.student || s.teacher || s.argon || s.finetune;
-  const row = (who, where, measured) => `<tr><td><b>${who}</b> ${where}</td><td class="num">${stat(measured)}</td></tr>`;
-  const head = (what, measure) => `<tr><th>${what} <span class="chip config">Configured</span></th><th class="num">${measure}</th></tr>`;
-  const inference = row("Student", CONFIGURED.student, s.student) + row("Teacher", CONFIGURED.teacher, s.teacher) + (s.argon ? row("", "Argon API calls", s.argon) : "");
-  $("p-models").innerHTML = `<header><h2>Where models run</h2>${panelChip(Boolean(any))}</header><div class="body"><table><thead>${head("Model and host", "Median latency")}</thead><tbody>${inference}</tbody><tbody>${head("Fine-tune", "Median duration")}${row("", CONFIGURED.finetune, s.finetune)}</tbody></table></div>`;
+  const any = s.student || s.teacher || s.finetune;
+  const item = (who, where, measured) => `<span class="item"><b>${who}</b> ${where} <span class="v">${stat(measured)}</span></span>`;
+  $("models").innerHTML =
+    `<h2>Models</h2><span class="chip config">Configured</span>` +
+    item("Student", CONFIGURED.student, s.student) +
+    item("Teacher", CONFIGURED.teacher, s.teacher) +
+    item("Fine-tune", CONFIGURED.finetune, s.finetune) +
+    panelChip(Boolean(any));
 }
 
-const diagnosisText = (d) =>
-  `<div>${esc(d.hypothesis)}</div>${d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : ""}${d.confidence === null ? "" : `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>`}`;
+const evidenceText = (d) => `${d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : ""}${d.confidence === null ? "" : `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>`}`;
+const diagnosisText = (d) => `<div>${esc(d.hypothesis)}</div>${evidenceText(d)}`;
 
 // A teacher demonstration shows the diagnosis it acts on, named by the diagnosed episode, with that episode's last frame.
 function actingOnBody(a) {
@@ -227,7 +222,7 @@ function actingOnBody(a) {
   const shot = a.frame && a.frame.url
     ? `<figure class="cited"><div class="thumb"><img src="${esc(a.frame.url)}" alt="Episode ${a.number}'s last head-camera frame"></div><figcaption class="note">Its last frame${a.frame.step === null ? "" : `, step ${esc(a.frame.step)}`}</figcaption></figure>`
     : "";
-  return `<div class="body stack">${head}<div class="cited-row">${shot}<div class="stack">${diagnosisText(a.diagnosis)}</div></div></div>`;
+  return `<div class="body stack">${head}<div>${esc(a.diagnosis.hypothesis)}</div><div class="cited-row">${shot}<div class="stack">${evidenceText(a.diagnosis)}</div></div></div>`;
 }
 
 function renderDiagnosis() {
@@ -251,10 +246,13 @@ function render() {
   renderEpisode();
   renderCamera();
   renderLog();
-  renderVerdict();
   renderRounds();
   renderModels();
   renderDiagnosis();
+  // A new episode starts the side column at its top, where the held-out figure is.
+  const ep = MomState.episode(view, now());
+  if (ep && ep.id !== renderedSide) $("side").scrollTop = 0;
+  renderedSide = ep && ep.id;
 }
 
 function schedule() {

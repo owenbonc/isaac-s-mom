@@ -222,13 +222,30 @@
     return pinned || (following(v, now) ? current(s) : story(s));
   }
 
-  // Moving onto a live run's last episode follows the run again.
-  function move(v, delta, now) {
+  const teacherDrove = (ep) => ep.rows.some((r) => r.kind === "takeover" || r.controller === "teacher");
+  // The story beats D, T and M jump to (SPEC §3.5).
+  const BEATS = { d: (e) => e.diagnosis !== null, t: teacherDrove, m: (e) => e.perturbedStep !== null };
+
+  // Where a navigation key leads from the shown episode: an index into the shown episodes, or -1 for nowhere new.
+  // A story beat goes to the nearest other episode that has it, forward on a tie.
+  function target(v, now, key) {
     const episodes = shown(v).episodes;
     const at = episodes.indexOf(episode(v, now));
-    if (at < 0) return;
-    const next = Math.min(episodes.length - 1, Math.max(0, at + delta));
-    v.selected = next === episodes.length - 1 && following(v, now) ? null : episodes[next].id;
+    const last = episodes.length - 1;
+    if (at < 0) return -1;
+    if (key === "ArrowLeft") return at > 0 ? at - 1 : -1;
+    if (key === "ArrowRight") return at < last ? at + 1 : -1;
+    if (key === "End") return at < last || v.compare ? last : -1;
+    for (let d = 1; d <= last; d++) for (const i of [at + d, at - d]) if (episodes[i] && BEATS[key](episodes[i])) return i;
+    return -1;
+  }
+
+  // Landing on a live run's last episode follows the run again.
+  function go(v, now, key) {
+    const i = target(v, now, key);
+    if (i < 0) return;
+    const episodes = shown(v).episodes;
+    v.selected = i === episodes.length - 1 && following(v, now) ? null : episodes[i].id;
     v.compare = null;
   }
 
@@ -245,12 +262,8 @@
     v.selected = ep.id;
   }
 
-  const KEYS = {
-    " ": togglePause,
-    ArrowLeft: (v, now) => move(v, -1, now),
-    ArrowRight: (v, now) => move(v, 1, now),
-    p: compareMove,
-  };
+  const KEYS = { " ": togglePause, p: compareMove };
+  for (const key of ["ArrowLeft", "ArrowRight", "End", ...Object.keys(BEATS)]) KEYS[key] = (v, now) => go(v, now, key);
   // Presenter keys (SPEC §3.5), whatever has focus. True when the key is the dashboard's, so the page claims it
   // (a focused button must not also take Space as a click); a held key acts once.
   function keydown(v, e, now) {
@@ -260,7 +273,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, actedOn, median, shown, held, following, episode, keydown };
+  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, actedOn, median, shown, held, following, accepted, teacherDrove, episode, target, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
