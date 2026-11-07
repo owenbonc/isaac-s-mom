@@ -1,8 +1,8 @@
 # Workstreams: what each owner builds
 
-Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everything else changes only through a PR that says why. The foundation ships each module as a working stand-in with its final signature, so `uv run mom run --sim fake --student stub` runs end to end without the student model, given `GEMINI_API_KEY` in `.env` for the teacher. Replace the stand-in, keep the signature, and keep that command working.
+Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everything else changes only through a PR that says why. The foundation ships each module as a working stand-in with its final signature, so `uv run mom run --sim fake` runs end to end today. Replace the stand-in, keep the signature, and keep that command working.
 
-Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run --sim fake --student stub --rounds 1`. Agents in a worktree run `scripts/agent-setup.sh origin/phase-1` instead.
+Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run --sim fake --rounds 1`. Agents in a worktree run `scripts/agent-setup.sh origin/phase-1` instead.
 
 ## 1. Simulation and robot — `isaacs_mom/sim/mujoco/`
 - `MujocoSim` (`sim.py`) implements `TruthSim` (`isaacs_mom/sim/base.py`, SPEC §3.1, §4.1) over `scene.py`, with arm IK and motion in `control.py`.
@@ -16,8 +16,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 ## 2. Argon teacher — `isaacs_mom/teacher/`
 - Replace `diagnose`, `choose_scenes` and `ArgonPolicy.act` (SPEC §3.3). Model `gemini-4-argon` via the `google-genai` SDK; key from `GEMINI_API_KEY` in `.env`.
 - Input is only the head-camera JPEGs, the instruction, skill history and the validator's reason. Never import `isaacs_mom.sim` or call `ground_truth` (rule 1).
-- `choose_scenes` must keep calling `assert_not_heldout` (rule 2). Enforce `ARGON_CALL_BUDGET` and emit an `argon_call` event per call with latency (rule 5). When Argon is unreachable or over budget, `act` returns `reobserve` a few times, then `None`.
-- End every demonstration with exactly one `reobserve` once the box is in the bin, then return `None`. The student learns to stop from that recorded step and treats two `reobserve`s in a row as done. Re-observe between skills by reading the new frame, not by sending `reobserve`.
+- `choose_scenes` must keep calling `assert_not_heldout` (rule 2). Enforce `ARGON_CALL_BUDGET` and emit an `argon_call` event per call with latency (rule 5). When Argon is unreachable or over budget, `act` follows SPEC §3.3: retry on the same frame with waits, then end the demonstration with exactly one closing `reobserve`, never two in a row before the end.
 - Done: SPEC §6 criterion 4 (Gate D). Tests use a fake Argon client; no live calls in CI.
 
 ## 3. Validator and dataset — `isaacs_mom/validator/`
@@ -26,15 +25,14 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 - Done: SPEC §6 criterion 3 (Gate C).
 
 ## 4. Student VLM and fine-tuning — `isaacs_mom/student/`
-- Replace `StudentPolicy.act` with SmolVLM2-500M-Video-Instruct (local, MPS on Macs). Prompt for one JSON `SkillCall`; parse with the pydantic model; anything unparseable becomes `reobserve` and is logged.
-- The student runs on the team's Windows NVIDIA machines (Isaac's RTX 5070 box and Santiago's RTX 5060 laptop) with CUDA 12.8 torch; Linux and CI use CPU torch.
+- Replace `StudentPolicy.act` with SmolVLM2-500M-Video-Instruct (local: MPS on Macs, CUDA on the Windows RTX 5070/5060 machines). Prompt for one JSON `SkillCall`; parse with the pydantic model; anything unparseable becomes `reobserve` and is logged. Two `reobserve`s in a row end the episode (SPEC §3.2).
 - Replace `finetune` with LoRA on a Modal A10G over the `training_r<round>.jsonl` file (SPEC §4.3); return `<run_id>/ckpt-r<round>` and make `StudentPolicy(checkpoint)` load it. Weights stay out of git.
 - Adapters live in `runs/<run_id>/checkpoints/ckpt-r<round>/`, so every run keeps its own; the id is `<run_id>/ckpt-r<round>` and `ckpt-r0` is the base model. `meta.json` there names the training set it came from. Run the real loop outside OneDrive so checkpoint swaps (directory renames) are not blocked by sync locks.
 - Done: SPEC §6 criterion 2 (Gate B), then the fine-tune half of criterion 5.
 
 ## 5. Orchestrator, dashboard and demo — `isaacs_mom/orchestrator/`, `docs/`
 - Owns `episode.run_episode`, `loop.run_loop`, the CLI and `events.EventLog` (working foundation versions).
-- Add the dashboard (FastAPI plus one HTML page, server-sent events tailing `events.jsonl`): head camera, controller, decisions, validator verdicts, the per-round success table with n, and where each model runs with latency. Label live, recorded or placeholder. Use the `impeccable` skill.
+- Add the dashboard (FastAPI plus one HTML page, server-sent events tailing `events.jsonl`): head camera, controller, decisions, validator verdicts, the per-round success table with n (errored episodes apart), each round's training-set summary, the run's replay result, and where each model runs with latency. Label live, recorded or placeholder. Use the `impeccable` skill.
 - Add `mom demo --ckpt --seed --perturb-at` for the judged single take, recording head and third-person frames to an MP4.
 - Deliverables: the ≤1-minute video, the one-page PDF, the 5-minute pitch (SPEC §6 criterion 8).
 - Done: SPEC §6 criterion 6 (Gate E).

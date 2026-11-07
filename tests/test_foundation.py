@@ -169,7 +169,7 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
     calls: list[object] = []
 
     def fake_argon(events: EventLog) -> Argon:
-        return Argon(events, generate=lambda parts: calls.append(parts) or '{"done": true}')
+        return Argon(events, generate=lambda purpose, parts: calls.append(parts) or '{"done": true}')
 
     results = run_loop(
         FakeSim(),
