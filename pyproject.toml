@@ -1,0 +1,35 @@
+[project]
+name = "isaacs-mom"
+version = "0.1.0"
+description = "An Argon teacher that finds the gaps in a robot's skills and creates its own lessons."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "mujoco>=3.3",
+    "numpy>=2.0",
+    "pillow>=11.0",
+    "pydantic>=2.9",
+]
+
+[project.scripts]
+mom = "isaacs_mom.orchestrator.cli:main"
+
+[dependency-groups]
+dev = ["pyright>=1.1.390", "pytest>=8.3", "ruff>=0.8"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+include = ["isaacs_mom", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
