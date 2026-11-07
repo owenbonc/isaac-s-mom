@@ -18,6 +18,7 @@ BOX_X = 0.34  # metres ahead of the robot, where the arms work
 BOX_HALF = (0.125, 0.15)
 TABLE_CENTER, TABLE_HALF = (0.40, 0.0), (0.2, 0.25)
 BIN_INNER_HALF, BIN_WALL = 0.22, 0.02
+BIN_OUTER_HALF = BIN_INNER_HALF + BIN_WALL
 BIN_DIST = (1.0, 1.4)
 BIN_BEARING = (math.radians(75), math.radians(285))
 TABLE_CLEARANCE = 0.45
@@ -112,13 +113,21 @@ class FakeSim:
             penetration=False,
         )
 
-    def perturb(self, perturbation: Perturbation) -> None:
+    def perturb(self, perturbation: Perturbation) -> bool:
         rng = np.random.default_rng(perturbation.seed)
         if perturbation.kind == "move_box":
-            if self.box_z == TABLE_Z and not self.held:
-                self.box = _box_xy(rng)
-        else:
-            self.bin, self.bin_yaw = _bin_pose(rng, self.xy)
+            if self.box_z != TABLE_Z or self.held:
+                return False
+            self.box = _box_xy(rng)
+            return True
+        if self.box_z == BIN_Z:  # moving it would tip the box out
+            return False
+        bin_xy, bin_yaw = _bin_pose(rng, self.xy)
+        # A box on the floor is in the bin's way; one on the table or in the hands is above it.
+        if self.box_z < TABLE_Z and not self._clear_of_box(bin_xy, bin_yaw):
+            return False
+        self.bin, self.bin_yaw = bin_xy, bin_yaw
+        return True
 
     def render_third_person(self) -> bytes:
         return self._render()
@@ -185,6 +194,12 @@ class FakeSim:
 
     def _hands(self, forward: float) -> np.ndarray:
         return self.xy + _rot(self.heading, (forward, self.work_y))
+
+    def _clear_of_box(self, bin_xy: np.ndarray, bin_yaw: float) -> bool:
+        """A bin at this pose would stand clear of the box, however the box is turned."""
+        x, y = self.box - bin_xy
+        outside = np.maximum(np.abs(_rot(-bin_yaw, (float(x), float(y)))) - BIN_OUTER_HALF, 0.0)
+        return float(np.linalg.norm(outside)) > math.hypot(*BOX_HALF)
 
     def _over_bin(self) -> bool:
         """Every corner of the box, which is turned with the robot, is inside the bin's walls."""

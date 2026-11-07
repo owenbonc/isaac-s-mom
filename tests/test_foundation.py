@@ -2,15 +2,16 @@ import json
 import math
 from pathlib import Path
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCall, SkillTarget
+from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, SkillCall, SkillTarget
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
-from isaacs_mom.sim.fake import PLACE_X, FakeSim
+from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, PLACE_X, FakeSim
 from isaacs_mom.teacher import choose_scenes
 from isaacs_mom.validator import validate
 from isaacs_mom.validator.training import build_training_set, training_examples
@@ -131,6 +132,85 @@ def test_fake_walks_and_turns_the_requested_amounts() -> None:
     sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90}))
     sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 50}))
     assert sim.pose() == pytest.approx((-0.30, 0.50, math.pi / 2))
+
+
+def _to_the_bin(sim: FakeSim) -> None:
+    policy = ScriptedPolicy(sim)
+    while call := policy.act(sim.observe(), "", ""):
+        assert sim.execute(call).ok
+
+
+def test_fake_moves_the_box_only_while_it_rests_on_the_table_out_of_the_hands() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    start = sim.ground_truth()
+    assert sim.perturb(Perturbation(kind="move_box", seed=99))
+    assert sim.ground_truth().box_xyz != start.box_xyz
+
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
+    sim.execute(SkillCall(skill="hug"))  # turned away from the table, so the hands close on nothing
+    sim.execute(SkillCall(skill="turn_right", params={"angle_deg": 30}))
+    missed = sim.ground_truth()
+    assert sim.closed and not sim.held
+    assert sim.perturb(Perturbation(kind="move_box", seed=100))
+    assert sim.ground_truth().box_xyz != missed.box_xyz
+
+    sim.reset(1234)
+    box_y = sim.ground_truth().box_xyz[1]
+    sim.execute(SkillCall(skill="reach_left" if box_y > 0 else "reach_right", params={"distance_cm": abs(box_y) * 100}))
+    sim.execute(SkillCall(skill="hug"))
+    hugged = sim.ground_truth()
+    assert sim.held
+    assert not sim.perturb(Perturbation(kind="move_box", seed=99))
+    assert sim.ground_truth() == hugged
+
+    sim.reset(1234)
+    _to_the_bin(sim)
+    placed = sim.ground_truth()
+    assert placed.box_on_bin_floor
+    assert not sim.perturb(Perturbation(kind="move_box", seed=99))
+    assert sim.ground_truth() == placed
+
+
+def test_fake_moves_the_bin_only_clear_of_the_box() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    _to_the_bin(sim)
+    placed = sim.ground_truth()
+    assert not sim.perturb(Perturbation(kind="move_bin", seed=99))
+    assert sim.ground_truth() == placed and validate(placed).accepted
+
+    sim.reset(1234)
+    assert sim.perturb(Perturbation(kind="move_bin", seed=99))  # the box is on the table, above the bin
+    landing = sim.ground_truth()
+    outward = np.array([math.cos(landing.bin_yaw), math.sin(landing.bin_yaw)])
+    # On the floor beside where the bin would go: centred 10 cm past its wall the box still reaches under it.
+    for past_wall, clear in [(0.10, False), (0.30, True)]:
+        sim.reset(1234)
+        sim.box, sim.box_z = np.array(landing.bin_xy) + (BIN_OUTER_HALF + past_wall) * outward, FLOOR_Z
+        on_floor = sim.ground_truth()
+        assert sim.perturb(Perturbation(kind="move_bin", seed=99)) is clear
+        assert (sim.ground_truth().bin_xy == landing.bin_xy) is clear
+        assert sim.ground_truth().box_xyz == on_floor.box_xyz
+
+
+def test_a_perturbation_the_sim_refuses_is_reported_not_recorded(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug"}
+    steps = len(run_episode(sim, ScriptedPolicy(sim), seed=1505, **common).steps)
+    late = run_episode(sim, ScriptedPolicy(sim), seed=1505, perturb_at=steps, **common)  # the box is in the bin
+    early = run_episode(sim, ScriptedPolicy(sim), seed=1505, perturb_at=0, **common)  # the box is on the table
+    logged = [json.loads(line) for line in events.path.read_text().splitlines()]
+
+    def of(manifest: EpisodeManifest, type_: str) -> list[int]:
+        return [
+            e["data"]["step"] for e in logged if e["type"] == type_ and e["data"]["episode_id"] == manifest.episode_id
+        ]
+
+    assert late.validation and late.validation.accepted
+    assert late.perturbations == [] and of(late, "perturbation") == [] and of(late, "error") == [steps]
+    assert [p.before_step for p in early.perturbations] == [0] and of(early, "perturbation") == [0]
 
 
 def test_scripted_episode_succeeds_and_takeover_is_recorded(tmp_path: Path) -> None:

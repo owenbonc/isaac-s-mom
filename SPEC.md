@@ -26,7 +26,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - Robot: Unitree G1 (29 DoF) from MuJoCo Menagerie with its floating base. Its legs run Unitree's pretrained walking policy (unitree_rl_gym `motion.pt`, BSD-3-Clause, run in numpy from `assets/unitree_g1_walk/policy.npz`) for the whole episode: it steps in place to hold its spot while the arms work, and walks or turns on command. Arms are joint-position controlled. Collision pads on the hands, since Menagerie's hands are visual only. A table, an orange box, and a green bin on a pedestal 1.0–1.4 m from the robot, beside or behind it, never ahead where the table is.
 - One head-mounted RGB camera, 320×240, tilted 45° down with a 100° vertical field of view, rendered with `mujoco.Renderer`. It sees the hands at the box during the hug, the bin above the carried box from ~1.1 m out, and the bin under the box at placing distance.
 - Skills (whitelist): `reach_left`, `reach_right` (slide the arms' working point sideways, `distance_cm` default 5, within ±12 cm), `walk_forward`, `walk_back` (`distance_cm` 0–150, default 30), `turn_left`, `turn_right` (turn the whole body by stepping, `angle_deg` 0–180, default 30), `hug`, `lift` (7 cm, just clear of the table, so the box doesn't hide the bin), `place` (push the box out, lower, let go, settle 3 s), `reobserve`. Damped least-squares IK (holding the hands' grip orientation while they carry the box) plus a joint-position controller turns an arm skill into simulator steps; a skill whose IK target is out of reach, that would pass the reach limit, or that would walk the robot into the table or within 42 cm of the bin's centre is refused with a reason and nothing moves (rule 7).
-- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading) is a pure function of the seed and the task; `move_bin` puts the bin at the task's distance from wherever the robot is then.
+- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading) is a pure function of the seed and the task; `move_bin` puts the bin at the task's distance from wherever the robot is then. `perturb` moves only a box resting on the table out of the robot's hands, and puts the bin only where it touches nothing and never while the box is in it; otherwise it refuses, nothing moves, and it returns False. FakeSim follows the same rule.
 - Tasks (`sim/mujoco/task.py`): a `TaskConfig` sets the box's size, mass and starting offset and the bin's distance and bearing, and refuses settings the G1 can't do. Presets: `across_room` (the default: bin 1.0–1.4 m away), `centred_box`, `near_bin` (0.7–0.9 m), `heavy_box` (2 kg), `small_box`, `far_bin` (1.6–2.2 m). Skills and the success rule are the same in every task. The task name is part of `sim_version`, so a manifest replays only on the task it was recorded in. `mom run --task <preset>` picks one; FakeSim plays the default only.
 - `FakeSim` (foundation) implements the same protocol with drawn frames and trivial physics so every other workstream and CI build without the real scene.
 - The demo video is recorded from the rendered frames (head camera next to a third-person camera), not screen capture.
@@ -43,7 +43,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - If Argon is unreachable or over budget, the robot holds and re-observes, and the run reports it.
 
 ### 3.4 Validator and recorder (workstream 3)
-- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration.
+- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest (neither moving nor turning) for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration.
 - Recorder writes `runs/<run_id>/episodes/<episode_id>/` (manifest §4.2, frames as JPEG, actions as `.npy`) and `runs/<run_id>/events.jsonl`.
 - `build_training_set(run_id, round) -> path` applies rules 2 and 3.
 - `replay(sim, manifest_path)` re-executes the stored skill calls and perturbations from the stored seed and reports whether the executed actions and the final verdict reproduce; it sets `replay_valid`.
@@ -52,7 +52,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - One command, `uv run mom run`, executes the loop (§3.6) and writes events.
 - Dashboard (FastAPI plus one HTML page, server-sent events): live head camera, the current controller (student checkpoint or teacher), each decision with its reasoning, validator verdicts, the success-rate table per round, and where each model runs with its measured latency.
 - `uv run mom demo --ckpt <id> --seed <s> --perturb-at <step>` runs the judged single take: student on an unseen scene, a perturbation mid-run, re-observe, finish.
-- Perturbations (`move_box`, `move_bin`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame.
+- Perturbations (`move_box`, `move_bin`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame. Only an applied perturbation is recorded and emitted as a `perturbation` event; a refused one is an `error` event.
 
 ### 3.6 The teach → fine-tune loop
 1. Evaluate the current student checkpoint on the 20 held-out seeds (success rate, n=20).
@@ -76,7 +76,7 @@ class RobotSim(Protocol):  # student and teacher
 
 class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
     def ground_truth(self) -> GroundTruth: ...
-    def perturb(self, p: Perturbation) -> None: ...
+    def perturb(self, p: Perturbation) -> bool: ...  # True when it applied; False changes nothing
     def render_third_person(self) -> bytes: ...  # JPEG, for the video
 ```
 - `Observation{episode_id, step, sim_time, head_rgb_jpeg: bytes, joint_state: list[float]}`

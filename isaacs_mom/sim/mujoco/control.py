@@ -23,7 +23,7 @@ CONTROL_DT = 0.02  # 50 Hz targets, the walking policy's rate; physics runs at t
 IK_DAMPING = 1e-2
 IK_POSTURE_WEIGHT = 0.05
 IK_ROTATION_WEIGHT = 0.3  # metres per radian: how much hand orientation trades against position
-IK_TOLERANCE = 0.01  # metres; a target further than this from the solved hand is out of reach
+IK_TOLERANCE_M = 0.01  # a target further than this from the solved hand is out of reach
 
 
 class Robot:
