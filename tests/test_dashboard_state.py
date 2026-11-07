@@ -373,23 +373,24 @@ def test_pausing_holds_the_shown_view_and_buffers_new_events_until_resume() -> N
     assert out[1] == {"shown": 5, "held": 0, "episode": "b", "focus": None}
 
 
-def test_the_pause_key_counts_events_buffered_since_the_pause_and_never_below_zero() -> None:
+def test_the_pause_key_is_named_by_its_label_and_counts_events_buffered_since_the_pause() -> None:
     events = stream(started("a"), decision(0), started("b"), decision(0))
     out = presenter(
         """
         const all = [...events];
+        const labels = [S.pauseLabel(v)];
         feed(2); press(" ");
-        const counts = [S.buffered(v)];
-        feed(2); counts.push(S.buffered(v));
-        S.reconnect(v); counts.push(S.buffered(v));  // the replay starts from nothing
+        labels.push(S.pauseLabel(v));
+        feed(2); labels.push(S.pauseLabel(v));
+        S.reconnect(v); labels.push(S.pauseLabel(v));  // the replay starts from nothing
         for (const e of all) S.receive(v, e, now);
-        counts.push(S.buffered(v));
-        press(" "); counts.push(S.buffered(v));
-        return counts;
+        labels.push(S.pauseLabel(v));
+        press(" "); labels.push(S.pauseLabel(v));
+        return labels;
         """,
         events,
     )
-    assert out == [0, 2, 0, 2, 0]
+    assert out == ["Pause", "Resume · 0 new", "Resume · 2 new", "Resume · 0 new", "Resume · 2 new", "Pause"]
 
 
 def test_a_reconnect_while_paused_keeps_the_frozen_view_and_resumes_onto_the_replayed_run() -> None:

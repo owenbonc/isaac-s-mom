@@ -7,10 +7,14 @@ let renderedFocus = null;
 let renderedSide = null;
 // The log follows new rows until the reader scrolls up from its bottom, and again once they scroll back down.
 let logFollowing = true;
+// Where following last parked the log: its foot, or the stage frame's row while a later decision runs.
+let logAnchor = 0;
 let flashedFrame = null;
-let lastHeard = { text: "", episode: null, paused: false };
+let lastHeard = { text: "", episode: null, paused: false, lost: false };
+// A one-off line for the announcer: the box or bin move, heard once when it arrives live.
+let news = "";
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
-const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Gemini API", finetune: "Modal A10G" };
+const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Argon (Gemini API)", finetune: "RTX 5070, local" };
 
 const $ = (id) => document.getElementById(id);
 // Assigning identical HTML would reload every image and reset scrolling, so panels skip unchanged writes.
@@ -34,8 +38,12 @@ const CHECK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l2.6 2
 const now = () => Date.now() / 1000;
 const label = (kind) => kind[0].toUpperCase() + kind.slice(1);
 const chip = (kind, text = label(kind)) => `<span class="chip ${kind}">${text}</span>`;
-// The label for a panel: placeholder when it has no data, else what the view shows of the run (or its episode).
-const panelChip = (hasData, ep = null) => chip(hasData ? MomState.provenance(view, now(), ep) : "placeholder");
+// A panel's label, quiet beside the header's: what the view shows of the run or of the panel's episode. A panel with
+// nothing to show says so in words, so placeholder means only a run that is not on a real simulator.
+const panelChip = (ep = null) => {
+  const kind = MomState.provenance(view, now(), ep);
+  return `<span class="chip quiet ${kind}">${label(kind)}</span>`;
+};
 const simName = (s) => {
   const sims = s.episodes.map((e) => e.sim);
   if (sims.some((sim) => sim === null)) return "simulator not stated";
@@ -90,30 +98,34 @@ function renderHeader() {
 function announce(text) {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
-  const heard = { text, episode: ep && ep.id, paused: view.frozen !== null };
+  const heard = { text, episode: ep && ep.id, paused: view.frozen !== null, lost: view.lost };
   const parts = [];
   if (heard.paused !== lastHeard.paused) parts.push(heard.paused ? "Paused." : "Resumed.");
+  if (heard.lost !== lastHeard.lost) parts.push(heard.lost ? "Connection to the run lost, retrying." : "Connection restored.");
   if (ep && heard.episode !== lastHeard.episode) parts.push(`Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}, ${kindOf(ep)[0].toLowerCase()}.`, text);
   else if (text !== lastHeard.text) parts.push(text);
+  parts.push(news);
+  news = "";
   lastHeard = heard;
   const message = parts.filter(Boolean).join(" ");
   if (message) $("announce").textContent = message;
 }
 
+// The control bar; returns its sentence for the announcer.
 function renderControl() {
   const ep = MomState.episode(view, now());
   const el = $("control");
   if (MomState.finetuning(view, now()) !== null) {
     el.className = "control";
-    el.innerHTML = `<span class="what">Fine-tuning the student</span><span class="note">No robot is moving. The held-out test of the new checkpoint starts when it is ready.</span>`;
-    announce("Fine-tuning the student.");
-    return;
+    el.innerHTML = view.lost
+      ? `<span class="what">Connection lost during the fine-tune</span><span class="note">Whether it is still running shows again when the connection returns.</span>`
+      : `<span class="what">Fine-tuning the student</span><span class="note">No robot is moving. The held-out test of the new checkpoint starts when it is ready.</span>`;
+    return view.lost ? "" : "Fine-tuning the student.";
   }
   if (!ep || !ep.controller) {
     el.className = "control";
     el.innerHTML = `<span class="what">${ep ? "Waiting for the first decision" : "Waiting for the run to start"}</span>`;
-    announce("");
-    return;
+    return "";
   }
   const took = ep.rows.find((r) => r.kind === "takeover");
   const done = finished(ep);
@@ -129,21 +141,23 @@ function renderControl() {
   const [kind, where] = kindOf(ep);
   el.className = "control " + ep.controller;
   el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}${detail ? `<span class="note">${detail}</span>` : ""}${words ? verdictChip(ep) : ""}`;
-  announce(`${WHO[ep.controller]} ${done ? "was" : "is"} in control.${words ? ` Verdict: ${words}.` : ""}`);
+  return `${WHO[ep.controller]} ${done ? "was" : "is"} in control.${words ? ` Verdict: ${words}.` : ""}`;
 }
 
 function renderCamera() {
   // While the student fine-tunes no robot moves, so the stage shows the wait instead of the last episode's frame.
   const tuning = MomState.finetuning(view, now());
   if (tuning !== null) {
-    $("chip-camera").innerHTML = panelChip(true);
-    $("stage").innerHTML = `<div class="tuning"><p class="what">Fine-tuning the student</p><p class="fig">${elapsed(tuning)}</p><p class="note">since the fine-tune started</p></div>`;
+    $("chip-camera").innerHTML = panelChip();
+    // A lost stream can't tell whether the fine-tune still runs, so the stage says only what is known.
+    const what = view.lost ? "Connection lost, retrying" : "Fine-tuning the student";
+    $("stage").innerHTML = `<div class="tuning"><p class="what">${what}</p><p class="fig">${elapsed(tuning)}</p><p class="note">since the fine-tune started</p></div>`;
     $("strip").innerHTML = "";
     return;
   }
   const ep = MomState.episode(view, now());
   const frames = MomState.filmstrip(ep, MomState.stageStep(view));
-  $("chip-camera").innerHTML = panelChip(frames.length > 0, ep);
+  $("chip-camera").innerHTML = panelChip(ep);
   if (!frames.length) {
     $("stage").innerHTML = `<div class="empty">${ep && finished(ep) ? "This episode recorded no head-camera frame." : "No head-camera frame yet. The latest frame appears here after each executed skill."}</div>`;
     $("strip").innerHTML = "";
@@ -178,6 +192,7 @@ function renderCamera() {
   const key = `${ep.id}@${last.step}`;
   const arriving = view.selected === null && !view.frozen && MomState.following(view, now());
   if (last.moved && arriving && key !== flashedFrame) {
+    news = `${what} at step ${move.step}. P shows the frames before and after.`;
     const shot = $("stage").querySelector(".shot");
     shot.classList.add("flash");
     shot.addEventListener("animationend", () => shot.classList.remove("flash"), { once: true });
@@ -237,9 +252,9 @@ function renderEpisode() {
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) < 0;
   $("b-p").disabled = !view.compare && (!ep || ep.perturbedStep === null);
   $("b-p").setAttribute("aria-pressed", String(view.compare !== null));
-  // The name stays "Pause" and aria-pressed carries the state; the visible label says what Space does next.
-  $("b-pause").setAttribute("aria-pressed", String(view.frozen !== null));
-  $("b-pause").lastElementChild.textContent = view.frozen ? `Resume · ${MomState.buffered(view)} new` : "Pause";
+  // The visible label is the name; the key stays inverse while paused.
+  $("b-pause").classList.toggle("on", view.frozen !== null);
+  $("b-pause").lastElementChild.textContent = MomState.pauseLabel(view);
   // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when it failed or was rejected.
   $("rail").style.setProperty("--n", s.episodes.length);
   $("rail").innerHTML = s.episodes
@@ -251,8 +266,10 @@ function renderLog() {
   const ep = MomState.episode(view, now());
   const list = $("log");
   // Said once in the header rather than on every row, until a decision in the episode carries a reason.
-  const reasons = !ep || ep.rows.some((r) => r.kind === "decision" && r.reason) || !ep.rows.some((r) => r.kind === "decision");
-  $("chip-log").innerHTML = (reasons ? "" : '<span class="note">No reasons yet</span>') + panelChip(ep !== null, ep);
+  const decisions = ep ? ep.rows.filter((r) => r.kind === "decision") : [];
+  const reasons = !decisions.length || decisions.some((r) => r.reason);
+  const silent = decisions.every((r) => r.controller === "student") ? "The student gives no reasons" : "No reasons yet";
+  $("chip-log").innerHTML = (reasons ? "" : `<span class="note">${silent}</span>`) + panelChip(ep);
   if (!ep) {
     list.innerHTML = '<li class="empty">No decisions yet. Each decision appears with its reason and latency.</li>';
     renderedEpisode = null;
@@ -271,7 +288,12 @@ function renderLog() {
   if (fromStart) logFollowing = true;
   list.innerHTML = html.join("");
   if (!fromStart) [...list.children].slice(renderedRows).forEach((li) => li.classList.add("fresh"));
-  if (logFollowing) list.scrollTop = list.scrollHeight;
+  if (logFollowing) {
+    // Until the verdict, the foot never pushes the stage frame's row (its reason) above the log's top.
+    const shown = !ep.verdict && stage && list.children[ep.rows.findIndex((r) => r.kind === "decision" && r.step === stage.step && r.skill)];
+    list.scrollTop = shown ? shown.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop : list.scrollHeight;
+    logAnchor = list.scrollTop;
+  }
   // M and P park the log with the move row a third of the way down.
   const row = list.querySelector("li.event.moved");
   if (focus !== null && focus !== renderedFocus && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
@@ -294,20 +316,19 @@ function renderRounds() {
     // First and latest only: the change is the claim.
     body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note mono">${span}</span></div>`;
   }
-  $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip(rounds.length > 0)}</header><div class="body">${body}</div>`;
+  $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body">${body}</div>`;
 }
 
 // One line: each model, where it runs (configured), and its measured median latency or fine-tune duration.
 function renderModels() {
   const s = MomState.summary(MomState.shown(view));
-  const any = s.student || s.teacher || s.finetune;
   const item = (who, where, measured) => `<span class="item"><b>${who}</b> ${where} <span class="v">${stat(measured)}</span></span>`;
   $("models").innerHTML =
-    `<h2>Models</h2><span class="chip config">Configured</span>` +
+    `<h2>Models</h2><span class="chip quiet config">Configured</span>` +
     item("Student", CONFIGURED.student, s.student) +
     item("Teacher", CONFIGURED.teacher, s.teacher) +
     item("Fine-tune", CONFIGURED.finetune, s.finetune) +
-    panelChip(Boolean(any));
+    panelChip();
 }
 
 const evidenceText = (d) => (d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : "");
@@ -340,15 +361,17 @@ function renderDiagnosis() {
     : d
       ? `<div class="body stack">${diagnosisText(d)}</div>`
       : `<div class="body ph-text">${ep ? "No diagnosis for this episode. The teacher diagnoses failed student episodes on development seeds, then demonstrates on new ones." : "No episode yet."}</div>`;
-  $("p-diagnosis").innerHTML = `<header><h2>Diagnosis</h2>${panelChip(Boolean(acting ? acting.diagnosis : d), ep)}</header>${body}`;
+  $("p-diagnosis").innerHTML = `<header><h2>Diagnosis</h2>${panelChip(ep)}</header>${body}`;
 }
 
 function render() {
   renderQueued = false;
+  const focused = document.activeElement;
   renderHeader();
-  renderControl();
+  const said = renderControl();
   renderEpisode();
   renderCamera();
+  announce(said);
   renderRounds();
   renderModels();
   renderDiagnosis();
@@ -359,6 +382,17 @@ function render() {
   if (ep && ep.id !== renderedSide) $("side").scrollTop = 0;
   renderedSide = ep && ep.id;
   fadeSide();
+  keepFocus(focused);
+}
+
+// A key that disabled itself, or P hiding a focused panel, would drop focus to <body>: the nearest enabled presenter
+// key takes it instead, or P's own key.
+function keepFocus(was) {
+  if (!was || was === document.body || (!was.disabled && was.checkVisibility())) return;
+  const keys = [...document.querySelectorAll(".presenter button")];
+  const at = keys.indexOf(was);
+  if (at < 0) return $("b-p").focus();
+  for (let d = 1; d < keys.length; d++) for (const key of [keys[at + d], keys[at - d]]) if (key && !key.disabled) return key.focus();
 }
 
 // The side column fades at its foot while more of it lies below.
@@ -387,7 +421,7 @@ document.addEventListener("click", (e) => {
 $("side").addEventListener("scroll", fadeSide);
 $("log").addEventListener("scroll", (e) => {
   const log = e.currentTarget;
-  logFollowing = log.scrollHeight - log.scrollTop - log.clientHeight < 8;
+  logFollowing = log.scrollHeight - log.scrollTop - log.clientHeight < 8 || Math.abs(log.scrollTop - logAnchor) < 8;
 });
 
 // A frame that fails to load is marked missing instead of showing a broken-image icon.

@@ -16,7 +16,7 @@
       <button type="button" id="b-m" data-key="m"><kbd>M</kbd> Move</button>
       <button type="button" id="b-p" data-key="p" aria-pressed="false"><kbd>P</kbd> Before/after</button>
       <button type="button" id="b-end" data-key="End"><kbd>End</kbd> Latest</button>
-      <button type="button" id="b-pause" data-key=" " aria-pressed="false" aria-label="Pause"><kbd>Space</kbd> <span>Pause</span></button>
+      <button type="button" id="b-pause" data-key=" "><kbd>Space</kbd> <span>Pause</span></button>
     </nav>
   </div>
   <div class="where">
@@ -29,7 +29,7 @@
           <dt><span class="chip live">Live</span></dt><dd>Events are arriving (the last within 20 s), or a fine-tune started in the last 30 minutes is still running.</dd>
           <dt><span class="chip recorded">Recorded</span></dt><dd>From the run's saved files; nothing new is arriving for it.</dd>
           <dt><span class="chip paused">Paused</span></dt><dd>Space is holding the view; new events wait until it resumes.</dd>
-          <dt><span class="chip placeholder">Placeholder</span></dt><dd>No data yet, or the run is on FakeSim, the stand-in simulator.</dd>
+          <dt><span class="chip placeholder">Placeholder</span></dt><dd>The run is on FakeSim, the stand-in simulator, or names no simulator. A panel with nothing to show says so in words.</dd>
           <dt><span class="chip config">Configured</span></dt><dd>Set in the code, not measured.</dd>
           <dt>Rail</dt><dd>One mark per episode: tall for the teacher, short for the student; filled when it succeeded or was accepted for training, hollow when it failed or was rejected. The outlined mark is the episode shown.</dd>
         </dl>

@@ -63,7 +63,7 @@ header.bar h1{font-size:var(--step-2)}
 .presenter button:hover:not(:disabled){background:var(--ground)}
 .presenter button:disabled{color:var(--ph);cursor:default}
 .presenter button:disabled kbd{border-color:transparent}
-.presenter button[aria-pressed="true"]{background:var(--ink);color:var(--panel)}
+.presenter button[aria-pressed="true"],#b-pause.on{background:var(--ink);color:var(--panel)}
 kbd{font-family:inherit;font-weight:600;padding:0 .3rem;border:1px solid currentColor;border-radius:3px}
 .chip.paused{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.95fr);gap:.8rem;padding:.8rem}
@@ -72,7 +72,9 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minm
 .side[data-more]{mask-image:linear-gradient(to bottom,#000 calc(100% - 3rem),transparent)}
 .side .panel{flex:none}
 
-footer.models{flex:none;display:flex;align-items:center;gap:.3rem 1rem;padding:.45rem 1.1rem;background:var(--panel);border-top:1px solid var(--rule);white-space:nowrap;overflow:hidden}
+/* The row wraps by whole items wherever it runs out of width, so no value or label is ever clipped. */
+footer.models{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem 1rem;padding:.45rem 1.1rem;background:var(--panel);border-top:1px solid var(--rule)}
+footer.models .item{white-space:nowrap}
 footer.models h2{font-size:1rem}
 footer.models .chip:last-child{margin-left:auto}
 footer.models .v{color:var(--muted)}
@@ -87,6 +89,9 @@ footer.models .v{color:var(--muted)}
 .chip.live{border-color:var(--ok);color:var(--ok)}
 .chip.config{color:var(--muted)}
 .chip.placeholder{border-style:dashed;color:var(--ph);background:repeating-linear-gradient(135deg,var(--panel) 0 5px,var(--hatch) 5px 7px)}
+/* Panel labels keep their shapes in outline and text, so the header's status and the Space key stay the loud ones. */
+.chip.quiet{background:none;font-weight:400}
+.chip.quiet.paused{color:var(--ink)}
 .tag{display:inline-flex;align-items:center;gap:.4rem;font-weight:600;padding:.12rem .55rem;border-radius:3px;white-space:nowrap}
 .tag.student{background:var(--panel);color:var(--student)}
 .tag.teacher{background:var(--panel);color:var(--teacher)}
@@ -217,7 +222,7 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
   .shot{width:100%}
   ol.log{max-height:24rem}
   .strip{grid-template-columns:repeat(3,minmax(0,1fr))}
-  footer.models{flex-wrap:wrap;white-space:normal}
+  footer.models .item{white-space:normal}
   .caption{white-space:normal}
   .rail{order:1;flex-basis:100%}
 }

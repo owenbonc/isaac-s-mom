@@ -236,6 +236,8 @@
   }
   // Events that arrived since the pause; a reconnect's replay starts from none.
   const buffered = (v) => (v.frozen ? Math.max(0, v.live.eventCount - v.frozen.state.eventCount) : 0);
+  // The pause key's label, which is also its accessible name (WCAG 2.5.3): what Space does next.
+  const pauseLabel = (v) => (v.frozen ? `Resume · ${buffered(v)} new` : "Pause");
   // A paused view judges the run as it was when paused, so it stays put if the run ends meanwhile.
   const following = (v, now) => running(v.live, v.frozen ? v.frozen.at : now);
 
@@ -333,7 +335,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, following, accepted, kind, verdictWords, teacherDrove, episode, finetuning, target, stageStep, keydown };
+  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, teacherDrove, episode, finetuning, target, stageStep, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
