@@ -150,6 +150,7 @@ class TrainingSetSummary(BaseModel):
     rejected: int
     unfinished: int
     rejected_by: dict[str, int]
+    empty_dev_episodes: int
     examples: int
 
 

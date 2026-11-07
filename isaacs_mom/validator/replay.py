@@ -4,6 +4,7 @@ import numpy as np
 
 from isaacs_mom.contracts import EpisodeManifest, ReplayReport
 from isaacs_mom.sim.base import TruthSim
+from isaacs_mom.validator.recorder import write_manifest
 from isaacs_mom.validator.rules import validate
 
 # The recorder saves actions as float32, so a faithful re-run matches only to float32 precision.
@@ -34,7 +35,7 @@ def replay(sim: TruthSim, manifest_path: Path) -> bool:
     _perturb_before(sim, manifest, len(manifest.steps))
     reproduced = reproduced and validate(sim.ground_truth()) == manifest.validation
     manifest.replay_valid = reproduced
-    manifest_path.write_text(manifest.model_dump_json(indent=2))
+    write_manifest(manifest_path, manifest)
     return reproduced
 
 

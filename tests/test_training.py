@@ -95,18 +95,23 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
     _write(tmp_path, "d-unfinished", manifest(validation=None))
     _write(tmp_path, "e-student-trial", manifest(validation=missed, controllers=("student",)))
     _write(tmp_path, "f-exam", exam)
+    _write(
+        tmp_path, "g-unexplained", manifest(validation=Validation(task_success=False, physics_valid=True, reason="x"))
+    )
+    _write(tmp_path, "h-empty", manifest(validation=missed, controllers=()))
 
     training_set = build_training_set(tmp_path, 1)
 
     summary = TrainingSetSummary.model_validate_json(training_set.with_suffix(".summary.json").read_text())
     assert summary == TrainingSetSummary(
         round=1,
-        episodes_scanned=6,
-        demonstrations=4,
+        episodes_scanned=8,
+        demonstrations=5,
         accepted=1,
-        rejected=2,
+        rejected=3,
         unfinished=1,
-        rejected_by={"missed_target": 1, "joint_limit": 1, "still_moving": 1},
+        rejected_by={"missed_target": 1, "joint_limit": 1, "still_moving": 1, "other": 1},
+        empty_dev_episodes=1,
         examples=2,
     )
     assert len(training_set.read_text().splitlines()) == summary.examples

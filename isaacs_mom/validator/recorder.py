@@ -1,4 +1,5 @@
 import os
+from itertools import pairwise
 from pathlib import Path
 
 import numpy as np
@@ -102,15 +103,19 @@ class Recorder:
         return self.manifest
 
     def _save(self) -> None:
-        # Write then rename, so a crash mid-write never leaves a half-written manifest.
-        partial = self.dir / "manifest.json.partial"
-        partial.write_text(self.manifest.model_dump_json(indent=2))
-        os.replace(partial, self.dir / "manifest.json")
+        write_manifest(self.dir / "manifest.json", self.manifest)
+
+
+def write_manifest(path: Path, manifest: EpisodeManifest) -> None:
+    # Write then rename, so a process crash mid-write never leaves a half-written manifest.
+    partial = path.with_name(path.name + ".partial")
+    partial.write_text(manifest.model_dump_json(indent=2))
+    os.replace(partial, path)
 
 
 def _check_executed(result: ExecResult) -> None:
     """SPEC §2 rule 4: every executed action needs its own timestamp, in time order."""
     if len(result.executed_actions) != len(result.timestamps):
         raise RecordingError(f"{len(result.executed_actions)} executed actions but {len(result.timestamps)} timestamps")
-    if any(later < earlier for earlier, later in zip(result.timestamps, result.timestamps[1:], strict=False)):
+    if any(later < earlier for earlier, later in pairwise(result.timestamps)):
         raise RecordingError("timestamps go backwards")

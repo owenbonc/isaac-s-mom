@@ -30,7 +30,8 @@ def training_examples(episode_dir: Path, manifest: EpisodeManifest) -> list[Trai
 def build_training_set(run_dir: Path, round_: int) -> Path:
     """All accepted teacher demonstrations recorded so far in this run, as JSON lines (SPEC §4.3).
 
-    Also writes `training_r<round>.summary.json`: how many demonstrations were seen, kept and rejected, and why.
+    Also writes `training_r<round>.summary.json`: across every round so far, how many demonstrations were seen,
+    kept and rejected, and why.
     """
     out = run_dir / f"training_r{round_}.jsonl"
     lines: list[str] = []
@@ -59,6 +60,8 @@ def _summarise(round_: int, manifests: list[EpisodeManifest], examples: int) -> 
         accepted=len(verdicts) - len(rejected),
         rejected=len(rejected),
         unfinished=len(demos) - len(verdicts),
-        rejected_by=dict(Counter(c for v in rejected for c in failure_categories(v.reason))),
+        rejected_by=dict(Counter(c for v in rejected for c in failure_categories(v.reason) or ["other"])),
+        # A teacher that stops before its first step leaves no teacher step, so count these rather than drop them.
+        empty_dev_episodes=sum(1 for m in manifests if m.split == "dev" and not m.steps),
         examples=examples,
     )
