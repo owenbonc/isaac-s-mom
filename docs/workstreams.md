@@ -8,7 +8,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 - `MujocoSim` (`sim.py`) implements `TruthSim` (`isaacs_mom/sim/base.py`, SPEC §3.1, §4.1) over `scene.py`, with arm IK and motion in `control.py`.
 - Free-standing Unitree G1 from MuJoCo Menagerie (vendored in `assets/`); table, orange box, green bin beside the robot; head camera 320×240; a third-person camera for the video.
 - Skills: `reach_left`, `reach_right`, `turn_left`, `turn_right`, `hug`, `lift`, `place`, `reobserve` (`distance_cm` 0–20, `angle_deg` 0–45, clamped by `SkillCall`). Out-of-reach or past-the-limit skills are refused with a reason and nothing moves (rule 7).
-- Layout is a pure function of the seed; `perturb` moves the box or the bin from `Perturbation.seed`.
+- Layout is a pure function of the seed; `perturb` moves the box or the bin from `Perturbation.seed` and returns whether it applied (SPEC §3.1).
 - `ground_truth()` fills every `GroundTruth` field, including `box_at_rest` over the last 1 s of sim time.
 - See it: `uv run python -m isaacs_mom.sim.mujoco.preview --seed 3 --gif runs/seed3.gif` films a scripted episode; `--viewer` opens MuJoCo's viewer.
 - Done: SPEC §6 criterion 1 (Gate A), covered by `tests/test_mujoco_sim.py`. Tests run headless (`MUJOCO_GL=osmesa` in CI).
@@ -26,8 +26,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 
 ## 4. Student VLM and fine-tuning — `isaacs_mom/student/`
 - Replace `StudentPolicy.act` with SmolVLM2-500M-Video-Instruct (local: MPS on Macs, CUDA on the Windows RTX 5070/5060 machines). Prompt for one JSON `SkillCall`; parse with the pydantic model; anything unparseable becomes `reobserve` and is logged. Two `reobserve`s in a row end the episode (SPEC §3.2).
-- Replace `finetune` with LoRA on a Modal A10G over the `training_r<round>.jsonl` file (SPEC §4.3); return `<run_id>/ckpt-r<round>` and make `StudentPolicy(checkpoint)` load it. Weights stay out of git.
-- Adapters live in `runs/<run_id>/checkpoints/ckpt-r<round>/`, so every run keeps its own; the id is `<run_id>/ckpt-r<round>` and `ckpt-r0` is the base model. `meta.json` there names the training set it came from. Run the real loop outside OneDrive so checkpoint swaps (directory renames) are not blocked by sync locks.
+- Replace `finetune` with LoRA on a Modal A10G over the `training_r<round>.jsonl` file (SPEC §4.3); return `ckpt-r<round>` and make `StudentPolicy(checkpoint)` load it. Weights stay out of git.
 - Done: SPEC §6 criterion 2 (Gate B), then the fine-tune half of criterion 5.
 
 ## 5. Orchestrator, dashboard and demo — `isaacs_mom/orchestrator/`, `docs/`
