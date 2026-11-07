@@ -52,7 +52,7 @@ class StudentPolicy:
         log.info(
             "student %s step %d: %s in %.0f ms", self.checkpoint, obs.step, call.model_dump_json(), self.last_latency_ms
         )
-        # The teacher ends each demonstration with one reobserve on the finished scene; a second one means done.
+        # SPEC §3.2: a second consecutive reobserve from the model means done.
         if call.skill == "reobserve" and self._last_skill == "reobserve":
             return None
         self._last_skill = call.skill

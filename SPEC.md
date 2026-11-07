@@ -31,12 +31,13 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 
 ### 3.2 Student (workstream 4)
 - SmolVLM2-500M-Video-Instruct, local (Mac MPS or the 4070 Ti laptop). `predict_skill(obs, instruction, feedback) -> SkillCall`, output parsed as JSON and checked against the whitelist; an unparseable answer becomes `reobserve` and is logged.
+- Two consecutive `reobserve` replies from the model end the student's episode (`act` returns `None`); an unparseable reply's fallback `reobserve` does not count.
 - Fine-tuning: LoRA on Modal A10G (`student/finetune_modal.py`), on training examples (§4.3). Each round produces a checkpoint id `ckpt-r<round>`; `ckpt-r0` is the base model.
 
 ### 3.3 Teacher (workstream 2)
 - Argon (`gemini-4-argon`, Gemini API) with a typed tool adapter over `RobotSim`.
 - `diagnose(failure) -> Diagnosis`: from the failed episode's frames, skill calls, and the validator's reason, a failure hypothesis with evidence and confidence.
-- `demonstrate(seed, instruction, diagnosis) -> Episode`: drives the robot skill by skill from fresh camera frames until done or the step limit (20), re-observing after every skill so a mid-run change alters the next decision.
+- `demonstrate(seed, instruction, diagnosis) -> Episode`: drives the robot skill by skill from fresh camera frames until done or the step limit (20), re-observing after every skill so a mid-run change alters the next decision. Ends every demonstration with exactly one `reobserve` once the task is done, then returns `None`, so the finished scene is in the training data.
 - `choose_scenes(diagnoses, n) -> list[int]`: picks development seeds that target the diagnosed failure. Rejects held-out seeds.
 - If Argon is unreachable or over budget, the robot holds and re-observes, and the run reports it.
 

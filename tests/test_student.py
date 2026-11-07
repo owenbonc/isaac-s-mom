@@ -135,6 +135,13 @@ def test_second_reobserve_in_a_row_means_done() -> None:
     assert policy.act(frame(1), "push", "reobserve: ok") is None
 
 
+def test_an_unparseable_reply_breaks_a_reobserve_streak() -> None:
+    policy = StudentPolicy(generate=scripted(REOBSERVE, "??", REOBSERVE))
+    policy.act(frame(0), "push", "start")
+    policy.act(frame(1), "push", "reobserve: ok")
+    assert policy.act(frame(2), "push", "reobserve: ok") == SkillCall(skill="reobserve")
+
+
 def test_unparseable_replies_never_end_the_episode() -> None:
     policy = StudentPolicy(generate=scripted("??", "??", "??"))
     assert all(policy.act(frame(i), "push", "start") == SkillCall(skill="reobserve") for i in range(3))
