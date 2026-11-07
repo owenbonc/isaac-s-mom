@@ -38,6 +38,15 @@ header.bar h1{font-size:var(--step-2)}
 .rail li.here{outline:2px solid var(--ink);outline-offset:2px}
 .control{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem;padding:.5rem 1.1rem;border-bottom:1px solid var(--rule);background:var(--panel);min-height:2.6rem}
 .control .verdict{margin-left:auto}
+.legend{position:relative;flex:none}
+.legend summary{list-style:none;cursor:pointer;font-weight:600;padding:.1rem .4rem;border-radius:4px;text-decoration:underline dotted;text-underline-offset:.2em}
+.legend summary::-webkit-details-marker{display:none}
+.legend summary:hover,.legend[open] summary{background:var(--ground)}
+.legend .pop{position:absolute;right:0;top:calc(100% + .4rem);z-index:2;width:min(36rem,calc(100vw - 2.2rem));background:var(--panel);border:1px solid var(--rule-strong);border-radius:6px;box-shadow:0 6px 20px rgb(18 23 31 / .18);padding:.8rem 1rem}
+.legend dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.5rem .8rem;margin:0 0 .6rem;align-items:baseline}
+.legend dt{font-weight:600}
+.legend dd{margin:0}
+.legend .note{margin:0}
 .control.student{background:var(--student-bg);border-bottom-color:var(--student-rule)}
 .control.teacher{background:var(--teacher-bg);border-bottom-color:var(--teacher-rule)}
 .control .what{font-weight:700}
@@ -127,6 +136,8 @@ footer.models .v{color:var(--muted)}
 ol.log{list-style:none;margin:0;padding:0;overflow:auto;min-height:0;flex:1}
 ol.log li{display:grid;grid-template-columns:1.5rem minmax(0,1fr);gap:.2rem .5rem;padding:.45rem .8rem;border-bottom:1px solid var(--rule);align-items:baseline}
 ol.log li .n{color:var(--muted);text-align:right}
+ol.log li.event .n{color:inherit;display:flex;justify-content:flex-end;align-self:center}
+ol.log li.event .n svg{width:1em;height:1em}
 ol.log .line{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:0 .6rem;min-width:0}
 ol.log .skill{font-family:var(--mono);font-weight:600;overflow-wrap:anywhere}
 ol.log li.student .skill{color:var(--student)}

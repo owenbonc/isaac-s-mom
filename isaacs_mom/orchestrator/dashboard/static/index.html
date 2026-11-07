@@ -19,9 +19,27 @@
       <button type="button" id="b-pause" data-key=" " aria-pressed="false"><kbd>Space</kbd> <span>Pause</span></button>
     </nav>
   </div>
-  <div class="where"><p id="episode-line"></p><ol class="rail" id="rail" aria-hidden="true"></ol></div>
+  <div class="where">
+    <p id="episode-line"></p>
+    <ol class="rail" id="rail" aria-hidden="true"></ol>
+    <details class="legend">
+      <summary>Labels</summary>
+      <div class="pop">
+        <dl>
+          <dt><span class="chip live">Live</span></dt><dd>Events are arriving (the last within 20 s), or a fine-tune started in the last 30 minutes is still running.</dd>
+          <dt><span class="chip recorded">Recorded</span></dt><dd>From the run's saved files; nothing new is arriving for it.</dd>
+          <dt><span class="chip paused">Paused</span></dt><dd>Space is holding the view; new events wait until it resumes.</dd>
+          <dt><span class="chip placeholder">Placeholder</span></dt><dd>No data yet, or the run is on FakeSim, the stand-in simulator.</dd>
+          <dt><span class="chip config">Configured</span></dt><dd>Set in the code, not measured.</dd>
+          <dt>Rail</dt><dd>One mark per episode: tall for the teacher, short for the student; filled when the validator accepted it, hollow when it rejected it. The outlined mark is the episode shown.</dd>
+        </dl>
+        <p class="note" id="run-meta"></p>
+      </div>
+    </details>
+  </div>
 </header>
 <div class="control" id="control"></div>
+<p class="sr" id="announce" aria-live="polite"></p>
 <main>
   <section class="panel col camera">
     <header><h2>Head camera</h2><span id="chip-camera"></span></header>

@@ -7,6 +7,7 @@ let renderedEpisode = null;
 let renderedFocus = null;
 let renderedSide = null;
 let flashedFrame = null;
+let announced = "";
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
 const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Gemini API", finetune: "Modal A10G" };
 
@@ -24,6 +25,9 @@ for (const el of document.querySelectorAll("[id]")) {
 }
 const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 const X = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
+const ARROW = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5L10 6l-3.5 3.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const DIAMOND = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5L10.5 6 6 10.5 1.5 6z" fill="currentColor"/></svg>';
+const BANG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v5M6 9.6v.4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
 const CHECK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l2.6 2.6L10 3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 const now = () => Date.now() / 1000;
@@ -37,13 +41,20 @@ const simName = (s) => {
   if (sims.some((sim) => sim.version.startsWith("fake"))) return "FakeSim";
   return esc(sims[sims.length - 1].version);
 };
+const WHO = { student: "Student", teacher: "Teacher (Argon)" };
 const tag = (controller, checkpoint) => {
-  const who = { student: "Student", teacher: "Teacher (Argon)" }[controller] || "Unknown controller";
+  const who = WHO[controller] || "Unknown controller";
   return `<span class="tag ${controller || "unknown"}">${who}${checkpoint ? ` <span class="mono">${esc(checkpoint)}</span>` : ""}</span>`;
 };
 const amount = (row) => (row.distance !== null ? ` ${+row.distance.toFixed(1)} cm` : row.angle !== null ? ` ${Math.round(row.angle)}°` : "");
 const skillText = (row) => (row.skill ? esc(row.skill) + amount(row) : '<span class="stop">Stopped, no skill chosen</span>');
-const SCENES = { dev: "Development scene", heldout: "Held-out test scene" };
+// What an episode is, named without the loop's round index, which reads like a checkpoint number and is not one.
+const kindOf = (ep) => {
+  if (ep.split === "heldout") return ["Held-out test", `seed ${esc(ep.seed ?? "")}`];
+  const first = ep.rows.find((r) => r.kind === "decision");
+  return [first && first.controller === "teacher" ? "Teacher demonstration" : "Student trial", `development seed ${esc(ep.seed ?? "")}`];
+};
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 const isAccepted = (v) => v.task && v.physics;
 const verdictChip = (v) => `<span class="verdict ${isAccepted(v) ? "good" : "bad"}">${isAccepted(v) ? CHECK + "Accepted" : X + "Rejected"}</span>`;
 const MOVED = { move_box: "Box moved", move_bin: "Bin moved" };
@@ -57,6 +68,15 @@ function renderHeader() {
   const kind = MomState.provenance(view, now());
   const status = s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)} · ${simName(s)}`);
   $("status").innerHTML = status + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
+  const robot = s.episodes.length && s.episodes[s.episodes.length - 1].sim;
+  $("run-meta").innerHTML = s.eventCount
+    ? `Run <b class="mono">${esc(s.runId)}</b>${robot ? `, robot <span class="mono">${esc(robot.robot)}</span>` : ""}: ${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}, ${s.eventCount} events.`
+    : "";
+}
+
+// Screen readers hear who is in control and the verdict when either changes, not every step.
+function announce(text) {
+  if (text !== announced) $("announce").textContent = announced = text;
 }
 
 function renderControl() {
@@ -65,22 +85,28 @@ function renderControl() {
   const el = $("control");
   if (s.finetune.pending && view.selected === null && MomState.following(view, now())) {
     el.className = "control";
-    el.innerHTML = `<span class="what">Fine-tuning the student, round ${esc(s.finetune.pending.round ?? "")}</span><span class="note">No robot is moving. Held-out evaluation starts when the new checkpoint is ready.</span>`;
+    el.innerHTML = `<span class="what">Fine-tuning the student</span><span class="note">No robot is moving. The held-out test of the new checkpoint starts when it is ready.</span>`;
+    announce("Fine-tuning the student.");
     return;
   }
   if (!ep || !ep.controller) {
     el.className = "control";
     el.innerHTML = `<span class="what">${ep ? "Waiting for the first decision" : "Waiting for the run to start"}</span>`;
+    announce("");
     return;
   }
   const took = ep.rows.find((r) => r.kind === "takeover");
+  const done = ep.verdict !== null;
+  // The controller tag is the sentence's subject.
   const detail = took
-    ? `The student stopped without succeeding${took.step === null ? "" : " at step " + took.step}, so the teacher took over.`
+    ? `took over when the student stopped${took.step === null ? "" : " at step " + esc(took.step)}.`
     : ep.controller === "student"
-      ? "Choosing each skill from the head-camera frame."
-      : "Demonstrating from the head-camera frame.";
+      ? `${done ? "chose" : "is choosing"} each skill from the head-camera frame.`
+      : `${done ? "demonstrated" : "is demonstrating"} from the head-camera frame.`;
+  const [kind, where] = kindOf(ep);
   el.className = "control " + ep.controller;
-  el.innerHTML = `<span class="what">${esc(SCENES[ep.split] || "Scene")}</span><span class="note">seed ${esc(ep.seed ?? "")}, round ${esc(ep.round ?? "")}</span>${tag(ep.controller, ep.checkpoint)}<span class="note">${detail}</span>${ep.verdict ? verdictChip(ep.verdict) : ""}`;
+  el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}<span class="note">${detail}</span>${done ? verdictChip(ep.verdict) : ""}`;
+  announce(`${WHO[ep.controller]} ${done ? "was" : "is"} in control.${done ? ` The validator ${isAccepted(ep.verdict) ? "accepted" : "rejected"} this episode.` : ""}`);
 }
 
 function renderCamera() {
@@ -100,12 +126,12 @@ function renderCamera() {
   if (view.compare && move) {
     const step = (f) => (f && f.step !== null ? `<span class="step">step ${esc(f.step)}</span>` : "");
     frame = cell(ep, move.before, `<span class="tag">Before the move</span>${step(move.before)}`, false) + cell(ep, move.after, `<span class="tag">After</span>${step(move.after)}`, true);
-    caption = `<p class="caption moved">${what} between these frames${move.decision ? `, before decision ${esc(move.decision.step)}` : ""}.</p>`;
+    caption = `<p class="caption moved">${what} between ${move.before && move.before.step !== null ? `step ${esc(move.before.step)} and ` : "these frames, before "}step ${esc(move.step)}.</p>`;
   } else {
     frame = cell(ep, last, tag(last.controller, last.checkpoint), last.moved);
     caption = last.moved
       ? `<p class="caption moved">${what} just before this frame, the first to show it.</p>`
-      : `<p class="caption">${last.step === null ? "Head-camera frame." : `Seen before decision ${esc(last.step)}.`}</p>`;
+      : `<p class="caption">${last.step === null ? "Head-camera frame." : `What the ${last.controller || "robot"} saw at step ${esc(last.step)}, before choosing.`}</p>`;
   }
   $("stage").innerHTML = `<div class="frame">${frame}</div>${caption}`;
   $("strip").innerHTML = frames
@@ -124,21 +150,22 @@ function renderCamera() {
 
 // One frame on the stage with its label and the skill it led to; a missing frame keeps its place, hatched.
 function cell(ep, f, label, moved) {
-  const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : `, seen before decision ${esc(f.step)}`}">` : "";
+  const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : ` at step ${esc(f.step)}`}">` : "";
   const row = f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill);
   const said = row ? `<span class="said ${row.controller || "unknown"}">${skillText(row)}</span>` : "";
   return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}<div class="over">${label}</div>${said}</div></div>`;
 }
 
+// Event rows carry a glyph where decisions carry their step, so the two never read as the same kind of row.
 function logRow(row) {
-  const step = row.step === null ? "" : esc(row.step);
+  const at = row.step === null ? "" : ` before step ${esc(row.step)}`;
   switch (row.kind) {
     case "perturbation":
-      return `<li class="event moved"><span class="n">${step}</span><span>${esc(MOVED[row.what] || "Scene changed")} <span class="d">by the orchestrator. The robot learns of it only from its camera${row.step === null ? "" : `, in the frame seen by step ${step}`}.</span></span></li>`;
+      return `<li class="event moved"><span class="n">${ARROW}</span><span>${esc(MOVED[row.what] || "Scene changed")}${at} <span class="d">by the orchestrator. The robot sees it only through its camera.</span></span></li>`;
     case "takeover":
-      return `<li class="event take"><span class="n">${step}</span><span>Teacher takes over</span></li>`;
+      return `<li class="event take"><span class="n">${DIAMOND}</span><span>Teacher took over${row.step === null ? "" : ` at step ${esc(row.step)}`}</span></li>`;
     case "error":
-      return `<li class="event bad"><span class="n"></span><span>Error <span class="d">${esc(row.text)}</span></span></li>`;
+      return `<li class="event bad"><span class="n">${BANG}</span><span>Error <span class="d">${esc(row.text)}</span></span></li>`;
     default:
       return "";
   }
@@ -155,7 +182,8 @@ function decisionRow(row, after) {
 
 function verdictRow(ep) {
   const v = ep.verdict;
-  return `<li class="event ${isAccepted(v) ? "good" : "bad"}"><span class="n"></span><span>Validator: ${isAccepted(v) ? "accepted" : "rejected"}. <span class="d">${esc(v.reason)}. Task ${v.task ? "succeeded" : "not met"}; physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
+  const reason = v.reason ? `${esc(cap(v.reason))}. ` : "";
+  return `<li class="event ${isAccepted(v) ? "good" : "bad"}"><span class="n">${isAccepted(v) ? CHECK : X}</span><span>The validator ${isAccepted(v) ? "accepted" : "rejected"} this episode. <span class="d">${reason}Task ${v.task ? "succeeded" : "not met"}, physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
 }
 
 const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m", "b-end": "End" };
@@ -243,7 +271,7 @@ function actingOnBody(a) {
   const head = `<p class="acting-on">Acting on diagnosis from episode ${a.number}</p>`;
   if (!a.diagnosis) return `<div class="body stack">${head}<div class="ph-text">Episode ${a.number} has no diagnosis in the events yet.</div></div>`;
   const shot = a.frame && a.frame.url
-    ? `<figure class="cited"><div class="thumb"><img src="${esc(a.frame.url)}" alt="Episode ${a.number}'s last head-camera frame"></div><figcaption class="note">Its last frame${a.frame.step === null ? "" : `, step ${esc(a.frame.step)}`}</figcaption></figure>`
+    ? `<figure class="cited"><div class="thumb"><img src="${esc(a.frame.url)}" alt="Episode ${a.number}'s last head-camera frame"></div><figcaption class="note">Episode ${a.number}${a.frame.step === null ? "" : `, step ${esc(a.frame.step)}`}</figcaption></figure>`
     : "";
   return `<div class="body stack">${head}<div>${esc(a.diagnosis.hypothesis)}</div><div class="cited-row">${shot}<div class="stack">${evidenceText(a.diagnosis)}</div></div></div>`;
 }
