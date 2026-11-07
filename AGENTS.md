@@ -43,7 +43,7 @@ See SPEC §5. Workstreams: 1 `isaacs_mom/sim/mujoco/`, 2 `isaacs_mom/teacher/`, 
 
 ```
 uv sync                         # install
-uv run mom run --sim fake       # the teach -> fine-tune loop (SPEC §3.6) on FakeSim
+uv run mom run --sim fake --student stub   # the teach -> fine-tune loop (SPEC §3.6) on FakeSim
 uv run pytest                   # tests
 scripts/verify.sh               # the definition of done; `secrets` runs only the history scan
 ```

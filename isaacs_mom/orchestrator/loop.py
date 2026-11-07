@@ -1,10 +1,12 @@
 """The teach -> fine-tune loop (SPEC §3.6)."""
 
+from collections.abc import Callable
 from pathlib import Path
 
 from isaacs_mom.contracts import EpisodeManifest, EvaluationResult
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
+from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
@@ -17,13 +19,23 @@ MAX_ROUNDS = 3
 DEMOS_PER_ROUND = 20
 DEV_TRIALS = 10
 
+StudentFactory = Callable[[str], Policy]
+StudentTrainer = Callable[[Path, str, int], str]
 
-def evaluate(sim: TruthSim, checkpoint: str, round_: int, run_dir: Path, events: EventLog) -> EvaluationResult:
+
+def evaluate(
+    sim: TruthSim,
+    checkpoint: str,
+    round_: int,
+    run_dir: Path,
+    events: EventLog,
+    make_student: StudentFactory = StudentPolicy,
+) -> EvaluationResult:
     seeds = sorted(heldout_seeds())
     successes = sum(
         run_episode(
             sim,
-            StudentPolicy(checkpoint),
+            make_student(checkpoint),
             run_dir=run_dir,
             events=events,
             seed=seed,
@@ -46,12 +58,14 @@ def run_loop(
     max_rounds: int = MAX_ROUNDS,
     demos: int = DEMOS_PER_ROUND,
     dev_trials: int = DEV_TRIALS,
+    make_student: StudentFactory = StudentPolicy,
+    train_student: StudentTrainer = finetune,
 ) -> list[EvaluationResult]:
     events = EventLog(run_dir, run_id)
     checkpoint = BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):
-        results.append(evaluate(sim, checkpoint, round_, run_dir, events))
+        results.append(evaluate(sim, checkpoint, round_, run_dir, events, make_student))
         if results[-1].rate >= TARGET_RATE or round_ == max_rounds:
             break
         trial_start = DEV_SEED_START + 1000 * round_
@@ -59,7 +73,7 @@ def run_loop(
         for seed in range(trial_start, trial_start + dev_trials):
             manifest = run_episode(
                 sim,
-                StudentPolicy(checkpoint),
+                make_student(checkpoint),
                 run_dir=run_dir,
                 events=events,
                 seed=seed,
@@ -92,6 +106,6 @@ def run_loop(
             )
         training_set = build_training_set(run_dir, round_ + 1)
         events.emit("finetune_started", round=round_ + 1, training_set=str(training_set))
-        checkpoint = finetune(training_set, checkpoint, round_ + 1)
+        checkpoint = train_student(training_set, checkpoint, round_ + 1)
         events.emit("finetune_completed", round=round_ + 1, checkpoint=checkpoint)
     return results

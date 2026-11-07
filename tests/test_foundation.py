@@ -10,6 +10,7 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
+from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
 from isaacs_mom.validator.training import build_training_set, training_examples
 
@@ -107,7 +108,16 @@ def test_training_set_takes_only_accepted_teacher_steps_from_dev(tmp_path: Path)
 
 
 def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
-    results = run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=2, dev_trials=2)
+    results = run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=2,
+        dev_trials=2,
+        make_student=StubStudent,
+        train_student=stub_finetune,
+    )
     assert [r.round for r in results] == [0, 1]
     assert all(r.n == len(heldout_seeds()) for r in results)
     event_types = {json.loads(line)["type"] for line in (tmp_path / "events.jsonl").read_text().splitlines()}
@@ -142,3 +152,27 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
     assert examples and all(type(e.target) is SkillTarget for e in examples)
     lines = build_training_set(tmp_path, 1).read_text().splitlines()
     assert lines and all("reason" not in json.loads(line)["target"] for line in lines)
+
+
+def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
+    built: list[str] = []
+
+    def make_student(checkpoint: str) -> StubStudent:
+        built.append(checkpoint)
+        return StubStudent(checkpoint)
+
+    def train_student(training_set: Path, base_checkpoint: str, round_: int) -> str:
+        return f"trained-{round_}"
+
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=1,
+        dev_trials=1,
+        make_student=make_student,
+        train_student=train_student,
+    )
+    assert built[0] == "ckpt-r0"
+    assert "trained-1" in built
