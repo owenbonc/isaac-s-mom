@@ -90,7 +90,8 @@ class Perturbation(BaseModel):
 class GroundTruth(BaseModel):
     """Simulator facts for the validator and orchestrator only (SPEC §2 rule 1). The bin is square, `bin_inner_half`
     wide either side of its centre and turned by `bin_yaw`; `box_on_bin_floor` means touching the floor inside its
-    walls."""
+    walls. `robot_xy` is the pelvis's floor position and `robot_yaw` the torso's heading (the walking heading plus any
+    waist twist), which is the way the head camera faces, so a miss can be named as the camera sees it."""
 
     box_xyz: tuple[float, float, float]
     bin_xy: tuple[float, float]
@@ -101,6 +102,8 @@ class GroundTruth(BaseModel):
     robot_fallen: bool
     joint_limit_violation: bool
     penetration: bool
+    robot_xy: tuple[float, float]
+    robot_yaw: float
 
 
 class Validation(BaseModel):
@@ -161,6 +164,33 @@ class TrainingExample(BaseModel):
     instruction: str
     feedback: str
     target: SkillTarget
+
+
+class TrainingSetSummary(BaseModel):
+    """The counts behind one training set, so every number shown carries its sample size (SPEC §2 rule 6)."""
+
+    round: int
+    episodes_scanned: int
+    demonstrations: int
+    accepted: int
+    rejected: int
+    unfinished: int
+    rejected_by: dict[str, int]
+    empty_dev_episodes: int
+    examples: int
+
+
+class ReplayFailure(BaseModel):
+    episode_id: str
+    reason: str
+
+
+class ReplayReport(BaseModel):
+    """`reproduced` out of `replayed` accepted episodes, with why each of the others failed."""
+
+    replayed: int
+    reproduced: int
+    failures: list[ReplayFailure]
 
 
 class EvaluationResult(BaseModel):

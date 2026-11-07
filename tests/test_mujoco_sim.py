@@ -252,7 +252,7 @@ def test_a_box_pushed_into_the_table_is_flagged(sim: MujocoSim) -> None:
     sim.execute(SkillCall(skill="reobserve"))
     gt = sim.ground_truth()
     assert gt.penetration
-    assert validate(gt).reason == "objects penetrated each other"
+    assert "penetration" in validate(gt).reason.split("; ")
 
 
 def test_a_shoved_robot_is_flagged_as_fallen(sim: MujocoSim) -> None:
@@ -260,7 +260,7 @@ def test_a_shoved_robot_is_flagged_as_fallen(sim: MujocoSim) -> None:
     _wait(sim, 2.0)
     gt = sim.ground_truth()
     assert gt.robot_fallen
-    assert validate(gt).reason == "robot fell"
+    assert validate(gt).reason.split("; ")[0] == "robot fell"
 
 
 def test_joints_count_as_past_their_range_only_beyond_the_tolerance(sim: MujocoSim) -> None:
@@ -279,7 +279,7 @@ def test_an_arm_forced_past_its_joint_range_is_flagged(sim: MujocoSim) -> None:
     sim.execute(SkillCall(skill="reobserve"))
     gt = sim.ground_truth()
     assert gt.joint_limit_violation
-    assert validate(gt).reason == "joint limit violated"
+    assert "joint limit violated" in validate(gt).reason.split("; ")
 
 
 def _state(sim: MujocoSim) -> tuple[object, ...]:
@@ -371,7 +371,7 @@ def test_a_robot_shoved_while_walking_is_flagged_as_fallen(blind_sim: MujocoSim)
     _wait(blind_sim, 1.0)
     gt = blind_sim.ground_truth()
     assert gt.robot_fallen
-    assert validate(gt).reason == "robot fell"
+    assert "robot fell" in validate(gt).reason.split("; ")
 
 
 def test_the_scripted_policy_finds_a_bin_moved_mid_carry(blind_sim: MujocoSim) -> None:
@@ -518,3 +518,13 @@ def test_moving_the_bin_is_refused_while_the_box_is_in_it(sim: MujocoSim) -> Non
     assert before.box_on_bin_floor
     assert not sim.perturb(Perturbation(kind="move_bin", seed=99))
     assert sim.ground_truth() == before
+
+
+def test_ground_truth_follows_the_robots_floor_pose_and_heading(blind_sim: MujocoSim) -> None:
+    start = blind_sim.ground_truth()
+    assert start.robot_xy == pytest.approx((0.0, 0.0), abs=0.03) and start.robot_yaw == pytest.approx(0.0, abs=0.05)
+    assert blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30})).ok
+    assert blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90})).ok
+    moved = blind_sim.ground_truth()
+    assert moved.robot_xy == pytest.approx((-0.30, 0.0), abs=0.05)
+    assert math.degrees(moved.robot_yaw) == pytest.approx(90, abs=5)

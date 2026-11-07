@@ -13,6 +13,7 @@ from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, PLACE_X, FakeSim
 from isaacs_mom.teacher import choose_scenes
+from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator import validate
 from isaacs_mom.validator.training import build_training_set, training_examples
 
@@ -253,7 +254,13 @@ def test_training_set_takes_only_accepted_teacher_steps_from_dev(tmp_path: Path)
 
 
 def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
-    results = run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=2, dev_trials=2)
+    calls: list[object] = []
+
+    def fake_argon(events: EventLog) -> Argon:
+        return Argon(events, generate=lambda parts: calls.append(parts) or '{"done": true}')
+
+    results = run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=2, dev_trials=2, make_argon=fake_argon)
+    assert calls  # the teacher ran, on the fake: no live Gemini call even with a key in .env
     assert [r.round for r in results] == [0, 1]
     assert all(r.n == len(heldout_seeds()) for r in results)
     event_types = {json.loads(line)["type"] for line in (tmp_path / "events.jsonl").read_text().splitlines()}
@@ -288,3 +295,13 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
     assert examples and all(type(e.target) is SkillTarget for e in examples)
     lines = build_training_set(tmp_path, 1).read_text().splitlines()
     assert lines and all("reason" not in json.loads(line)["target"] for line in lines)
+
+
+def test_fake_ground_truth_follows_the_robots_floor_pose_and_heading() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    assert sim.ground_truth().robot_xy == (0.0, 0.0) and sim.ground_truth().robot_yaw == 0.0
+    assert sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30})).ok
+    assert sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90})).ok
+    gt = sim.ground_truth()
+    assert gt.robot_xy == pytest.approx((-0.30, 0.0)) and gt.robot_yaw == pytest.approx(math.pi / 2)

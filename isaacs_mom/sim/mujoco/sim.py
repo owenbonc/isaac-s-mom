@@ -116,6 +116,7 @@ class MujocoSim:
         self._box_dadr = self.model.jnt_dofadr[self.model.joint("box_free").id]
         self._bin = self.model.body("bin").mocapid[0]
         self._box_geom = self.model.geom("box").id
+        self._torso = self.model.body("torso_link").id
         self._table_top = self.model.geom("table_top").id
         self._hand_pads = {self.model.geom(f"{side}_hand_pad").id for side in ("left", "right")}
         self._bin_geoms = {g for g in range(self.model.ngeom) if self.model.geom_bodyid[g] == self.model.body("bin").id}
@@ -190,6 +191,8 @@ class MujocoSim:
             robot_fallen=self._fallen,
             joint_limit_violation=self._limit_violated,
             penetration=self._penetrated,
+            robot_xy=(float(d.xpos[self.robot.pelvis][0]), float(d.xpos[self.robot.pelvis][1])),
+            robot_yaw=self._torso_yaw(),
         )
 
     def perturb(self, perturbation: Perturbation) -> bool:
@@ -387,6 +390,10 @@ class MujocoSim:
     def _drive(self) -> None:
         command = self.walker.command_to(self.data, self.goal_xy, self.goal_yaw, WALK_SPEED_M_S, TURN_RATE_RAD_S)
         self.walker.act(self.data, command)
+
+    def _torso_yaw(self) -> float:
+        rot = self.data.xmat[self._torso].reshape(3, 3)
+        return float(np.arctan2(rot[1, 0], rot[0, 0]))
 
     def joints_past_limits(self) -> list[str]:
         """The hinge joints more than JOINT_LIMIT_TOL_RAD past their range right now."""

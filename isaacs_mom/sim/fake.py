@@ -111,6 +111,8 @@ class FakeSim:
             robot_fallen=False,
             joint_limit_violation=False,
             penetration=False,
+            robot_xy=(float(self.xy[0]), float(self.xy[1])),
+            robot_yaw=float(self.heading),
         )
 
     def perturb(self, perturbation: Perturbation) -> bool:
