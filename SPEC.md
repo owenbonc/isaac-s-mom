@@ -66,6 +66,15 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 6. Replay every accepted episode of the run (`replay_accepted`) after the loop's results are saved.
 7. If time allows, B1: the same budget of randomly chosen seeds demonstrated by the teacher, fine-tuned and evaluated the same way.
 
+### 3.7 Task generator (workstream 1, extension)
+The vision: a person types what the robot should learn, and an agent generates the success rule and the scene assets the student trains on, so the teacher can demonstrate it and the validator can judge it. For the hackathon the loop teaches one task; this is a prototype off the critical path.
+- `generate_task(instruction) -> TaskSpec | Refusal` in `isaacs_mom/tasks/`. `TaskSpec{name, instruction, scene, success, perturbations}` covers a narrow, physically checked set of objects and placements: boxes the hug can hold, and a bin, shelf or platform the existing `place` can reach. Each spec is checked against what the G1 can reach and lift with the existing skills, as `TaskConfig` does.
+- `success` is declarative data over named facts (the object inside a region; resting on top of another, in contact; at rest for 1 s; the robot not fallen), evaluated by our code with stated tolerances, never code the model writes. `perturbations` declares which object may move mid-run, and where to.
+- Argon proposes the spec as JSON, parsed at the boundary. Anything outside the schema, an unsupported object, a setting past the robot's limits, a start where objects overlap or are unstable, or a rule already true at reset is refused with a reason.
+- Rule 1: scene and rule data reach only the validator and orchestrator side. The generator's Argon call is separate from the teacher's, its output never enters the teacher's or the student's prompts, and its calls count against `ARGON_CALL_BUDGET` (rule 5).
+- A hash of the spec is part of `sim_version`, so a replay runs on exactly the same task.
+- The default task, `validate()` and `contracts.py` stay unchanged until one example works end to end: instruction → validated spec → runnable scene → correct verdicts on a scripted success and a scripted failure → a reproducible replay. Joining generated rules to `validate()` is then agreed with workstream 3. Scanned meshes, arbitrary objects and new motion parameters are later (§9).
+
 ## 4. Contracts
 
 All shared types live in `isaacs_mom/contracts.py` (pydantic v2). A change to a contract updates every caller in the same PR.
@@ -111,6 +120,7 @@ isaacs_mom/teacher/          Argon teacher (WS2)
 isaacs_mom/validator/        validator, recorder, training sets, replay (WS3)
 isaacs_mom/student/          SmolVLM2 inference and fine-tuning (WS4)
 isaacs_mom/orchestrator/     loop, CLI, demo, dashboard (WS5)
+isaacs_mom/tasks/            task generator (WS1, extension, §3.7)
 configs/                     heldout_seeds.json, instructions
 docs/                        one-page summary, pitch
 ```
@@ -126,6 +136,7 @@ docs/                        one-page summary, pitch
 7. **Rules.** Tests prove rules 1, 2, 3 and 7; the Argon budget stops calls at the cap.
 8. **Deliverables.** A continuous ≤ 1-minute video from the simulator showing perception next to actions and one unscripted change; the one-page PDF (user and problem, features, architecture, where each model runs with hardware and latency, limits, critical failure mode, safety); the 5-minute pitch.
 9. `scripts/verify.sh` prints READY on `phase-1` and CI is green.
+10. **Evaluation report.** `uv run mom eval` runs the base (`ckpt-r0`) and the fine-tuned checkpoint, student only (no teacher takeover), on the sealed held-out seeds in three conditions: `across_room` (the training distribution); the same seeds on `near_bin` and `far_bin` (bin distances the training task never uses); and `across_room` with `move_bin` right after the student's first successful `lift` (read from ground truth on the orchestrator side, rule 1). Each condition reports successes out of (n − errored). A refused move ("not applied") and an episode that never lifts ("trigger not reached") are shown apart and don't count as adaptation tests. Each episode saves its checkpoint, task, `sim_version`, seed, frames, skill calls, decision latency with its device, perturbations and verdict, and latency is compared against a stated edge-device budget. Reported only: the loop's stop rule (§3.6) stays on `across_room` held-out.
 
 ## 7. Timeline (London)
 
@@ -156,4 +167,4 @@ docs/                        one-page summary, pitch
 
 ## 9. Later phases (not built now)
 
-Joint-level student (behaviour cloning on recorded actions), Isaac GR00T fine-tuning on the exported dataset, failure-category curricula with ablations, more tasks and embodiments, sim-to-real.
+Joint-level student (behaviour cloning on recorded actions), Isaac GR00T fine-tuning on the exported dataset, failure-category curricula with ablations, more tasks and embodiments beyond the task generator's prototype (§3.7), scanned-in meshes and arbitrary objects, sim-to-real.
