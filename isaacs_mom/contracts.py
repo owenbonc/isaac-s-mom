@@ -4,9 +4,11 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, Field, field_validator
 
-Skill = Literal["approach_left", "approach_right", "push_forward", "retract", "reobserve"]
+Skill = Literal["reach_left", "reach_right", "turn_left", "turn_right", "hug", "lift", "place", "reobserve"]
 SKILLS: tuple[Skill, ...] = get_args(Skill)
 MAX_DISTANCE_CM = 20.0
+MAX_ANGLE_DEG = 45.0
+PARAM_LIMITS = {"distance_cm": MAX_DISTANCE_CM, "angle_deg": MAX_ANGLE_DEG}
 
 Controller = Literal["student", "teacher"]
 Split = Literal["dev", "heldout"]
@@ -32,13 +34,11 @@ class SkillCall(BaseModel):
 
     @field_validator("params")
     @classmethod
-    def _only_distance(cls, params: dict[str, float]) -> dict[str, float]:
-        unknown = set(params) - {"distance_cm"}
+    def _known_and_clamped(cls, params: dict[str, float]) -> dict[str, float]:
+        unknown = set(params) - set(PARAM_LIMITS)
         if unknown:
             raise ValueError(f"unknown skill params: {sorted(unknown)}")
-        if "distance_cm" in params:
-            params["distance_cm"] = min(max(params["distance_cm"], 0.0), MAX_DISTANCE_CM)
-        return params
+        return {k: min(max(v, 0.0), PARAM_LIMITS[k]) for k, v in params.items()}
 
 
 class Observation(BaseModel):
@@ -59,17 +59,23 @@ class ExecResult(BaseModel):
 
 
 class Perturbation(BaseModel):
-    kind: Literal["move_block", "move_target"]
+    kind: Literal["move_box", "move_bin"]
     seed: int
 
 
 class GroundTruth(BaseModel):
-    block_xy: tuple[float, float]
-    target_xy: tuple[float, float]
-    target_radius: float
-    block_at_rest: bool
+    """Simulator facts for the validator and orchestrator only (SPEC §2 rule 1). The bin is square, `bin_inner_half`
+    wide either side of its centre and turned by `bin_yaw`; the box is in it when it touches the bin's floor."""
+
+    box_xyz: tuple[float, float, float]
+    bin_xy: tuple[float, float]
+    bin_yaw: float
+    bin_inner_half: float
+    box_on_bin_floor: bool
+    box_at_rest: bool
+    robot_fallen: bool
     joint_limit_violation: bool
-    table_penetration: bool
+    penetration: bool
 
 
 class Validation(BaseModel):

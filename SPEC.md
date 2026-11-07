@@ -22,10 +22,11 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 
 ### 3.1 Simulation (workstream 1)
 - **MuJoCo** (organisers' Option A), running in-process on every teammate's Mac. Modal is used only for fine-tuning.
-- Robot: Unitree G1 from MuJoCo Menagerie with its floating base removed (base fixed, disclosed as a constrained humanoid manipulation demo). Fallback if the G1 arm push is unreliable by Sat 19:00: Franka Panda from Menagerie. A table, a coloured block, a target zone.
+- Task: hug a big box (30 × 25 × 25 cm, 0.8 kg) off a table with both arms, lift it, twist to the bin beside the robot and drop it in.
+- Robot: Unitree G1 (29 DoF) from MuJoCo Menagerie, free-standing: it keeps its floating base and balances on its own feet under joint-position control, in Unitree's soft-knee standing pose. It does not walk; it reaches the bin by twisting at the waist. Collision pads on the hands, since Menagerie's hands are visual only. A table, an orange box, a green bin on the robot's left.
 - One head-mounted RGB camera, 320×240, rendered with `mujoco.Renderer`.
-- Skills (whitelist): `approach_left`, `approach_right`, `push_forward`, `retract`, `reobserve`. Each takes optional `params` (`distance_cm`, clamped 0–20). IK plus a joint-position controller turns a skill into simulator steps.
-- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (block and target positions) is a pure function of the seed.
+- Skills (whitelist): `reach_left`, `reach_right` (slide the arms' working point sideways, `distance_cm` 0–20, default 5, within ±12 cm), `turn_left`, `turn_right` (twist the waist, `angle_deg` 0–45, default 30, within ±150°), `hug`, `lift`, `place` (reach out over the bin, lower, let go, settle 2.5 s), `reobserve`. Damped least-squares IK plus a joint-position controller turns a skill into simulator steps; a skill whose IK target is out of reach, or that would pass a reach or twist limit, is refused with a reason and nothing moves (rule 7).
+- `MujocoSim` implements `TruthSim` (§4.1). Scene layout (box position on the table, bin position and heading beside the robot) is a pure function of the seed.
 - `FakeSim` (foundation) implements the same protocol with drawn frames and trivial physics so every other workstream and CI build without the real scene.
 - The demo video is recorded from the rendered frames (head camera next to a third-person camera), not screen capture.
 
@@ -41,7 +42,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - If Argon is unreachable or over budget, the robot holds and re-observes, and the run reports it.
 
 ### 3.4 Validator and recorder (workstream 3)
-- `validate_episode(episode_id) -> Validation` from simulator ground truth: block inside the target zone, at rest for 1 s of sim time, no joint-limit violation, no table penetration.
+- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration.
 - Recorder writes `runs/<run_id>/episodes/<episode_id>/` (manifest §4.2, frames as JPEG, actions as `.npy`) and `runs/<run_id>/events.jsonl`.
 - `build_training_set(run_id, round) -> path` applies rules 2 and 3.
 - `replay(episode_id)` re-executes stored actions from the stored seed and reports whether the final state validates.
@@ -50,7 +51,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - One command, `uv run mom run`, executes the loop (§3.6) and writes events.
 - Dashboard (FastAPI plus one HTML page, server-sent events): live head camera, the current controller (student checkpoint or teacher), each decision with its reasoning, validator verdicts, the success-rate table per round, and where each model runs with its measured latency.
 - `uv run mom demo --ckpt <id> --seed <s> --perturb-at <step>` runs the judged single take: student on an unseen scene, a perturbation mid-run, re-observe, finish.
-- Perturbations (`move_block`, `move_target`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame.
+- Perturbations (`move_box`, `move_bin`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame.
 
 ### 3.6 The teach → fine-tune loop
 1. Evaluate the current student checkpoint on the 20 held-out seeds (success rate, n=20).
@@ -79,8 +80,8 @@ class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
 ```
 - `Observation{episode_id, step, sim_time, head_rgb_jpeg: bytes, joint_state: list[float]}`
 - `SkillCall{skill: Skill, params: dict[str, float]}`; `ExecResult{ok, error, executed_actions: list[list[float]], timestamps: list[float]}`
-- `Perturbation{kind: move_block | move_target, seed}`
-- `GroundTruth{block_xy, target_xy, target_radius, block_at_rest, joint_limit_violation, table_penetration}`
+- `Perturbation{kind: move_box | move_bin, seed}`
+- `GroundTruth{box_xyz, bin_xy, bin_yaw, bin_inner_half, box_on_bin_floor, box_at_rest, robot_fallen, joint_limit_violation, penetration}`
 - `Validation{task_success, physics_valid, reason}` is computed by the validator from `GroundTruth`.
 
 ### 4.2 Episode manifest (`manifest.json`)
@@ -111,7 +112,7 @@ docs/                        one-page summary, pitch
 
 ## 6. Acceptance criteria — Phase 1 (the hackathon)
 
-1. **Gate A.** On a Mac, `MujocoSim.reset(seed)` → `observe()` returns a head frame that changes when the block moves; `execute(push_forward)` moves the G1 arm with physics and pushes the block; the same seed reproduces the same scene.
+1. **Gate A.** On a Mac, `MujocoSim.reset(seed)` → `observe()` returns a head frame that changes when the box moves; `hug` then `lift` raise the box off the table with physics while the G1 stays on its feet; the same seed reproduces the same scene.
 2. **Gate B.** The student reads a real frame and returns a whitelisted skill that the simulator executes; its latency is logged.
 3. **Gate C.** The validator gives a correct verdict on one success and one failure; the episode is saved; `replay` reproduces it.
 4. **Gate D.** The teacher diagnoses a genuine student failure and completes the task; a perturbation mid-demonstration changes its next decision, traced to the new frame.
@@ -126,7 +127,7 @@ docs/                        one-page summary, pitch
 | By | Done |
 |---|---|
 | Sat 17:00 | Foundation merged: contracts, sim protocols, FakeSim, skeleton loop on FakeSim, verify, CI |
-| Sat 19:00 | Gate A (or switch the robot to Franka Panda) |
+| Sat 19:00 | Gate A |
 | Sat 21:00 | Gate B |
 | Sat 23:00 | Gate C |
 | Sun 03:00 | Gate D |
@@ -140,7 +141,7 @@ docs/                        one-page summary, pitch
 
 | Risk | Fallback | Decide by |
 |---|---|---|
-| G1 arm push unreliable in MuJoCo | Franka Panda from Menagerie, same skills | Sat 19:00 |
+| G1 hug slips or the robot tips while twisting | Lighter box, smaller twist range (the scripted policy succeeds on 36 of 40 seeds now) | Sat 21:00 |
 | Rendering on CI | `MUJOCO_GL=osmesa`; real-scene tests skip with a reason when no GL is available | Sat 17:00 |
 | SmolVLM2 too weak to fine-tune usefully | Report the measured result honestly; demo leans on the validated data pipeline | Sun 06:00 |
 | Argon latency or tool mismatch | Fewer, coarser skills per call | Sat 23:00 |

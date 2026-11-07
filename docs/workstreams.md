@@ -5,12 +5,13 @@ Read `AGENTS.md` and `SPEC.md` first. Each workstream owns its folder; everythin
 Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run --sim fake --rounds 1`. Agents in a worktree run `scripts/agent-setup.sh origin/phase-1` instead.
 
 ## 1. Simulation and robot — `isaacs_mom/sim/mujoco/`
-- Replace `MujocoSim` (stub) with a real implementation of `TruthSim` (`isaacs_mom/sim/base.py`, SPEC §3.1, §4.1).
-- Unitree G1 from MuJoCo Menagerie, floating base removed; table, red block, green target zone; head camera 320×240; a third-person camera for the video.
-- Skills: `approach_left`, `approach_right`, `push_forward`, `retract`, `reobserve`, `distance_cm` 0–20 (already clamped by `SkillCall`). IK plus joint-position control; clamp to joint limits and report violations in `ExecResult` (rule 7).
-- Layout is a pure function of the seed; `perturb` moves the block or target from `Perturbation.seed`.
-- `ground_truth()` fills every `GroundTruth` field, including `block_at_rest` over the last 1 s of sim time.
-- Done: SPEC §6 criterion 1 (Gate A) by Sat 19:00, else switch to Franka Panda and tell Owen. Tests run headless (`MUJOCO_GL=osmesa` in CI).
+- `MujocoSim` (`sim.py`) implements `TruthSim` (`isaacs_mom/sim/base.py`, SPEC §3.1, §4.1) over `scene.py`, with arm IK and motion in `control.py`.
+- Free-standing Unitree G1 from MuJoCo Menagerie (vendored in `assets/`); table, orange box, green bin beside the robot; head camera 320×240; a third-person camera for the video.
+- Skills: `reach_left`, `reach_right`, `turn_left`, `turn_right`, `hug`, `lift`, `place`, `reobserve` (`distance_cm` 0–20, `angle_deg` 0–45, clamped by `SkillCall`). Out-of-reach or past-the-limit skills are refused with a reason and nothing moves (rule 7).
+- Layout is a pure function of the seed; `perturb` moves the box or the bin from `Perturbation.seed`.
+- `ground_truth()` fills every `GroundTruth` field, including `box_at_rest` over the last 1 s of sim time.
+- See it: `uv run python -m isaacs_mom.sim.mujoco.preview --seed 3 --gif runs/seed3.gif` films a scripted episode; `--viewer` opens MuJoCo's viewer.
+- Done: SPEC §6 criterion 1 (Gate A), covered by `tests/test_mujoco_sim.py`. Tests run headless (`MUJOCO_GL=osmesa` in CI).
 
 ## 2. Argon teacher — `isaacs_mom/teacher/`
 - Replace `diagnose`, `choose_scenes` and `ArgonPolicy.act` (SPEC §3.3). Model `gemini-4-argon` via the `google-genai` SDK; key from `GEMINI_API_KEY` in `.env`.
@@ -20,7 +21,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 
 ## 3. Validator and dataset — `isaacs_mom/validator/`
 - Owns `rules.validate`, `Recorder`, `training.build_training_set` (working foundation versions with tests in `tests/test_foundation.py`). Add `replay(sim, manifest_path) -> bool` and set `replay_valid` in the manifest.
-- Keep rules 2, 3 and 4 tested; tighten `validate` for the real scene (block at rest, contacts) once workstream 1 lands.
+- Keep rules 2, 3 and 4 tested. `validate` now reads the box-in-bin facts from `GroundTruth`; tighten it against real MuJoCo runs.
 - Done: SPEC §6 criterion 3 (Gate C).
 
 ## 4. Student VLM and fine-tuning — `isaacs_mom/student/`
