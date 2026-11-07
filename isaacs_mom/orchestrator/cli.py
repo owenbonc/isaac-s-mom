@@ -45,7 +45,9 @@ def main() -> None:
         return argons[-1]
 
     run_dir = Path("runs") / args.run_id
-    results = run_loop(make_sim(args.sim, args.task), run_dir, args.run_id, max_rounds=args.rounds, make_argon=make_argon)
+    results = run_loop(
+        make_sim(args.sim, args.task), run_dir, args.run_id, max_rounds=args.rounds, make_argon=make_argon
+    )
     for r in results:
         print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")
     print(argons[0].summary() + (" (stub teacher)" if teacher == "stub" else ""))
