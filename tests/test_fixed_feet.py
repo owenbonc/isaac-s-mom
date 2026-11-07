@@ -239,7 +239,7 @@ def test_a_box_dropped_in_the_bin_is_accepted_only_once_at_rest(sim: MujocoSim) 
     assert validate(gt).accepted
 
 
-@pytest.mark.parametrize("depth", [0.045, 0.05])  # shallower, the contact pushes it out before the first 20 ms tick
+@pytest.mark.parametrize("depth", [0.035, 0.045, 0.05])  # read after a tick, at ~75% of the depth
 def test_a_box_pushed_into_the_table_is_flagged(sim: MujocoSim, depth: float) -> None:
     start = sim.ground_truth().box_xyz
     _put_box(sim, (start[0], start[1], start[2] - depth))
