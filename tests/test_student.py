@@ -6,33 +6,34 @@ from pathlib import Path
 import pytest
 
 from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget, TrainingExample
+from isaacs_mom.orchestrator.loop import INSTRUCTION
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, resolve_adapter
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
 from isaacs_mom.student.tuning import finetune
 
-PUSH_5 = SkillCall(skill="push_forward", params={"distance_cm": 5})
+REACH_5 = SkillCall(skill="reach_left", params={"distance_cm": 5})
 
 
 @pytest.mark.parametrize(
     "text",
     [
-        '{"skill": "push_forward", "params": {"distance_cm": 5}}',
-        '```json\n{"skill": "push_forward", "params": {"distance_cm": 5}}\n```',
-        'Plan {not json} then {"skill": "push_forward", "params": {"distance_cm": 5}} since the block is ahead.',
+        '{"skill": "reach_left", "params": {"distance_cm": 5}}',
+        '```json\n{"skill": "reach_left", "params": {"distance_cm": 5}}\n```',
+        'Plan {not json} then {"skill": "reach_left", "params": {"distance_cm": 5}} since the box is to the left.',
     ],
 )
 def test_a_reply_containing_a_skill_call_parses(text: str) -> None:
-    assert parse_reply(text) == PUSH_5
+    assert parse_reply(text) == REACH_5
 
 
 @pytest.mark.parametrize(
     "text",
     [
         "",
-        "push forward a bit",
+        "reach left a bit",
         '{"skill": "fly"}',
-        '{"skill": "push_forward", "params": {"torque": 1}}',
+        '{"skill": "reach_left", "params": {"torque": 1}}',
         '{"skill": ',
         "[1, 2]",
     ],
@@ -45,30 +46,30 @@ def test_a_reply_without_a_whitelisted_skill_call_is_unparseable(text: str) -> N
 @pytest.mark.parametrize("distance", ["NaN", '"nan"', "Infinity", "-Infinity"])
 def test_a_non_finite_distance_is_unparseable(distance: str) -> None:
     with pytest.raises(UnparseableReply):
-        parse_reply(f'{{"skill": "push_forward", "params": {{"distance_cm": {distance}}}}}')
+        parse_reply(f'{{"skill": "reach_left", "params": {{"distance_cm": {distance}}}}}')
 
 
 def test_a_reason_in_the_reply_is_dropped() -> None:
-    assert parse_reply('{"skill": "retract", "params": {}, "reason": "x"}').reason == ""
+    assert parse_reply('{"skill": "hug", "params": {}, "reason": "x"}').reason == ""
 
 
 def test_reply_distance_is_clamped_to_the_skill_limit() -> None:
-    assert parse_reply('{"skill": "push_forward", "params": {"distance_cm": 90}}').params == {"distance_cm": 20.0}
+    assert parse_reply('{"skill": "reach_left", "params": {"distance_cm": 90}}').params == {"distance_cm": 20.0}
 
 
 def test_training_target_round_trips_through_the_parser() -> None:
-    call = SkillCall(skill="approach_left", params={"distance_cm": 7.26})
-    assert parse_reply(format_target(call)) == SkillCall(skill="approach_left", params={"distance_cm": 7.3})
+    call = SkillCall(skill="reach_right", params={"distance_cm": 7.26})
+    assert parse_reply(format_target(call)) == SkillCall(skill="reach_right", params={"distance_cm": 7.3})
 
 
 def test_training_target_has_no_reason() -> None:
-    assert format_target(SkillTarget(skill="retract")) == '{"skill":"retract","params":{}}'
+    assert format_target(SkillTarget(skill="hug")) == '{"skill":"hug","params":{}}'
 
 
 def test_prompt_names_the_task_the_last_result_and_every_skill() -> None:
-    text = prompt_text("Push the red block into the green target zone.", "push_forward: ok")
-    assert "Push the red block into the green target zone." in text
-    assert "push_forward: ok" in text
+    text = prompt_text(INSTRUCTION, "reach_left: ok")
+    assert INSTRUCTION in text
+    assert "reach_left: ok" in text
     assert all(skill in text for skill in SKILLS)
 
 
@@ -107,50 +108,50 @@ def scripted(*replies: str) -> Callable[[bytes, str, str], str]:
 
 
 def test_reply_becomes_the_skill_call_and_its_latency_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    policy = StudentPolicy(generate=scripted('{"skill": "approach_left", "params": {"distance_cm": 4}}'))
+    policy = StudentPolicy(generate=scripted('{"skill": "reach_right", "params": {"distance_cm": 4}}'))
     with caplog.at_level(logging.INFO, logger="isaacs_mom.student"):
-        call = policy.act(frame(), "push", "start")
-    assert call == SkillCall(skill="approach_left", params={"distance_cm": 4})
+        call = policy.act(frame(), "hug", "start")
+    assert call == SkillCall(skill="reach_right", params={"distance_cm": 4})
     assert policy.last_latency_ms >= 0
     assert " ms" in caplog.text
 
 
 def test_unparseable_reply_reobserves_and_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    policy = StudentPolicy(generate=scripted("I would push the block"))
+    policy = StudentPolicy(generate=scripted("I would hug the box"))
     with caplog.at_level(logging.WARNING, logger="isaacs_mom.student"):
-        assert policy.act(frame(), "push", "start") == SkillCall(skill="reobserve")
+        assert policy.act(frame(), "hug", "start") == SkillCall(skill="reobserve")
     assert "unparseable" in caplog.text
 
 
 def test_non_finite_reply_reobserves_and_is_logged(caplog: pytest.LogCaptureFixture) -> None:
-    policy = StudentPolicy(generate=scripted('{"skill": "push_forward", "params": {"distance_cm": NaN}}'))
+    policy = StudentPolicy(generate=scripted('{"skill": "reach_left", "params": {"distance_cm": NaN}}'))
     with caplog.at_level(logging.WARNING, logger="isaacs_mom.student"):
-        assert policy.act(frame(), "push", "start") == SkillCall(skill="reobserve")
+        assert policy.act(frame(), "hug", "start") == SkillCall(skill="reobserve")
     assert "unparseable" in caplog.text
 
 
 def test_second_reobserve_in_a_row_means_done() -> None:
     policy = StudentPolicy(generate=scripted(REOBSERVE, REOBSERVE))
-    assert policy.act(frame(0), "push", "start") == SkillCall(skill="reobserve")
-    assert policy.act(frame(1), "push", "reobserve: ok") is None
+    assert policy.act(frame(0), "hug", "start") == SkillCall(skill="reobserve")
+    assert policy.act(frame(1), "hug", "reobserve: ok") is None
 
 
 def test_an_unparseable_reply_breaks_a_reobserve_streak() -> None:
     policy = StudentPolicy(generate=scripted(REOBSERVE, "??", REOBSERVE))
-    policy.act(frame(0), "push", "start")
-    policy.act(frame(1), "push", "reobserve: ok")
-    assert policy.act(frame(2), "push", "reobserve: ok") == SkillCall(skill="reobserve")
+    policy.act(frame(0), "hug", "start")
+    policy.act(frame(1), "hug", "reobserve: ok")
+    assert policy.act(frame(2), "hug", "reobserve: ok") == SkillCall(skill="reobserve")
 
 
 def test_unparseable_replies_never_end_the_episode() -> None:
     policy = StudentPolicy(generate=scripted("??", "??", "??"))
-    assert all(policy.act(frame(i), "push", "start") == SkillCall(skill="reobserve") for i in range(3))
+    assert all(policy.act(frame(i), "hug", "start") == SkillCall(skill="reobserve") for i in range(3))
 
 
 def test_reobserve_streak_starts_over_in_a_new_episode() -> None:
     policy = StudentPolicy(generate=scripted(REOBSERVE, REOBSERVE))
-    policy.act(frame(0, "ep-1"), "push", "start")
-    assert policy.act(frame(0, "ep-2"), "push", "start") == SkillCall(skill="reobserve")
+    policy.act(frame(0, "ep-1"), "hug", "start")
+    assert policy.act(frame(0, "ep-2"), "hug", "start") == SkillCall(skill="reobserve")
 
 
 def test_missing_checkpoint_fails_before_any_model_call(tmp_path: Path) -> None:
@@ -171,7 +172,7 @@ def training_set(runs: Path, rows: list[TrainingExample], run_id: str = "run-a")
 def example(tmp_path: Path, target: SkillTarget, feedback: str = "start") -> TrainingExample:
     image = tmp_path / "0000.jpg"
     image.write_bytes(b"frame-bytes")
-    return TrainingExample(image=str(image), instruction="push", feedback=feedback, target=target)
+    return TrainingExample(image=str(image), instruction="hug", feedback=feedback, target=target)
 
 
 def test_empty_training_set_keeps_the_previous_checkpoint(tmp_path: Path) -> None:
@@ -184,8 +185,8 @@ def test_empty_training_set_keeps_the_previous_checkpoint(tmp_path: Path) -> Non
 
 def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: Path) -> None:
     rows = [
-        example(tmp_path, SkillTarget(skill="push_forward", params={"distance_cm": 12.34})),
-        example(tmp_path, SkillTarget(skill="reobserve"), feedback="push_forward: ok"),
+        example(tmp_path, SkillTarget(skill="reach_left", params={"distance_cm": 12.34})),
+        example(tmp_path, SkillTarget(skill="reobserve"), feedback="reach_left: ok"),
     ]
     shipped_examples: list[dict[str, str]] = []
     shipped_images: dict[str, bytes] = {}
@@ -198,7 +199,7 @@ def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: P
     assert finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=trainer) == "run-a/ckpt-r1"
     assert list(shipped_images.values()) == [b"frame-bytes"]
     assert [e["target"] for e in shipped_examples] == [
-        '{"skill":"push_forward","params":{"distance_cm":12.3}}',
+        '{"skill":"reach_left","params":{"distance_cm":12.3}}',
         '{"skill":"reobserve","params":{}}',
     ]
     assert {e["image"] for e in shipped_examples} == set(shipped_images)
@@ -209,7 +210,7 @@ def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: P
 
 
 def test_two_runs_keep_their_own_round_one_checkpoints(tmp_path: Path) -> None:
-    rows = [example(tmp_path, SkillTarget(skill="retract"))]
+    rows = [example(tmp_path, SkillTarget(skill="hug"))]
 
     def trainer_for(run_id: str) -> Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]:
         return lambda examples, images: {**ADAPTER, "adapter_model.safetensors": run_id.encode()}
@@ -224,7 +225,7 @@ def test_two_runs_keep_their_own_round_one_checkpoints(tmp_path: Path) -> None:
 
 
 def test_trainer_without_adapter_weights_leaves_no_checkpoint(tmp_path: Path) -> None:
-    rows = [example(tmp_path, SkillTarget(skill="retract"))]
+    rows = [example(tmp_path, SkillTarget(skill="hug"))]
 
     def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
         return {"adapter_config.json": b"{}"}
@@ -235,7 +236,7 @@ def test_trainer_without_adapter_weights_leaves_no_checkpoint(tmp_path: Path) ->
 
 
 def test_rerunning_a_round_replaces_the_old_checkpoint(tmp_path: Path) -> None:
-    rows = [example(tmp_path, SkillTarget(skill="retract"))]
+    rows = [example(tmp_path, SkillTarget(skill="hug"))]
     checkpoints = tmp_path / "run-a" / "checkpoints"
 
     def first(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
@@ -253,7 +254,7 @@ def test_rerunning_a_round_replaces_the_old_checkpoint(tmp_path: Path) -> None:
 
 
 def test_nested_trainer_file_name_is_rejected_before_anything_is_written(tmp_path: Path) -> None:
-    rows = [example(tmp_path, SkillTarget(skill="retract"))]
+    rows = [example(tmp_path, SkillTarget(skill="hug"))]
 
     def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
         return {**ADAPTER, "sub/x.bin": b"x"}

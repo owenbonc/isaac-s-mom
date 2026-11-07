@@ -1,0 +1,1 @@
+Unitree G1 (29 DoF) from MuJoCo Menagerie `unitree_g1/`, commit `98a70c569c4c1b6da467a20012f766ee1f8dc521`, BSD-3-Clause (see `LICENSE`). Only `g1.xml` and the meshes it references are copied; `scene.py` edits the model in code rather than here.
