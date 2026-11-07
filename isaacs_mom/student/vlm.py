@@ -59,9 +59,25 @@ def reply(model: Any, processor: Any, device: str, jpeg: bytes, instruction: str
     return processor.batch_decode(out[:, inputs["input_ids"].shape[1] :], skip_special_tokens=True)[0].strip()
 
 
-@lru_cache(maxsize=1)
+AdapterKey = tuple[Path, int, int] | None
+
+
+def cache_key(adapter: Path | None) -> AdapterKey:
+    """The adapter with its weights' mtime and size, so weights replaced in place load afresh."""
+    if adapter is None:
+        return None
+    stat = (adapter / "adapter_model.safetensors").stat()
+    return adapter, stat.st_mtime_ns, stat.st_size
+
+
 def generator(adapter: Path | None) -> Callable[[bytes, str, str], str]:
+    return _generator(cache_key(adapter))
+
+
+@lru_cache(maxsize=1)
+def _generator(key: AdapterKey) -> Callable[[bytes, str, str], str]:
     """Cached, because a policy is built per episode and loading the model takes seconds."""
+    adapter = key[0] if key else None
     device = pick_device()
     model = load_model(adapter, device)
     log.info("student model %s on %s, adapter %s", MODEL_ID, device, adapter)

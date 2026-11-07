@@ -117,6 +117,18 @@ def test_a_checkpoint_id_without_its_run_is_rejected(tmp_path: Path, checkpoint:
         resolve_adapter(checkpoint, tmp_path)
 
 
+def test_the_model_cache_key_changes_when_an_adapters_weights_are_rewritten(tmp_path: Path) -> None:
+    from isaacs_mom.student import vlm
+
+    weights = tmp_path / "adapter_model.safetensors"
+    weights.write_bytes(b"old")
+    before = vlm.cache_key(tmp_path)
+    assert vlm.cache_key(tmp_path) == before
+    weights.write_bytes(b"newer")
+    assert vlm.cache_key(tmp_path) != before
+    assert vlm.cache_key(None) is None
+
+
 REOBSERVE = '{"skill": "reobserve", "params": {}}'
 
 
