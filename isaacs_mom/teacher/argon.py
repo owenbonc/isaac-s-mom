@@ -25,7 +25,7 @@ MAX_WAIT_S = 120.0
 ENV_PATH = Path(__file__).resolve().parents[2] / ".env"
 
 Part = str | bytes  # text, or a JPEG from the head camera
-Purpose = Literal["act", "diagnose", "startup"]
+Purpose = Literal["act", "diagnose", "startup", "task"]
 Generate = Callable[[Purpose, list[Part]], str]
 
 

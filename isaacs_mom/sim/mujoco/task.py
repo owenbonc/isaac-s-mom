@@ -15,6 +15,8 @@ MAX_BOX_MASS_KG = 2.0
 MAX_BOX_OFFSET_M = 0.12  # the arms' sideways reach
 MIN_BIN_DISTANCE_M = 0.5  # a walking robot stops ~0.45 m short of the bin's centre to place
 TWIST_BIN_DISTANCE_M = (0.40, 0.50)  # a fixed-feet bin must sit where the twisted, outstretched arms put the box
+# Where `place` lands the box on a wall-less top every time: higher, it lands still between the open hands.
+PLATFORM_TOP_RANGE_M = (0.40, 0.45)
 
 
 @dataclass(frozen=True)
@@ -69,6 +71,7 @@ class TaskConfig:
     box_offset_m: float = 0.10  # the box starts within this of the table's centre line
     bin_distance_m: tuple[float, float] = (1.0, 1.4)
     bin_bearing_deg: tuple[float, float] = (75.0, 285.0)  # anticlockwise from straight ahead; the table is ahead
+    platform_top_m: float | None = None  # unset, the bin; set, a wall-less platform with its top this high
 
     def __post_init__(self) -> None:
         problems = []
@@ -92,6 +95,12 @@ class TaskConfig:
         left, right = self.bin_bearing_deg
         if not 0.0 < left <= right < 360.0:
             problems.append(f"bin bearing {self.bin_bearing_deg} must lie between 0 and 360 degrees, low to high")
+        if self.platform_top_m is not None:
+            lo, hi = PLATFORM_TOP_RANGE_M
+            if not lo <= self.platform_top_m <= hi:
+                problems.append(f"platform top {self.platform_top_m} m is outside the {lo}-{hi} m the drop lands on")
+            if not self.walking:
+                problems.append("a platform is measured only for walking tasks")
         if problems:
             raise ValueError(f"task {self.name!r}: " + "; ".join(problems))
 

@@ -53,6 +53,9 @@ def test_every_preset_lays_out_within_its_ranges(name: str) -> None:
         ({"bin_distance_m": (1.4, 1.0)}, "bin distance"),
         ({"bin_distance_m": (0.3, 0.6)}, "bin distance"),
         ({"bin_bearing_deg": (300.0, 60.0)}, "bin bearing"),
+        ({"platform_top_m": 0.50}, "platform top"),  # the box lands still between the open hands
+        ({"platform_top_m": 0.35}, "platform top"),
+        ({"walking": False, "bin_distance_m": (0.43, 0.45), "platform_top_m": 0.45}, "only for walking"),
     ],
 )
 def test_a_task_the_robot_cannot_do_is_refused(changes: dict[str, Any], complaint: str) -> None:
