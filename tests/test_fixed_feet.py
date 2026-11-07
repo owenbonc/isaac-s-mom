@@ -270,6 +270,26 @@ def _state(sim: MujocoSim) -> tuple[object, ...]:
     return sim.work_y, sim.waist, sim.closed, sim.lifted, sim.data.time, sim.data.ctrl.tolist()
 
 
+def _hug_and_lift(sim: MujocoSim) -> None:
+    box_y = sim.ground_truth().box_xyz[1]
+    for call in [
+        SkillCall(skill="reach_left", params={"distance_cm": box_y * 100}),
+        SkillCall(skill="hug"),
+        SkillCall(skill="lift"),
+    ]:
+        assert sim.execute(call).ok, call
+
+
+@pytest.mark.parametrize("skill", ["turn_left", "turn_right"])
+def test_a_twist_that_would_sweep_the_arms_into_the_box_is_refused_and_changes_nothing(
+    blind_sim: MujocoSim, skill: str
+) -> None:
+    before, qpos, qvel = _state(blind_sim), blind_sim.data.qpos.tobytes(), blind_sim.data.qvel.tobytes()
+    result = blind_sim.execute(SkillCall.model_validate({"skill": skill, "params": {"angle_deg": 30}}))
+    assert not result.ok and result.error and "sweep into the box" in result.error and not result.executed_actions
+    assert (_state(blind_sim), blind_sim.data.qpos.tobytes(), blind_sim.data.qvel.tobytes()) == (before, qpos, qvel)
+
+
 def test_a_turn_past_the_limit_is_refused_and_changes_nothing(blind_sim: MujocoSim) -> None:
     start = blind_sim.ground_truth().box_xyz
     blind_sim.execute(SkillCall(skill="reach_left", params={"distance_cm": start[1] * 100}))
@@ -458,6 +478,7 @@ def test_walking_is_refused_with_fixed_feet_and_changes_nothing(blind_sim: Mujoc
 
 
 def test_a_twist_past_45_degrees_at_once_is_refused_and_changes_nothing(blind_sim: MujocoSim) -> None:
+    _hug_and_lift(blind_sim)
     before = _state(blind_sim)
     result = blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 46}))
     assert not result.ok and result.error and "45 deg" in result.error and not result.executed_actions
@@ -490,6 +511,7 @@ def test_the_twisted_drop_aims_on_the_leaning_pose(blind_sim: MujocoSim) -> None
 
 
 def test_ground_truth_heading_follows_the_waist_twist(sim: MujocoSim) -> None:
+    _hug_and_lift(sim)  # a 30 degree twist with the box still on the table would sweep the arms into it
     before = sim.ground_truth()
     assert before.robot_yaw == pytest.approx(0.0, abs=np.deg2rad(3))
     sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))

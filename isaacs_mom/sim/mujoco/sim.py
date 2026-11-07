@@ -56,6 +56,10 @@ TURN_RATE_RAD_S = 0.7
 TWIST_STEP_LIMIT_DEG = 45.0
 TWIST_LIMIT_RAD = np.deg2rad(150)
 TWIST_SPEED_RAD_S = np.deg2rad(60)
+# A turn swings the hands round with the body, so past ~20 degrees one beside the box catches its front corner. The
+# sweep is checked in these steps, and a hand within a pad's thickness of the box counts as touching.
+SWEEP_STEP_RAD = np.deg2rad(5)
+ARM_CLEARANCE_M = 0.03
 ARRIVED_M = 0.03  # from the goal pose
 ARRIVED_YAW_RAD = np.deg2rad(3)
 # The stepping gait sways a few centimetres about its stance; a walk this far off its goal didn't get there.
@@ -287,8 +291,10 @@ class MujocoSim:
                 sign = 1.0 if call.skill == "turn_left" else -1.0
                 angle_deg = call.params.get("angle_deg", DEFAULT_TURN_DEG)
                 if not self.task.walking:
-                    return self._twist(call.skill, sign, angle_deg)
+                    return self._twist(call.skill, sign, angle_deg, half)
                 angle = np.deg2rad(angle_deg)
+                if self._arms_sweep_into_box(sign * angle, half):
+                    return f"{call.skill}: the arms would sweep into the box on the table"
                 return self._walk_to(
                     self.goal_xy, wrap(self.goal_yaw + sign * angle), angle / TURN_RATE_RAD_S, call.skill
                 )
@@ -412,7 +418,7 @@ class MujocoSim:
     def _hold(self, duration: float) -> None:
         move(self.model, self.data, self.data.ctrl.copy(), duration, self._tick, self._drive)
 
-    def _twist(self, skill: str, sign: float, angle_deg: float) -> str | None:
+    def _twist(self, skill: str, sign: float, angle_deg: float, half: float) -> str | None:
         if angle_deg > TWIST_STEP_LIMIT_DEG:
             return (
                 f"{skill}: {angle_deg:.0f} deg is past the {TWIST_STEP_LIMIT_DEG:.0f} deg a waist twist turns at once"
@@ -420,6 +426,8 @@ class MujocoSim:
         waist = self.waist + sign * np.deg2rad(angle_deg)
         if abs(waist) > TWIST_LIMIT_RAD:
             return f"{skill}: past the {np.degrees(TWIST_LIMIT_RAD):.0f} deg twist limit"
+        if self._arms_sweep_into_box(waist - self.waist, half):
+            return f"{skill}: the arms would sweep into the box on the table"
         goal = self.data.ctrl.copy()
         goal[self.robot.waist_yaw_act] = waist
         move(
@@ -454,6 +462,24 @@ class MujocoSim:
             for s in self._speeds
             if s.time_s >= now - AT_REST_WINDOW_S
         )
+
+    def _arms_sweep_into_box(self, turn: float, half: float) -> bool:
+        """Turning by `turn` radians would swing a hand, `half` either side of the work line, into the box resting
+        on the table (rule 7). A box the hands hold turns with them."""
+        if not self._box_loose_on_table():
+            return False
+        box_xy = self.data.xpos[self._box][:2]
+        rot = self.data.xmat[self._box].reshape(3, 3)
+        box_yaw = float(np.arctan2(rot[1, 0], rot[0, 0]))
+        touching = np.array(self.task.box_half[:2]) + ARM_CLEARANCE_M
+        hands = [np.array([BOX_X, self.work_y + sign * half]) for sign in (1.0, -1.0)]
+        steps = max(1, int(np.ceil(abs(turn) / SWEEP_STEP_RAD)))
+        for swept in np.linspace(0.0, turn, steps + 1)[1:]:
+            for hand in hands:
+                world = self.goal_xy + _turn(hand, self.goal_yaw + self.waist + swept)
+                if np.all(np.abs(_turn(world - box_xy, -box_yaw)) < touching):
+                    return True
+        return False
 
     def _box_loose_on_table(self) -> bool:
         """Resting on the table top and not held. Hands closed on it hold it; a missed hug or an open hand against

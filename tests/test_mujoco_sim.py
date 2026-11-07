@@ -354,6 +354,31 @@ def test_turning_turns_the_whole_body_in_place(blind_sim: MujocoSim) -> None:
     assert math.hypot(x2 - x, y2 - y) < 0.06
 
 
+# SEED's box starts 9 cm left of centre, so turning right swings the left hand into its front corner. A 90 degree turn
+# ends with both hands clear of it, so only checking the sweep on the way round catches it.
+@pytest.mark.parametrize(("skill", "angle"), [("turn_right", 30), ("turn_left", 90), ("turn_right", 90)])
+def test_a_turn_that_would_sweep_the_arms_into_the_box_is_refused_and_changes_nothing(
+    blind_sim: MujocoSim, skill: str, angle: float
+) -> None:
+    before, qpos, qvel = _state(blind_sim), blind_sim.data.qpos.tobytes(), blind_sim.data.qvel.tobytes()
+    result = blind_sim.execute(SkillCall.model_validate({"skill": skill, "params": {"angle_deg": angle}}))
+    assert not result.ok and result.error and "sweep into the box" in result.error and not result.executed_actions
+    assert (_state(blind_sim), blind_sim.data.qpos.tobytes(), blind_sim.data.qvel.tobytes()) == (before, qpos, qvel)
+
+
+@pytest.mark.parametrize("start", ["ready", "backed_off", "holding_it"])
+def test_a_30_degree_turn_clear_of_the_box_still_turns(blind_sim: MujocoSim, start: str) -> None:
+    if start == "backed_off":  # the open arms swing round behind the box
+        assert blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30})).ok
+    elif start == "holding_it":
+        _carry(blind_sim)
+    box, heading = blind_sim.ground_truth().box_xyz, blind_sim.pose()[2]
+    assert blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30})).ok
+    assert math.degrees(math.remainder(blind_sim.pose()[2] - heading, math.tau)) == pytest.approx(30, abs=4)
+    if start != "holding_it":
+        assert blind_sim.ground_truth().box_xyz == pytest.approx(box, abs=0.005)
+
+
 def test_a_hugged_box_survives_walking_and_turning(blind_sim: MujocoSim) -> None:
     _carry(blind_sim)
     assert blind_sim.execute(SkillCall(skill="turn_right", params={"angle_deg": 120})).ok
