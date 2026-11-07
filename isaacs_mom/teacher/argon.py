@@ -5,6 +5,7 @@ Server, timeout, rate-limit and transport errors raise `ArgonUnavailable`, which
 so a bad key or a wrong model stops the run before any episode.
 """
 
+import math
 import os
 import re
 import time
@@ -62,24 +63,27 @@ def env_value(name: str, env_path: Path | None = None) -> str | None:
     return found
 
 
+def _seconds(text: object) -> float | None:
+    """A usable wait: finite and not negative (time.sleep raises on a negative one, and NaN slips past min)."""
+    try:
+        value = float(text)  # type: ignore[arg-type]
+    except (TypeError, ValueError):
+        return None
+    return value if math.isfinite(value) and value >= 0 else None
+
+
 def retry_after_s(error: Exception) -> float | None:
     """The server's own wait: a Retry-After header, or a google.rpc.RetryInfo `retryDelay` like "37s"."""
     headers = getattr(getattr(error, "response", None), "headers", None)
     header = headers.get("retry-after") if hasattr(headers, "get") else None  # type: ignore[union-attr]
-    try:
-        if header:
-            return float(header)
-    except (TypeError, ValueError):
-        pass
+    if header and (wait := _seconds(header)) is not None:
+        return wait
     body = getattr(error, "details", None)
     details = body.get("error", {}).get("details", []) if isinstance(body, dict) else []
     for detail in details if isinstance(details, list) else []:
         delay = detail.get("retryDelay") if isinstance(detail, dict) else None
         if isinstance(delay, str) and delay.endswith("s"):
-            try:
-                return float(delay[:-1])
-            except ValueError:
-                return None
+            return _seconds(delay[:-1])
     return None
 
 
@@ -105,6 +109,8 @@ def gemini_generate(model: str = MODEL) -> Generate:
             if e.code not in RETRYABLE_CODES:
                 raise
             raise ArgonUnavailable(f"ClientError: {e}", retry_after_s(e)) from e
+        except httpx2.TooManyRedirects:
+            raise  # a redirect loop is a setup fault, not a passing outage
         except (errors.ServerError, errors.UnknownApiResponseError, httpx2.RequestError) as e:
             raise ArgonUnavailable(f"{type(e).__name__}: {e}", retry_after_s(e)) from e
         return response.text or ""
@@ -159,8 +165,15 @@ class Argon:
             text, error = self.generate(purpose, parts), None
         except ArgonUnavailable as e:
             text, error, self.server_wait_s = None, str(e), e.retry_after_s
+        except Exception as e:
+            self._log_call(purpose, started, f"{type(e).__name__}: {e}")  # a fatal 4xx is still a call (rule 5)
+            raise
         if text == "":
             text, error = None, "empty answer"
+        self._log_call(purpose, started, error)
+        return text
+
+    def _log_call(self, purpose: Purpose, started: float, error: str | None) -> None:
         self.failed += error is not None
         self.last_error = error
         self._emit(
@@ -173,12 +186,12 @@ class Argon:
             error=error,
             latency_ms=round((time.perf_counter() - started) * 1000, 1),
         )
-        return text
 
     def wait(self, attempt: int) -> None:
         """Before the next attempt: the server's Retry-After when the last call gave one, else the schedule."""
         default = RETRY_WAITS_S[min(attempt, len(RETRY_WAITS_S) - 1)]
-        self.sleep(min(self.server_wait_s or default, MAX_WAIT_S))
+        wait = self.server_wait_s if self.server_wait_s is not None else default
+        self.sleep(min(max(0.0, wait), MAX_WAIT_S))
 
     def summary(self) -> str:
         """For the end of a run (SPEC §3.3: calls used out of the budget, unavailable answers, budget run out)."""

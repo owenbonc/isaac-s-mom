@@ -258,7 +258,6 @@ def unreachable_errors() -> list[Exception]:
         httpx2.ConnectError("down"),
         httpx2.ReadTimeout("slow"),
         httpx2.DecodingError("bad gzip"),
-        httpx2.TooManyRedirects("loop"),
     ]
 
 
@@ -277,6 +276,14 @@ def test_other_4xx_errors_fail_fast(monkeypatch: pytest.MonkeyPatch, code: int) 
 
     fake_client(monkeypatch, [], errors.ClientError(code, {"error": {"message": "bad request"}}))
     with pytest.raises(errors.ClientError):
+        gemini_generate()("act", ["hi"])
+
+
+def test_a_redirect_loop_is_a_setup_fault_not_an_outage(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx2
+
+    fake_client(monkeypatch, [], httpx2.TooManyRedirects("loop"))
+    with pytest.raises(httpx2.TooManyRedirects):
         gemini_generate()("act", ["hi"])
 
 
@@ -472,7 +479,8 @@ def test_the_documented_fake_run_needs_no_key_and_asking_for_argon_without_one_s
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--rounds", "0", "--run-id", "doc"])
     cli.main()
-    assert "(stub teacher)" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "(stub teacher)" in out and "argon: 0/" in out  # the stub spends nothing, not even a startup check
     monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--teacher", "argon", "--rounds", "0"])
     with pytest.raises(MissingKey):
         cli.main()
@@ -512,3 +520,40 @@ def test_a_bad_key_stops_the_cli_at_the_startup_check_before_the_sim(
     with pytest.raises(errors.ClientError):
         cli.main()
     assert built == []
+
+
+@pytest.mark.parametrize("bad", ["-3s", "nans", "infs", "-1e9s"])
+def test_a_negative_or_non_finite_retry_delay_is_ignored(bad: str) -> None:
+    from google.genai import errors
+
+    info = {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": bad}
+    assert retry_after_s(errors.ClientError(429, {"error": {"message": "q", "details": [info]}})) is None
+    with_header = errors.ClientError(429, {"error": {"message": "q"}})
+    with_header.response = SimpleNamespace(headers={"retry-after": bad[:-1]})  # type: ignore[assignment]
+    assert retry_after_s(with_header) is None
+
+
+@pytest.mark.parametrize("server_wait", [-3.0, float("nan"), float("-inf")])
+def test_a_bad_server_wait_never_reaches_sleep_as_negative_or_nan(tmp_path: Path, server_wait: float) -> None:
+    waits: list[float] = []
+    a, _ = argon(tmp_path, ArgonUnavailable("429", retry_after_s=server_wait), STEP, waits=waits)
+    ArgonPolicy(None, a).act(obs(), "task", "start")
+    assert len(waits) == 1 and 0.0 <= waits[0] <= 120.0
+
+
+def test_a_fatal_4xx_is_still_logged_as_a_call(tmp_path: Path) -> None:
+    from google.genai import errors
+
+    a, _ = argon(tmp_path, errors.ClientError(401, {"error": {"message": "API key not valid"}}))
+    with pytest.raises(errors.ClientError):
+        a.check()
+    [call] = events(tmp_path, "argon_call")
+    assert call["purpose"] == "startup" and call["ok"] is False and "ClientError" in str(call["error"])
+    assert a.calls == 1
+
+
+def test_failing_the_last_budgeted_call_ends_at_once_without_a_wait(tmp_path: Path) -> None:
+    waits: list[float] = []
+    a, _ = argon(tmp_path, ArgonUnavailable("down"), budget=1, waits=waits)
+    assert demo(ArgonPolicy(None, a)) == ["reobserve"]
+    assert waits == []

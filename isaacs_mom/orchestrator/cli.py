@@ -36,7 +36,8 @@ def main() -> None:
     run_dir = Path("runs") / args.run_id
     # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
     argon = Argon(EventLog(run_dir, args.run_id), generate=stub_generate if teacher == "stub" else None)
-    argon.check()
+    if teacher == "argon":
+        argon.check()  # the stub has no key or model to check, so it spends nothing
     results = run_loop(make_sim(args.sim), run_dir, args.run_id, max_rounds=args.rounds, argon=argon)
     for r in results:
         print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")

@@ -75,7 +75,7 @@ def ask_parsed[T](
             if parsed is not None:
                 return parsed
             argon.error(purpose, "unparseable or non-whitelisted Argon answer", raw=answer[:RAW_LOG_CHARS])
-        if attempt < ATTEMPTS - 1:
+        if attempt < ATTEMPTS - 1 and not argon.exhausted:  # over budget ends at once, without a last wait
             argon.wait(attempt)
     return None
 
