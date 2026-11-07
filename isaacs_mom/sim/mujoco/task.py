@@ -1,7 +1,7 @@
-"""Configurable tasks for the MuJoCo scene (SPEC §3.1): the box, where it starts, and where the bin goes.
+"""Configurable tasks for the MuJoCo scene (SPEC §3.1): walking or fixed feet, the box, and where the bin goes.
 
-Every task is hug-and-place with the same skills and success rule, so a task changes only the scene's numbers and the
-student, teacher and validator need nothing new. A task kind with its own skills or success rule would extend this.
+Every task is hug-and-place with the same success rule. Walking tasks carry the box to the bin on the legs' walking
+policy; `fixed_feet` twists the waist to a bin beside the robot. A task with its own success rule would extend this.
 """
 
 from dataclasses import dataclass
@@ -13,12 +13,57 @@ BOX_HALF_DEPTH_RANGE = (0.08, 0.15)
 BOX_HALF_HEIGHT_RANGE = (0.08, 0.15)
 MAX_BOX_MASS_KG = 2.0
 MAX_BOX_OFFSET_M = 0.12  # the arms' sideways reach
-MIN_BIN_DISTANCE_M = 0.5  # the robot stops ~0.45 m short of the bin's centre to place
+MIN_BIN_DISTANCE_M = 0.5  # a walking robot stops ~0.45 m short of the bin's centre to place
+TWIST_BIN_DISTANCE_M = (0.40, 0.50)  # a fixed-feet bin must sit where the twisted, outstretched arms put the box
+
+
+@dataclass(frozen=True)
+class Rig:
+    """How the robot meets a kind of task: its head camera, the third-person view and the arms' carry and drop."""
+
+    head_camera_pos: tuple[float, float, float]
+    head_camera_tilt_deg: float
+    head_camera_fovy_deg: float
+    third_person_eye: tuple[float, float, float]
+    third_person_target: tuple[float, float, float]
+    third_person_fovy_deg: float
+    lift_m: float
+    open_clearance_m: float  # how far outside the box's sides the open hands wait
+    place_x_m: float  # how far ahead of the pelvis the box is let go
+    place_z_m: float
+
+
+# A wide lens tilted 45 degrees sees the bin above the box carried 7 cm up, from 1-1.4 m away.
+WALKING_RIG = Rig(
+    (0.10, 0.0, 0.45),
+    45.0,
+    100.0,
+    (2.3, -2.3, 2.9),
+    (-0.25, 0.1, 0.3),
+    55.0,
+    lift_m=0.07,
+    open_clearance_m=0.18,
+    place_x_m=0.40,
+    place_z_m=0.84,
+)
+FIXED_FEET_RIG = Rig(
+    (0.09, 0.0, 0.40),
+    50.0,
+    75.0,
+    (1.3, 1.5, 1.6),
+    (0.05, 0.15, 0.75),
+    50.0,
+    lift_m=0.12,
+    open_clearance_m=0.15,
+    place_x_m=0.38,
+    place_z_m=0.86,
+)
 
 
 @dataclass(frozen=True)
 class TaskConfig:
     name: str
+    walking: bool = True
     box_half: tuple[float, float, float] = (0.125, 0.15, 0.125)  # depth, width, height
     box_mass_kg: float = 0.8
     box_offset_m: float = 0.10  # the box starts within this of the table's centre line
@@ -40,13 +85,19 @@ class TaskConfig:
         if (2 * self.box_half[0]) ** 2 + (2 * self.box_half[1]) ** 2 >= (2 * BIN_INNER_HALF) ** 2:
             problems.append("the box's footprint diagonal is as wide as the bin")
         near, far = self.bin_distance_m
-        if not MIN_BIN_DISTANCE_M <= near <= far:
+        if self.walking and not MIN_BIN_DISTANCE_M <= near <= far:
             problems.append(f"bin distance {self.bin_distance_m} must run from at least {MIN_BIN_DISTANCE_M} m upwards")
+        if not self.walking and not TWIST_BIN_DISTANCE_M[0] <= near <= far <= TWIST_BIN_DISTANCE_M[1]:
+            problems.append(f"bin distance {self.bin_distance_m} is outside a waist twist's {TWIST_BIN_DISTANCE_M} m")
         left, right = self.bin_bearing_deg
         if not 0.0 < left <= right < 360.0:
             problems.append(f"bin bearing {self.bin_bearing_deg} must lie between 0 and 360 degrees, low to high")
         if problems:
             raise ValueError(f"task {self.name!r}: " + "; ".join(problems))
+
+    @property
+    def rig(self) -> Rig:
+        return WALKING_RIG if self.walking else FIXED_FEET_RIG
 
 
 TASKS = {
@@ -60,6 +111,8 @@ TASKS = {
         TaskConfig("heavy_box", box_mass_kg=2.0),
         TaskConfig("small_box", box_half=(0.10, 0.11, 0.10)),
         TaskConfig("far_bin", bin_distance_m=(1.6, 2.2)),
+        # The robot stays on its feet and twists its waist to a bin beside it.
+        TaskConfig("fixed_feet", walking=False, bin_distance_m=(0.43, 0.45), bin_bearing_deg=(97.0, 112.0)),
     ]
 }
 DEFAULT_TASK = TASKS["across_room"]

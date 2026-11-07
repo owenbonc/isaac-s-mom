@@ -39,16 +39,24 @@ class Robot:
         self.arm_dadr = {side: [model.jnt_dofadr[model.joint(j).id] for j in js] for side, js in ARM_JOINTS.items()}
         self.arm_act = {side: [self.joint_actuator[j] for j in js] for side, js in ARM_JOINTS.items()}
         self.arm_range = {side: model.jnt_range[[model.joint(j).id for j in js]] for side, js in ARM_JOINTS.items()}
+        self.waist_yaw_act = self.joint_actuator["waist_yaw_joint"]
         self.pelvis = model.body("pelvis").id
 
     def solve_arm(
-        self, ctrl: np.ndarray, side: str, target: np.ndarray, rotation: np.ndarray | None = None, iters: int = 100
+        self,
+        ctrl: np.ndarray,
+        side: str,
+        target: np.ndarray,
+        rotation: np.ndarray | None = None,
+        iters: int = 100,
+        pose: np.ndarray | None = None,
     ) -> tuple[np.ndarray, float, np.ndarray]:
         """Joint targets, within limits, that bring `side`'s hand closest to `target`, the miss distance, and the
-        hand's orientation there. `target` (and `rotation`, if given) are in the frame of the robot standing upright
-        at the origin facing +x, so a solution holds wherever the robot has walked; arm joints start from `ctrl`."""
+        hand's orientation there. The robot is posed as `pose` (world coordinates, a twisted waist included) or, by
+        default, standing upright at the origin facing +x, so a solution holds wherever it has walked. `target` and
+        `rotation` are in that frame; the arm joints start from `ctrl`."""
         m, d = self.model, self.scratch
-        d.qpos[:] = self.stand
+        d.qpos[:] = self.stand if pose is None else pose
         arm = [self.joint_actuator[name] for name in ARM_JOINTS[side]]
         qadr, dadr = self.arm_qadr[side], self.arm_dadr[side]
         d.qpos[qadr] = ctrl[arm]

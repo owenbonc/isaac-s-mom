@@ -5,19 +5,17 @@ from pathlib import Path
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
+from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.teacher.argon import Argon, stub_generate
 
 
-def make_sim(name: str, task: str) -> TruthSim:
+def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
     if name == "fake":
         from isaacs_mom.sim.fake import FakeSim
 
         return FakeSim()
     from isaacs_mom.sim.mujoco import MujocoSim
-    from isaacs_mom.sim.mujoco.task import TASKS
 
-    if task not in TASKS:
-        raise SystemExit(f"unknown task {task!r}; choose from {', '.join(sorted(TASKS))}")
     return MujocoSim(TASKS[task])
 
 
@@ -33,9 +31,10 @@ def main() -> None:
     )
     run.add_argument("--rounds", type=int, default=3)
     run.add_argument("--run-id", default=time.strftime("run-%Y%m%d-%H%M%S"))
-    # Imported lazily with the sim, so `--sim fake` never loads MuJoCo; FakeSim is the default task only.
-    run.add_argument("--task", default="across_room", help="MuJoCo task preset (isaacs_mom/sim/mujoco/task.py)")
+    run.add_argument("--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)")
     args = parser.parse_args()
+    if args.sim == "fake" and args.task != DEFAULT_TASK.name:
+        parser.error(f"--sim fake plays only the default task, {DEFAULT_TASK.name}")
 
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
     argons: list[Argon] = []

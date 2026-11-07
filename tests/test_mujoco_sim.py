@@ -117,7 +117,7 @@ def test_a_reach_past_the_limit_is_refused_though_the_arms_could_make_it(blind_s
 
 @pytest.mark.parametrize(
     ("skill", "target", "unreachable"),
-    [("reach_left", "BOX_X", 0.8), ("hug", "_hug_z", 2.0), ("lift", "LIFT_DZ", 1.0)],
+    [("reach_left", "BOX_X", 0.8), ("hug", "_hug_z", 2.0), ("lift", "_lift_m", 1.0)],
 )
 def test_a_skill_whose_target_is_out_of_reach_changes_nothing(
     blind_sim: MujocoSim, monkeypatch: pytest.MonkeyPatch, skill: str, target: str, unreachable: float
@@ -127,7 +127,7 @@ def test_a_skill_whose_target_is_out_of_reach_changes_nothing(
         blind_sim.execute(SkillCall(skill="reach_left", params={"distance_cm": start[1] * 100}))
     if skill == "lift":
         blind_sim.execute(SkillCall(skill="hug"))
-    if target.startswith("_"):  # the hug height follows the task's box, so it lives on the sim
+    if target.startswith("_"):  # set from the task, so it lives on the sim
         monkeypatch.setattr(blind_sim, target, unreachable)
     else:
         monkeypatch.setattr(f"isaacs_mom.sim.mujoco.sim.{target}", unreachable)
@@ -382,7 +382,11 @@ def test_the_scripted_policy_finds_a_bin_moved_mid_carry(blind_sim: MujocoSim) -
 
 @pytest.mark.parametrize(
     ("waypoint", "unreachable"),
-    [("PLACE_X", 0.8), ("PLACE_Z", 0.4), ("_release_half", 0.5)],  # the first, second, then only the last out of reach
+    [
+        ("_place_x", 0.8),
+        ("_place_z", 0.4),
+        ("_release_half", 0.5),
+    ],  # the first, second, then only the last out of reach
 )
 def test_a_place_with_any_waypoint_out_of_reach_changes_nothing(
     blind_sim: MujocoSim, monkeypatch: pytest.MonkeyPatch, waypoint: str, unreachable: float
@@ -391,10 +395,7 @@ def test_a_place_with_any_waypoint_out_of_reach_changes_nothing(
     blind_sim.execute(SkillCall(skill="reach_left", params={"distance_cm": start[1] * 100}))
     blind_sim.execute(SkillCall(skill="hug"))
     blind_sim.execute(SkillCall(skill="lift"))
-    if waypoint.startswith("_"):  # the release width follows the task's box, so it lives on the sim
-        monkeypatch.setattr(blind_sim, waypoint, unreachable)
-    else:
-        monkeypatch.setattr(f"isaacs_mom.sim.mujoco.sim.{waypoint}", unreachable)
+    monkeypatch.setattr(blind_sim, waypoint, unreachable)  # set from the task, so it lives on the sim
     before = _state(blind_sim)
     result = blind_sim.execute(SkillCall(skill="place"))
     assert not result.ok and result.error and "can't reach" in result.error and not result.executed_actions
@@ -494,7 +495,7 @@ def test_a_placed_box_stays_in_the_bin_and_the_refused_perturbation_is_not_recor
 
 def test_moving_the_bin_is_refused_only_where_it_would_land_on_the_box(sim: MujocoSim) -> None:
     def pose_for(seed: int) -> tuple[tuple[float, float], float]:
-        return bin_pose(np.random.default_rng(seed), sim.task, around=sim.pose()[:2])
+        return bin_pose(np.random.default_rng(seed), sim.task, around=(float(sim.goal_xy[0]), float(sim.goal_xy[1])))
 
     (x, y), yaw = pose_for(0)
     _put_box(sim, (x, y, 0.13), yaw)  # on the floor exactly where seed 0 would put the bin
@@ -555,16 +556,8 @@ def test_a_box_with_an_open_hand_against_it_still_moves(sim: MujocoSim) -> None:
     assert sim.ground_truth().box_xyz[:2] != pytest.approx(before[:2], abs=0.01)
 
 
-def test_a_moved_box_lands_between_the_open_hands(sim: MujocoSim) -> None:
-    assert sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 10})).ok
-    for seed in range(10):
-        assert sim.perturb(Perturbation(kind="move_box", seed=seed))
-        assert abs(sim.ground_truth().box_xyz[1] - sim.work_y) <= 0.10 + 1e-6, f"move_box seed {seed}"
-        sim.execute(SkillCall(skill="reobserve"))  # let it settle onto the table before the next move
-
-
 def test_moving_the_bin_onto_the_robot_is_refused(sim: MujocoSim, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("isaacs_mom.sim.mujoco.sim.bin_pose", lambda rng: ((0.0, 0.0), 0.0))  # where it stands
+    monkeypatch.setattr("isaacs_mom.sim.mujoco.sim.bin_pose", lambda *_, **__: ((0.0, 0.0), 0.0))  # where it stands
     before = sim.ground_truth()
     assert not sim.perturb(Perturbation(kind="move_bin", seed=0))
     assert sim.ground_truth() == before

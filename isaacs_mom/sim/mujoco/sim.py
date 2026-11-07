@@ -40,13 +40,10 @@ from isaacs_mom.sim.mujoco.walk import Walker, wrap
 
 # The hands work relative to the box: they hug at its mid-height, wait 5 cm above that, close 1.5 cm inside its sides,
 # open 18 cm outside them (clear of a box 12 cm off-centre as the robot sways) and let go 7 cm outside them.
+GRIP_ABOVE_CENTRE = 0.005
 READY_ABOVE_HUG = 0.05
 SQUEEZE = 0.015
-OPEN_CLEARANCE = 0.18
 RELEASE_CLEARANCE = 0.07
-LIFT_DZ = 0.07  # clears the table; any higher and the box hides the bin from the head camera
-PLACE_X = 0.40  # the hands push the box this far ahead of the pelvis before letting go
-PLACE_Z = 0.84  # the box drops ~40 cm to the bin floor from here
 REACH_LIMIT = 0.12
 STEPPING_PELVIS_Z = 0.774  # the pelvis's mean height while the legs step in place
 BOX_MOVE_TRIES = 20
@@ -55,6 +52,10 @@ DEFAULT_WALK_CM = 30.0
 DEFAULT_TURN_DEG = 30.0
 WALK_SPEED_M_S = 0.3
 TURN_RATE_RAD_S = 0.7
+# Fixed feet: a turn twists the waist, at most this much at a time and in all.
+TWIST_STEP_LIMIT_DEG = 45.0
+TWIST_LIMIT_RAD = np.deg2rad(150)
+TWIST_SPEED_RAD_S = np.deg2rad(60)
 ARRIVED_M = 0.03  # from the goal pose
 ARRIVED_YAW_RAD = np.deg2rad(3)
 # The stepping gait sways a few centimetres about its stance; a walk this far off its goal didn't get there.
@@ -99,23 +100,24 @@ def _clearance(xy: np.ndarray, centre: np.ndarray, half: np.ndarray, yaw: float)
 
 
 class MujocoSim:
-    robot_config = "unitree_g1_29dof_walking"
-
     def __init__(self, task: TaskConfig = DEFAULT_TASK) -> None:
         self.task = task
         # The task is part of the version, so a manifest only replays on the scene it was recorded in.
         self.sim_version = f"mujoco-{mujoco.__version__} task={task.name}"
-        width = task.box_half[1]
-        self._open_half, self._closed_half = width + OPEN_CLEARANCE, width - SQUEEZE
+        self.robot_config = "unitree_g1_29dof_walking" if task.walking else "unitree_g1_29dof_free_standing"
+        rig, width = task.rig, task.box_half[1]
+        self._open_half, self._closed_half = width + rig.open_clearance_m, width - SQUEEZE
         self._release_half = width + RELEASE_CLEARANCE
-        self._hug_z = TABLE_TOP_Z + task.box_half[2]
+        self._hug_z = TABLE_TOP_Z + task.box_half[2] + GRIP_ABOVE_CENTRE
+        self._lift_m, self._place_x, self._place_z = rig.lift_m, rig.place_x_m, rig.place_z_m
         self.model = build_model(task)
         self.data = mujoco.MjData(self.model)
         self._stand = stand_qpos(self.model)
-        stepping = self._stand.copy()
-        stepping[2] = STEPPING_PELVIS_Z
-        self.robot = Robot(self.model, stepping)
-        self.walker = Walker(self.model)
+        stance = self._stand.copy()
+        if task.walking:
+            stance[2] = STEPPING_PELVIS_Z
+        self.robot = Robot(self.model, stance)
+        self.walker = Walker(self.model) if task.walking else None
         # Made on first use, so the physics runs (and is tested) where no GL context exists.
         self._renderers: dict[str, mujoco.Renderer] = {}
         self._box = self.model.body("box").id
@@ -153,8 +155,10 @@ class MujocoSim:
         self._put_bin(d, scene.bin_xy, scene.bin_yaw)
         d.ctrl[:] = d.qpos[self.robot.actuated_qadr]
         mujoco.mj_forward(m, d)
-        self.walker.reset()
+        if self.walker:
+            self.walker.reset()
         self.goal_xy, self.goal_yaw = np.zeros(2), 0.0
+        self.waist = 0.0
         self.work_y = 0.0
         self.closed = False
         self.lifted = False
@@ -217,7 +221,8 @@ class MujocoSim:
             return False
         if self._bin_floor in self._touching(self.data, {self._box_geom}):  # moving it would tip the box out
             return False
-        xy, yaw = bin_pose(rng, self.task, around=self.pose()[:2])
+        # Around the stance the legs hold, not the swaying or leaning pelvis.
+        xy, yaw = bin_pose(rng, self.task, around=(float(self.goal_xy[0]), float(self.goal_xy[1])))
         trial = copy.copy(self.data)
         self._put_bin(trial, xy, yaw)
         mujoco.mj_fwdPosition(self.model, trial)
@@ -232,7 +237,12 @@ class MujocoSim:
 
     def pose(self) -> tuple[float, float, float]:
         """The robot's floor pose (x, y, heading), for previews and tests; the agents never see it."""
-        return float(self.data.qpos[0]), float(self.data.qpos[1]), self.walker.yaw(self.data)
+        w, x, y, z = self.data.qpos[3:7]
+        return (
+            float(self.data.qpos[0]),
+            float(self.data.qpos[1]),
+            float(np.arctan2(2 * (w * z + x * y), 1 - 2 * (y * y + z * z))),
+        )
 
     def _render(self, camera: str, size: tuple[int, int]) -> bytes:
         if camera not in self._renderers:
@@ -259,6 +269,8 @@ class MujocoSim:
                     self.work_y = work_y
                 return error
             case "walk_forward" | "walk_back":
+                if not self.task.walking:
+                    return f"{call.skill}: the feet stay put in task {self.task.name}"
                 sign = 1.0 if call.skill == "walk_forward" else -1.0
                 step = sign * call.params.get("distance_cm", DEFAULT_WALK_CM) / 100
                 heading = np.array([np.cos(self.goal_yaw), np.sin(self.goal_yaw)])
@@ -269,7 +281,10 @@ class MujocoSim:
                 return self._walk_to(goal, self.goal_yaw, abs(step) / WALK_SPEED_M_S, call.skill)
             case "turn_left" | "turn_right":
                 sign = 1.0 if call.skill == "turn_left" else -1.0
-                angle = np.deg2rad(call.params.get("angle_deg", DEFAULT_TURN_DEG))
+                angle_deg = call.params.get("angle_deg", DEFAULT_TURN_DEG)
+                if not self.task.walking:
+                    return self._twist(call.skill, sign, angle_deg)
+                angle = np.deg2rad(angle_deg)
                 return self._walk_to(
                     self.goal_xy, wrap(self.goal_yaw + sign * angle), angle / TURN_RATE_RAD_S, call.skill
                 )
@@ -290,9 +305,9 @@ class MujocoSim:
                 height = self._hand_point()[2]
                 error = self._move_through(
                     [
-                        ((PLACE_X, 0.0, height), half, 0.6, True),
-                        ((PLACE_X, 0.0, PLACE_Z), half, 0.6, False),
-                        ((PLACE_X - 0.03, 0.0, PLACE_Z + 0.04), self._release_half, 0.5, False),
+                        ((self._place_x, 0.0, height), half, 0.6, True),
+                        ((self._place_x, 0.0, self._place_z), half, 0.6, False),
+                        ((self._place_x - 0.03, 0.0, self._place_z + 0.04), self._release_half, 0.5, False),
                     ]
                 )
                 if error:
@@ -312,7 +327,7 @@ class MujocoSim:
         """Where the hands go for the current state, or for the state a skill is about to commit."""
         closed = self.closed if closed is None else closed
         lifted = self.lifted if lifted is None else lifted
-        z = self._hug_z + (0.0 if closed else READY_ABOVE_HUG) + (LIFT_DZ if lifted else 0.0)
+        z = self._hug_z + (0.0 if closed else READY_ABOVE_HUG) + (self._lift_m if lifted else 0.0)
         return BOX_X, self.work_y if work_y is None else work_y, z
 
     def _plan_hands(
@@ -322,15 +337,19 @@ class MujocoSim:
         hold, and the hands' orientations there. With `level`, hands holding the box keep their grip orientation, so
         it doesn't tip."""
         x, y, heading = self.pose()
-        # The pelvis sways a couple of centimetres off its stance; aim from where it is now.
-        offset = self.goal_xy - (x, y)
         goal, grip = ctrl.copy(), {}
         for side, sign in (("left", 1.0), ("right", -1.0)):
-            in_stance = np.array([point[0], point[1] + sign * half])
-            world = offset + _turn(in_stance, self.goal_yaw)
-            target = np.array([*_turn(world, -heading), point[2]])
-            rotation = self._grip[side] if level and self._grip else None
-            q, miss, grip[side] = self.robot.solve_arm(goal, side, target, rotation)
+            hand = np.array([point[0], point[1] + sign * half])
+            if self.task.walking:
+                # The pelvis sways a couple of centimetres off its stance: aim from where it is now.
+                world = self.goal_xy - (x, y) + _turn(hand, self.goal_yaw)
+                target, pose = np.array([*_turn(world, -heading), point[2]]), None
+                rotation = self._grip[side] if level and self._grip else None
+            else:
+                # Fixed feet lean as the twisted arms carry the box out: aim on the live pose, turned with the waist.
+                target, pose = np.array([*((x, y) + _turn(hand, heading + self.waist)), point[2]]), self.data.qpos
+                rotation = None
+            q, miss, grip[side] = self.robot.solve_arm(goal, side, target, rotation, pose=pose)
             if miss > IK_TOLERANCE_M:
                 return (ctrl, grip), f"{side} hand can't reach there ({miss * 100:.0f} cm short)"
             goal[self.robot.arm_act[side]] = q
@@ -389,7 +408,25 @@ class MujocoSim:
     def _hold(self, duration: float) -> None:
         move(self.model, self.data, self.data.ctrl.copy(), duration, self._tick, self._drive)
 
+    def _twist(self, skill: str, sign: float, angle_deg: float) -> str | None:
+        if angle_deg > TWIST_STEP_LIMIT_DEG:
+            return (
+                f"{skill}: {angle_deg:.0f} deg is past the {TWIST_STEP_LIMIT_DEG:.0f} deg a waist twist turns at once"
+            )
+        waist = self.waist + sign * np.deg2rad(angle_deg)
+        if abs(waist) > TWIST_LIMIT_RAD:
+            return f"{skill}: past the {np.degrees(TWIST_LIMIT_RAD):.0f} deg twist limit"
+        goal = self.data.ctrl.copy()
+        goal[self.robot.waist_yaw_act] = waist
+        move(
+            self.model, self.data, goal, max(0.4, abs(waist - self.waist) / TWIST_SPEED_RAD_S), self._tick, self._drive
+        )
+        self.waist = waist
+        return None
+
     def _drive(self) -> None:
+        if self.walker is None:  # fixed feet: the legs hold the stance on their own position actuators
+            return
         command = self.walker.command_to(self.data, self.goal_xy, self.goal_yaw, WALK_SPEED_M_S, TURN_RATE_RAD_S)
         self.walker.act(self.data, command)
 

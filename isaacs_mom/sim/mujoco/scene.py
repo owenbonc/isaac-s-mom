@@ -1,9 +1,10 @@
 # pyright: reportAttributeAccessIssue=false
 # (mujoco's compiled bindings ship no type information, so every mujoco.* attribute looks unknown)
-"""The MuJoCo scene: a walking Unitree G1, a table with a big box, and a bin across the room.
+"""The MuJoCo scene: a Unitree G1, a table with a big box, and a bin across the room or, with fixed feet, beside it.
 
-The G1 keeps its floating base; its legs run Unitree's walking policy (`walk.py`) and its arms are joint-position
-controlled, so nothing moves it that a real robot couldn't.
+The G1 keeps its floating base. In walking tasks its legs run Unitree's walking policy (`walk.py`); with fixed feet
+they hold Unitree's soft-knee stance. The arms are joint-position controlled, so nothing moves it that a real robot
+couldn't.
 """
 
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from pathlib import Path
 import mujoco
 import numpy as np
 
-from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF, TaskConfig
+from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF, Rig, TaskConfig
 from isaacs_mom.sim.mujoco.walk import configure_legs
 
 G1_XML = Path(__file__).parent / "assets" / "unitree_g1" / "g1.xml"
@@ -66,12 +67,13 @@ def box_xy(rng: np.random.Generator, task: TaskConfig) -> tuple[float, float]:
 def bin_pose(
     rng: np.random.Generator, task: TaskConfig, around: tuple[float, float] = (0.0, 0.0)
 ) -> tuple[tuple[float, float], float]:
-    """A bin the task's distance from `around`, facing it, at one of the task's bearings, and clear of the table."""
+    """A bin the task's distance from `around`, facing it, at one of the task's bearings; when walking, with room
+    between it and the table to walk through."""
     for _ in range(LAYOUT_TRIES):
         bearing = np.deg2rad(rng.uniform(*task.bin_bearing_deg))
         dist = rng.uniform(*task.bin_distance_m)
         xy = (around[0] + dist * np.cos(bearing), around[1] + dist * np.sin(bearing))
-        if table_clearance(xy) > BIN_INNER_HALF + BIN_WALL + TABLE_CLEARANCE:
+        if not task.walking or table_clearance(xy) > BIN_INNER_HALF + BIN_WALL + TABLE_CLEARANCE:
             return (float(xy[0]), float(xy[1])), float(bearing)
     raise ValueError(f"task {task.name!r}: no bin pose clears the table in {LAYOUT_TRIES} draws")
 
@@ -88,7 +90,10 @@ def layout(seed: int, task: TaskConfig) -> Layout:
     box = box_xy(rng, task)
     for _ in range(LAYOUT_TRIES):
         bin_xy, bin_yaw = bin_pose(rng, task)
-        if np.hypot(bin_xy[0] - BACKED_OFF_XY[0], bin_xy[1] - BACKED_OFF_XY[1]) > BACKED_OFF_CLEARANCE:
+        if (
+            not task.walking
+            or np.hypot(bin_xy[0] - BACKED_OFF_XY[0], bin_xy[1] - BACKED_OFF_XY[1]) > BACKED_OFF_CLEARANCE
+        ):
             return Layout(box_xy=box, bin_xy=bin_xy, bin_yaw=bin_yaw)
     raise ValueError(f"task {task.name!r}: no bin pose leaves room to back off from the table in {LAYOUT_TRIES} draws")
 
@@ -125,15 +130,13 @@ def _add_hands(spec: mujoco.MjSpec) -> None:
         )
 
 
-def _add_head_camera(spec: mujoco.MjSpec) -> None:
-    # Top of the face, tilted 45 degrees down with a wide lens: the hands at the box, and a bin 1-1.4 m ahead above
-    # the carried box or, once close, below it.
-    tilt = np.deg2rad(45)
+def _add_head_camera(spec: mujoco.MjSpec, rig: Rig) -> None:
+    tilt = np.deg2rad(rig.head_camera_tilt_deg)
     spec.body("torso_link").add_camera(
         name="head",
-        pos=[0.10, 0.0, 0.45],
+        pos=list(rig.head_camera_pos),
         xyaxes=[0, -1, 0, np.sin(tilt), 0, np.cos(tilt)],
-        fovy=100.0,
+        fovy=rig.head_camera_fovy_deg,
     )
 
 
@@ -234,9 +237,9 @@ def _add_world(spec: mujoco.MjSpec, task: TaskConfig) -> None:
         condim=4,
     )
 
-    # High over the robot's front-right shoulder, wide enough for the table and a bin anywhere around the robot.
-    eye, target = np.array([2.3, -2.3, 2.9]), np.array([-0.25, 0.1, 0.3])
-    world.add_camera(name="third_person", pos=eye, xyaxes=_look_at(eye, target), fovy=55.0)
+    # Walking: high and wide, for a bin anywhere around the robot. Fixed feet: close, from the side the bin is on.
+    eye, target = np.array(task.rig.third_person_eye), np.array(task.rig.third_person_target)
+    world.add_camera(name="third_person", pos=eye, xyaxes=_look_at(eye, target), fovy=task.rig.third_person_fovy_deg)
 
 
 def build_model(task: TaskConfig) -> mujoco.MjModel:
@@ -244,11 +247,12 @@ def build_model(task: TaskConfig) -> mujoco.MjModel:
     # Menagerie's "stand" keyframe has no room for the scene's extra joints.
     for key in list(spec.keys):
         spec.delete(key)
-    spec.option.impratio = 10  # firmer friction cones, so the hugged box doesn't creep out of the hands
-    configure_legs(spec)
+    if task.walking:
+        spec.option.impratio = 10  # firmer friction cones, so the box doesn't creep out of the hands on the walk
+        configure_legs(spec)
     _grip_feet(spec)
     _add_hands(spec)
-    _add_head_camera(spec)
+    _add_head_camera(spec, task.rig)
     _add_world(spec, task)
     return spec.compile()
 

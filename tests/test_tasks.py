@@ -36,8 +36,11 @@ def test_every_preset_lays_out_within_its_ranges(name: str) -> None:
         assert task.bin_distance_m[0] - 1e-9 <= distance <= task.bin_distance_m[1] + 1e-9
         bearing = np.degrees(np.arctan2(scene.bin_xy[1], scene.bin_xy[0])) % 360
         assert task.bin_bearing_deg[0] - 1e-6 <= bearing <= task.bin_bearing_deg[1] + 1e-6
-        assert table_clearance(scene.bin_xy) > BIN_INNER_HALF + BIN_WALL + TABLE_CLEARANCE
-        assert np.hypot(scene.bin_xy[0] - BACKED_OFF_XY[0], scene.bin_xy[1] - BACKED_OFF_XY[1]) > BACKED_OFF_CLEARANCE
+        if task.walking:  # room to walk between the table and the bin, and to back off the table first
+            assert table_clearance(scene.bin_xy) > BIN_INNER_HALF + BIN_WALL + TABLE_CLEARANCE
+            assert (
+                np.hypot(scene.bin_xy[0] - BACKED_OFF_XY[0], scene.bin_xy[1] - BACKED_OFF_XY[1]) > BACKED_OFF_CLEARANCE
+            )
 
 
 @pytest.mark.parametrize(

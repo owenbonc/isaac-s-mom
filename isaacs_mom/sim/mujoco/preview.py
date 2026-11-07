@@ -18,7 +18,7 @@ from PIL import Image, ImageDraw
 from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCall, Validation
 from isaacs_mom.orchestrator.episode import MAX_STEPS, PERTURB_SEED_OFFSET
 from isaacs_mom.sim.mujoco.scene import TABLE_TOP_Z, table_clearance
-from isaacs_mom.sim.mujoco.sim import MujocoSim
+from isaacs_mom.sim.mujoco.sim import TWIST_STEP_LIMIT_DEG, MujocoSim
 from isaacs_mom.sim.mujoco.task import TASKS
 from isaacs_mom.sim.mujoco.walk import wrap
 from isaacs_mom.validator import validate
@@ -60,6 +60,13 @@ class OraclePolicy:
             return SkillCall(skill="hug")
         if not sim.lifted:
             return SkillCall(skill="lift")
+        if not sim.task.walking:
+            # Twist the waist until the box faces the bin, aiming from where the feet stand, then place.
+            twist = np.degrees(wrap(np.arctan2(gt.bin_xy[1], gt.bin_xy[0]) - sim.waist))
+            if abs(twist) > 2:
+                angle = min(abs(twist), TWIST_STEP_LIMIT_DEG)
+                return SkillCall(skill="turn_left" if twist > 0 else "turn_right", params={"angle_deg": angle})
+            return SkillCall(skill="place")
         if table_clearance((gt.box_xyz[0], gt.box_xyz[1])) == 0.0:
             return SkillCall(skill="walk_back", params={"distance_cm": BACK_OFF_CM})
         to_bin = np.array(gt.bin_xy) - (x, y)
