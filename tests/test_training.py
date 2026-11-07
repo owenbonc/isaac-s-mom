@@ -22,7 +22,7 @@ def step(index: int, controller: Controller) -> StepRecord:
         sim_time=float(index),
         frame=f"frames/{index:04d}.jpg",
         joint_state=[0.0],
-        skill_call=SkillCall(skill="push_forward", params={"distance_cm": 5.0}),
+        skill_call=SkillCall(skill="reach_left", params={"distance_cm": 5.0}),
         controller=controller,
         checkpoint=None,
         actions=f"actions/{index:04d}.npy",
@@ -42,7 +42,7 @@ def manifest(
         seed=seed,
         split="dev",
         round=0,
-        instruction="push the block onto the target",
+        instruction="hug the box into the bin",
         sim_version="test",
         robot_config="test",
         steps=[step(i, c) for i, c in enumerate(controllers)],
@@ -85,9 +85,11 @@ def _write(run_dir: Path, episode_id: str, episode: EpisodeManifest) -> None:
 
 def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
     missed = Validation(
-        task_success=False, physics_valid=True, reason="block 7.0 cm from target centre (radius 5.0 cm)"
+        task_success=False,
+        physics_valid=True,
+        reason="box not in bin: 30 cm from its centre (inner half-width 22 cm), 70 cm high",
     )
-    unsafe = Validation(task_success=False, physics_valid=False, reason="joint limit violated; block still moving")
+    unsafe = Validation(task_success=False, physics_valid=False, reason="joint limit violated; box still moving")
     exam = manifest(seed=min(heldout_seeds()), controllers=("student",)).model_copy(update={"split": "heldout"})
     _write(tmp_path, "a-accepted", manifest(controllers=("student", "teacher", "teacher")))
     _write(tmp_path, "b-missed", manifest(validation=missed))
@@ -110,7 +112,7 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
         accepted=1,
         rejected=3,
         unfinished=1,
-        rejected_by={"missed_target": 1, "joint_limit": 1, "still_moving": 1, "other": 1},
+        rejected_by={"missed_bin": 1, "joint_limit": 1, "still_moving": 1, "other": 1},
         empty_dev_episodes=1,
         examples=2,
     )

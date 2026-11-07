@@ -32,7 +32,7 @@ def _saved(run_dir: Path) -> EpisodeManifest:
     return EpisodeManifest.model_validate_json((run_dir / "episodes" / "ep" / "manifest.json").read_text())
 
 
-PUSH = SkillCall(skill="push_forward")
+HUG = SkillCall(skill="hug")
 
 
 def test_diary_is_saved_as_soon_as_the_episode_starts(tmp_path: Path) -> None:
@@ -44,10 +44,10 @@ def test_diary_is_saved_as_soon_as_the_episode_starts(tmp_path: Path) -> None:
 
 def test_diary_survives_a_crash_before_the_verdict(tmp_path: Path) -> None:
     recorder = _start(tmp_path)
-    recorder.add_step(_obs(0), PUSH, _result(), "student", "ckpt-r0")
-    recorder.add_perturbation(Perturbation(kind="move_block", seed=7))
+    recorder.add_step(_obs(0), HUG, _result(), "student", "ckpt-r0")
+    recorder.add_perturbation(Perturbation(kind="move_box", seed=7))
     recorder.mark_takeover()
-    recorder.add_step(_obs(1), PUSH, _result(), "teacher", None)
+    recorder.add_step(_obs(1), HUG, _result(), "teacher", None)
     saved = _saved(tmp_path)
     assert [s.controller for s in saved.steps] == ["student", "teacher"]
     assert [p.before_step for p in saved.perturbations] == [1]
@@ -56,7 +56,7 @@ def test_diary_survives_a_crash_before_the_verdict(tmp_path: Path) -> None:
 
 
 def test_finish_writes_the_verdict(tmp_path: Path) -> None:
-    verdict = Validation(task_success=True, physics_valid=True, reason="block at rest inside target")
+    verdict = Validation(task_success=True, physics_valid=True, reason="box at rest inside bin")
     _start(tmp_path).finish(verdict)
     assert _saved(tmp_path).validation == verdict
 
@@ -64,11 +64,11 @@ def test_finish_writes_the_verdict(tmp_path: Path) -> None:
 def test_actions_and_timestamps_must_line_up(tmp_path: Path) -> None:
     recorder = _start(tmp_path)
     with pytest.raises(RecordingError, match="2 executed actions but 1 timestamps"):
-        recorder.add_step(_obs(0), PUSH, _result(actions=2, timestamps=(0.02,)), "teacher", None)
+        recorder.add_step(_obs(0), HUG, _result(actions=2, timestamps=(0.02,)), "teacher", None)
     assert _saved(tmp_path).steps == []
     assert list((tmp_path / "episodes" / "ep" / "frames").iterdir()) == []
 
 
 def test_timestamps_must_not_go_backwards(tmp_path: Path) -> None:
     with pytest.raises(RecordingError, match="timestamps go backwards"):
-        _start(tmp_path).add_step(_obs(0), PUSH, _result(timestamps=(0.04, 0.02)), "teacher", None)
+        _start(tmp_path).add_step(_obs(0), HUG, _result(timestamps=(0.04, 0.02)), "teacher", None)
