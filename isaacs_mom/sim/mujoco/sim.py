@@ -7,17 +7,19 @@ it, `lift` raises them, `turn_*` twists the waist, and `place` centres the box, 
 A skill that would leave the reachable range is refused and reported, never executed (rule 7).
 """
 
+import copy
 import io
 import uuid
 from collections import deque
 from collections.abc import Callable
+from typing import NamedTuple
 
 import mujoco
 import numpy as np
 from PIL import Image
 
 from isaacs_mom.contracts import ExecResult, GroundTruth, Observation, Perturbation, SkillCall
-from isaacs_mom.sim.mujoco.control import IK_TOLERANCE, Robot, move
+from isaacs_mom.sim.mujoco.control import IK_TOLERANCE_M, Robot, move
 from isaacs_mom.sim.mujoco.scene import (
     BIN_INNER_HALF,
     BOX_HALF,
@@ -45,14 +47,23 @@ BOX_SHIFT_LIMIT = 0.10  # a moved box stays this close to the table's centre lin
 TURN_LIMIT = np.deg2rad(150)
 DEFAULT_REACH_CM = 5.0
 DEFAULT_TURN_DEG = 30.0
-TURN_SPEED = np.deg2rad(60)  # rad/s
+TURN_SPEED_RAD_S = np.deg2rad(60)
 SETTLE_STEP_S = 0.5
 MAX_SETTLE_S = 6.0  # a box that lands leaning on a wall can take several seconds to tip flat
 FALLEN_Z = 0.6
-PENETRATION_TOL = 0.02  # a dropped box dips ~1 cm into the bin floor for a step; tunnelling goes far deeper
-AT_REST_SPEED = 0.02  # m/s
-AT_REST_WINDOW = 1.0  # s of sim time
-JOINT_LIMIT_TOL = 0.02  # rad
+PENETRATION_TOL_M = (
+    0.03  # a box landing on a corner dips up to ~2 cm into the bin floor for a step; tunnelling goes deeper
+)
+AT_REST_SPEED_M_S = 0.02
+AT_REST_SPIN_RAD_S = 0.2
+AT_REST_WINDOW_S = 1.0
+JOINT_LIMIT_TOL_RAD = 0.02
+
+
+class BoxSample(NamedTuple):
+    time_s: float
+    speed_m_s: float
+    spin_rad_s: float
 
 
 def _jpeg(pixels: np.ndarray) -> bytes:
@@ -78,6 +89,9 @@ class MujocoSim:
         self._waist_qadr = self.model.jnt_qposadr[self.model.joint("waist_yaw_joint").id]
         self._box_geom = self.model.geom("box").id
         self._bin_floor = self.model.geom("bin_floor").id
+        self._table_top = self.model.geom("table_top").id
+        self._hand_pads = {self.model.geom(f"{side}_hand_pad").id for side in ("left", "right")}
+        self._bin_geoms = {g for g in range(self.model.ngeom) if self.model.geom_bodyid[g] == self.model.body("bin").id}
         self.on_tick: Callable[[], None] | None = None  # e.g. to film the motion for the demo video
         self._scenery = {
             g
@@ -97,14 +111,14 @@ class MujocoSim:
         d.qpos[:] = stand_qpos(m)
         scene = layout(seed)
         self._put_box(scene.box_xy)
-        self._put_bin(scene.bin_xy, scene.bin_yaw)
+        self._put_bin(d, scene.bin_xy, scene.bin_yaw)
         d.ctrl[:] = d.qpos[self.robot.actuated_qadr]
         mujoco.mj_forward(m, d)
         self.work_y = 0.0
         self.waist = 0.0
         self.closed = False
         self.lifted = False
-        self._speeds: deque[tuple[float, float]] = deque()
+        self._speeds: deque[BoxSample] = deque()
         self._fallen = self._limit_violated = self._penetrated = False
         self._actions: list[list[float]] = []
         self._times: list[float] = []
@@ -148,17 +162,25 @@ class MujocoSim:
             penetration=self._penetrated,
         )
 
-    def perturb(self, perturbation: Perturbation) -> None:
+    def perturb(self, perturbation: Perturbation) -> bool:
         rng = np.random.default_rng(perturbation.seed)
         if perturbation.kind == "move_box":
-            if self.closed:  # the box is in the robot's grip, as FakeSim treats it
-                return
+            if not self._box_loose_on_table():
+                return False
             x, y = box_xy(rng)
-            # Land between the open hands, never inside one.
+            # Land between the open hands, never inside one; the box is too wide to rest anywhere clear of closed ones.
             self._put_box((x, float(np.clip(self.work_y + y, -BOX_SHIFT_LIMIT, BOX_SHIFT_LIMIT))))
+            self._speeds.clear()  # it has not been seen at rest where it now is
         else:
-            self._put_bin(*bin_pose(rng))
+            xy, yaw = bin_pose(rng)
+            trial = copy.copy(self.data)
+            self._put_bin(trial, xy, yaw)
+            mujoco.mj_fwdPosition(self.model, trial)
+            if self._touching(trial, self._bin_geoms):  # it would land on the box or the robot
+                return False
+            self._put_bin(self.data, xy, yaw)
         mujoco.mj_forward(self.model, self.data)
+        return True
 
     def render_third_person(self) -> bytes:
         return self._render("third_person", THIRD_SIZE)
@@ -191,7 +213,7 @@ class MujocoSim:
                     return f"{call.skill}: past the {np.degrees(TURN_LIMIT):.0f} deg twist limit"
                 goal = self.data.ctrl.copy()
                 goal[self.robot.waist_yaw_act] = waist
-                move(self.model, self.data, goal, max(0.4, abs(waist - self.waist) / TURN_SPEED), self._tick)
+                move(self.model, self.data, goal, max(0.4, abs(waist - self.waist) / TURN_SPEED_RAD_S), self._tick)
                 self.waist = waist
             case "hug":
                 error = self._move_hands(self._hand_point(closed=True), CLOSED_HALF, 0.8)
@@ -243,7 +265,7 @@ class MujocoSim:
         for side, sign in (("left", 1.0), ("right", -1.0)):
             target = self.robot.to_world(self.data, np.array([point[0], point[1] + sign * half, point[2]]), self.waist)
             q, miss = self.robot.solve_arm(self.data, goal, side, target)
-            if miss > IK_TOLERANCE:
+            if miss > IK_TOLERANCE_M:
                 return ctrl, f"{side} hand can't reach there ({miss * 100:.0f} cm short)"
             goal[self.robot.arm_act[side]] = q
         return goal, None
@@ -255,27 +277,47 @@ class MujocoSim:
         return error
 
     def _box_at_rest(self) -> bool:
-        """The box has moved slower than AT_REST_SPEED for the last AT_REST_WINDOW of sim time."""
+        """For the last AT_REST_WINDOW_S of sim time the box has moved slower than AT_REST_SPEED_M_S and turned
+        slower than AT_REST_SPIN_RAD_S."""
         now = self.data.time
-        if not self._speeds or self._speeds[0][0] > now - AT_REST_WINDOW:
+        if not self._speeds or self._speeds[0].time_s > now - AT_REST_WINDOW_S:
             return False
-        return max((s for t, s in self._speeds if t >= now - AT_REST_WINDOW), default=0.0) < AT_REST_SPEED
+        return all(
+            s.speed_m_s < AT_REST_SPEED_M_S and s.spin_rad_s < AT_REST_SPIN_RAD_S
+            for s in self._speeds
+            if s.time_s >= now - AT_REST_WINDOW_S
+        )
+
+    def _box_loose_on_table(self) -> bool:
+        """Resting on the table top and not held. Hands closed on it hold it; a missed hug or an open hand against
+        it doesn't, as in FakeSim, where `held` means a hug that caught the box."""
+        touching = self._touching(self.data, {self._box_geom})
+        return self._table_top in touching and not (self.closed and touching & self._hand_pads)
+
+    def _touching(self, data: mujoco.MjData, geoms: set[int]) -> set[int]:
+        """The geoms in contact with any of `geoms`, other than those."""
+        pairs = [(c.geom1, c.geom2) for c in data.contact[: data.ncon]]
+        return ({b for a, b in pairs if a in geoms} | {a for a, b in pairs if b in geoms}) - geoms
 
     def _tick(self) -> None:
         d = self.data
         self._actions.append([float(v) for v in d.ctrl])
         self._times.append(float(d.time))
-        self._speeds.append((float(d.time), float(np.linalg.norm(d.qvel[self._box_dadr : self._box_dadr + 3]))))
-        while self._speeds and self._speeds[0][0] < d.time - 2 * AT_REST_WINDOW:
+        box_vel = d.qvel[self._box_dadr : self._box_dadr + 6]
+        self._speeds.append(
+            BoxSample(float(d.time), float(np.linalg.norm(box_vel[:3])), float(np.linalg.norm(box_vel[3:])))
+        )
+        while self._speeds and self._speeds[0].time_s < d.time - 2 * AT_REST_WINDOW_S:
             self._speeds.popleft()
         if self.on_tick:
             self.on_tick()
         self._fallen |= d.xpos[self.robot.pelvis][2] < FALLEN_Z
         self._limit_violated |= any(
-            d.qpos[adr] < lo - JOINT_LIMIT_TOL or d.qpos[adr] > hi + JOINT_LIMIT_TOL for adr, lo, hi in self._limited
+            d.qpos[adr] < lo - JOINT_LIMIT_TOL_RAD or d.qpos[adr] > hi + JOINT_LIMIT_TOL_RAD
+            for adr, lo, hi in self._limited
         )
         self._penetrated |= any(
-            c.dist < -PENETRATION_TOL and (c.geom1 in self._scenery or c.geom2 in self._scenery)
+            c.dist < -PENETRATION_TOL_M and (c.geom1 in self._scenery or c.geom2 in self._scenery)
             for c in d.contact[: d.ncon]
         )
 
@@ -284,6 +326,6 @@ class MujocoSim:
         self.data.qpos[a : a + 7] = [*xy, TABLE_TOP_Z + BOX_HALF[2], 1.0, 0.0, 0.0, 0.0]
         self.data.qvel[self._box_dadr : self._box_dadr + 6] = 0.0
 
-    def _put_bin(self, xy: tuple[float, float], yaw: float) -> None:
-        self.data.mocap_pos[self._bin] = [*xy, 0.0]
-        self.data.mocap_quat[self._bin] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]
+    def _put_bin(self, data: mujoco.MjData, xy: tuple[float, float], yaw: float) -> None:
+        data.mocap_pos[self._bin] = [*xy, 0.0]
+        data.mocap_quat[self._bin] = [np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)]

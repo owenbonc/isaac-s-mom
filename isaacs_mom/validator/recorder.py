@@ -49,6 +49,7 @@ class Recorder:
         instruction: str,
         sim_version: str,
         robot_config: str,
+        driver: Controller,
     ) -> "Recorder":
         manifest = EpisodeManifest(
             episode_id=episode_id,
@@ -59,6 +60,7 @@ class Recorder:
             instruction=instruction,
             sim_version=sim_version,
             robot_config=robot_config,
+            driver=driver,
         )
         return cls(run_dir, manifest)
 

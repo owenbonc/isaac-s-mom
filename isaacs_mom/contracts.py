@@ -140,6 +140,8 @@ class EpisodeManifest(BaseModel):
     instruction: str
     sim_version: str
     robot_config: str
+    # Who drove the episode from its first step, so one refused before any step is still attributed.
+    driver: Controller | None = None
     steps: list[StepRecord] = Field(default_factory=list)
     perturbations: list[PerturbationRecord] = Field(default_factory=list)
     takeover_step: int | None = None

@@ -12,6 +12,8 @@ from isaacs_mom.contracts import (
     EpisodeManifest,
     ExecResult,
     Observation,
+    Perturbation,
+    PerturbationRecord,
     ReplayFailure,
     ReplayReport,
     SkillCall,
@@ -103,6 +105,17 @@ def test_replay_applies_the_recorded_mid_run_perturbation(tmp_path: Path) -> Non
     assert replay(FakeSim(), path)
 
     manifest.perturbations = []
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)
+
+
+def test_replay_rejects_a_recorded_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1606)
+    manifest = _load(path)
+    # The box is in the bin by the end, so moving it is refused and nothing else about the replay changes.
+    manifest.perturbations = [
+        PerturbationRecord(before_step=len(manifest.steps), perturbation=Perturbation(kind="move_box", seed=1))
+    ]
     path.write_text(manifest.model_dump_json())
     assert not replay(FakeSim(), path)
 
@@ -210,18 +223,25 @@ def test_a_replay_result_that_cannot_be_saved_is_a_failure(tmp_path: Path, monke
     assert report.failures[0].reason == "could not save the replay result: read-only folder"
 
 
-class CrashingSim(FakeSim):
-    def execute(self, call: SkillCall) -> ExecResult:
-        raise mujoco.FatalError("simulation unstable")  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
-
-
-def test_a_simulator_crash_is_a_failed_replay_not_a_lost_run(tmp_path: Path) -> None:
+@pytest.mark.parametrize(
+    "error",
+    [
+        mujoco.FatalError("simulation unstable"),  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
+        TypeError("simulation unstable"),
+        AttributeError("simulation unstable"),
+    ],
+)
+def test_a_simulator_crash_is_a_failed_replay_not_a_lost_run(tmp_path: Path, error: Exception) -> None:
     path = _record(tmp_path, GreedyHugger, seed=1614)
+
+    class CrashingSim(FakeSim):
+        def execute(self, call: SkillCall) -> ExecResult:
+            raise error
 
     report = replay_accepted(CrashingSim(), tmp_path)
 
     assert (report.replayed, report.reproduced) == (1, 0)
-    assert report.failures[0].reason == "replay raised FatalError: simulation unstable"
+    assert report.failures[0].reason == f"replay raised {type(error).__name__}: simulation unstable"
     assert _load(path).replay_valid is False
 
 
@@ -240,3 +260,12 @@ def test_a_save_failure_keeps_the_divergence_it_found(tmp_path: Path, monkeypatc
     assert report.failures[0].reason == (
         "step 0: executed actions differ; could not save the replay result: read-only folder"
     )
+
+
+def test_replay_rejects_a_mid_run_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1603)
+    manifest = _load(path)
+    lift = next(i for i, s in enumerate(manifest.steps) if s.skill_call.skill == "lift")  # the box is held by then
+    manifest.perturbations = [PerturbationRecord(before_step=lift, perturbation=Perturbation(kind="move_box", seed=1))]
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)  # every step and the verdict still match: only the refused move tells

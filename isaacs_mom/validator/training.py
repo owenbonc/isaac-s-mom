@@ -4,7 +4,7 @@ from pathlib import Path
 from isaacs_mom.contracts import EpisodeManifest, SkillTarget, TrainingExample, TrainingSetSummary
 from isaacs_mom.seeds import assert_not_heldout
 from isaacs_mom.validator.recorder import write_atomically
-from isaacs_mom.validator.rules import RECORDING_ERROR, failure_categories
+from isaacs_mom.validator.rules import failure_categories
 
 
 def training_examples(episode_dir: Path, manifest: EpisodeManifest) -> list[TrainingExample]:
@@ -51,16 +51,10 @@ def build_training_set(run_dir: Path, round_: int) -> Path:
 
 
 def _summarise(round_: int, manifests: list[EpisodeManifest], examples: int) -> TrainingSetSummary:
-    # A demonstration is a dev episode the teacher drove at least one step of.
-    demos = [m for m in manifests if m.split == "dev" and any(s.controller == "teacher" for s in m.steps)]
+    # A demonstration is a dev episode the teacher drove, from its first step or after a takeover.
+    demos = [m for m in manifests if m.split == "dev" and (m.driver == "teacher" or _teacher_stepped(m))]
     verdicts = [m.validation for m in demos if m.validation is not None]
     rejected = [v for v in verdicts if not v.accepted]
-    # A recording error on the very first step leaves no teacher step, so count those episodes' errors too.
-    refused_at_once = [
-        m.validation
-        for m in manifests
-        if m.split == "dev" and not m.steps and m.validation and m.validation.reason.startswith(RECORDING_ERROR)
-    ]
     return TrainingSetSummary(
         round=round_,
         episodes_scanned=len(manifests),
@@ -68,10 +62,12 @@ def _summarise(round_: int, manifests: list[EpisodeManifest], examples: int) -> 
         accepted=len(verdicts) - len(rejected),
         rejected=len(rejected),
         unfinished=len(demos) - len(verdicts),
-        rejected_by=dict(
-            Counter(c for v in rejected + refused_at_once for c in failure_categories(v.reason) or ["other"])
-        ),
-        # A teacher that stops before its first step leaves no teacher step, so count these rather than drop them.
+        rejected_by=dict(Counter(c for v in rejected for c in failure_categories(v.reason) or ["other"])),
+        # Dev episodes with no step at all, whoever drove them, so a policy that stopped at once stays visible.
         empty_dev_episodes=sum(1 for m in manifests if m.split == "dev" and not m.steps),
         examples=examples,
     )
+
+
+def _teacher_stepped(manifest: EpisodeManifest) -> bool:
+    return any(s.controller == "teacher" for s in manifest.steps)

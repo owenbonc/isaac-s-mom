@@ -11,14 +11,24 @@ from isaacs_mom.validator.rules import validate
 # The recorder saves actions as float32, so a faithful re-run matches only to float32 precision.
 TOLERANCE = 1e-5
 # MuJoCo's FatalError subclasses none of the built-in errors.
-REPLAY_ERRORS = (OSError, ValueError, RuntimeError, ArithmeticError, LookupError, mujoco.FatalError)  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
+REPLAY_ERRORS = (
+    OSError,
+    ValueError,
+    RuntimeError,
+    ArithmeticError,
+    LookupError,
+    TypeError,
+    AttributeError,
+    mujoco.FatalError,  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
+)
 
 
 def replay(sim: TruthSim, manifest_path: Path) -> bool:
     """SPEC §3.4: re-run the stored skill calls and perturbations from the stored seed; sets `replay_valid`.
 
-    True when every step's executed actions, timestamps and outcome match the recording and the final verdict
-    matches the stored one, so a rejected episode replays as valid when its failure reproduces.
+    True when every recorded perturbation applies again, every step's executed actions, timestamps and outcome match
+    the recording and the final verdict matches the stored one, so a rejected episode replays as valid when its
+    failure reproduces.
     """
     manifest = EpisodeManifest.model_validate_json(manifest_path.read_text())
     reproduced = _divergence(sim, manifest, manifest_path.parent) is None
@@ -66,10 +76,12 @@ def _divergence(sim: TruthSim, manifest: EpisodeManifest, episode_dir: Path) -> 
     """Where a re-run first differs from the recording, or None when it reproduces."""
     sim.reset(manifest.seed)
     for i, step in enumerate(manifest.steps):
-        _perturb_before(sim, manifest, i)
+        applied = _perturb_before(sim, manifest, i)
         result = sim.execute(step.skill_call)
         stored = np.load(episode_dir / step.actions)
         actual = np.asarray(result.executed_actions, dtype=np.float32)
+        if not applied:
+            return f"step {i}: a recorded perturbation no longer applies"
         if result.ok != step.ok:
             return f"step {i}: outcome differs"
         if actual.shape != stored.shape or not np.allclose(actual, stored, atol=TOLERANCE):
@@ -78,13 +90,13 @@ def _divergence(sim: TruthSim, manifest: EpisodeManifest, episode_dir: Path) -> 
             result.timestamps, step.timestamps, atol=TOLERANCE
         ):
             return f"step {i}: timestamps differ"
-    _perturb_before(sim, manifest, len(manifest.steps))
+    if not _perturb_before(sim, manifest, len(manifest.steps)):
+        return "a recorded perturbation after the last step no longer applies"
     if validate(sim.ground_truth()) != manifest.validation:
         return "final verdict differs"
     return None
 
 
-def _perturb_before(sim: TruthSim, manifest: EpisodeManifest, step: int) -> None:
-    for record in manifest.perturbations:
-        if record.before_step == step:
-            sim.perturb(record.perturbation)
+def _perturb_before(sim: TruthSim, manifest: EpisodeManifest, step: int) -> bool:
+    """Apply the perturbations recorded before `step`; False when one no longer applies."""
+    return all([sim.perturb(r.perturbation) for r in manifest.perturbations if r.before_step == step])
