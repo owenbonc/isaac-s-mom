@@ -3,12 +3,11 @@
 from isaacs_mom.student.checkpoints import BASE_CHECKPOINT, adapter_dir, valid_run_id
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.stub import StubStudent, stub_finetune
-from isaacs_mom.student.tuning import NO_CUDA, TRAINERS, finetune, has_cuda
+from isaacs_mom.student.tuning import NO_CUDA, finetune, has_cuda
 
 __all__ = [
     "BASE_CHECKPOINT",
     "NO_CUDA",
-    "TRAINERS",
     "StubStudent",
     "StudentPolicy",
     "adapter_dir",

@@ -1,4 +1,4 @@
-"""LoRA fine-tuning of SmolVLM2, shared by the local CUDA and Modal trainers (SPEC §3.2)."""
+"""LoRA fine-tuning of SmolVLM2 on the local CUDA GPU (SPEC §3.2)."""
 
 import contextlib
 import json

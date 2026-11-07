@@ -1,4 +1,4 @@
-"""Fine-tuning (SPEC §3.2): package a training set, train on the local GPU or Modal, store the run's ckpt-r<round>."""
+"""Fine-tuning (SPEC §3.2): package a training set, train on the local CUDA GPU, store the run's ckpt-r<round>."""
 
 import json
 import logging
@@ -13,7 +13,7 @@ from isaacs_mom.student.prompt import format_target
 
 Trainer = Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]
 log = logging.getLogger(__name__)
-NO_CUDA = "local fine-tuning needs a CUDA GPU (the 4070 Ti / 5060 laptops), or pass --trainer modal"
+NO_CUDA = "fine-tuning needs a CUDA GPU (the Windows RTX 5070 or 5060 machine); --student stub runs without one"
 
 
 def has_cuda() -> bool:
@@ -29,20 +29,8 @@ def local_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> d
     return lora_train(examples, images, "cuda")
 
 
-def modal_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
-    import modal
-
-    from isaacs_mom.student.finetune_modal import app, train
-
-    with modal.enable_output(), app.run():
-        return train.remote(examples, images)
-
-
-TRAINERS: dict[str, Trainer] = {"local": local_trainer, "modal": modal_trainer}
-
-
 def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]:
-    """Frames ship as bytes under short keys, because the training container cannot read local paths."""
+    """Each frame is read once, under a short key, however many examples share it."""
     keys: dict[str, str] = {}
     images: dict[str, bytes] = {}
     examples: list[dict[str, str]] = []
