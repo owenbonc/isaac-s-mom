@@ -14,7 +14,7 @@ from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
-from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, FakeSim
+from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, PLACE_X, FakeSim
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
@@ -33,19 +33,25 @@ class ScriptedPolicy:
 
     def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
         gt = self.sim.ground_truth()
-        work_y, waist, closed, lifted = obs.joint_state
+        work_y, closed, lifted = obs.joint_state
+        x, y, heading = self.sim.pose()
         if gt.box_on_bin_floor:
             return None
         if not closed:
-            dy = gt.box_xyz[1] - work_y
+            dy = -math.sin(heading) * (gt.box_xyz[0] - x) + math.cos(heading) * (gt.box_xyz[1] - y) - work_y
             if abs(dy) > 0.01:
                 return SkillCall(skill="reach_left" if dy > 0 else "reach_right", params={"distance_cm": abs(dy) * 100})
             return SkillCall(skill="hug")
         if not lifted:
             return SkillCall(skill="lift")
-        turn = math.degrees(math.atan2(gt.bin_xy[1], gt.bin_xy[0]) - waist)
+        if abs(gt.box_xyz[0] - 0.4) < 0.2 and abs(gt.box_xyz[1]) < 0.25:  # still over the table
+            return SkillCall(skill="walk_back", params={"distance_cm": 30})
+        dist = math.hypot(gt.bin_xy[0] - x, gt.bin_xy[1] - y)
+        turn = math.degrees(math.remainder(math.atan2(gt.bin_xy[1] - y, gt.bin_xy[0] - x) - heading, math.tau))
         if abs(turn) > 2:
             return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
+        if dist > PLACE_X + 0.05:
+            return SkillCall(skill="walk_forward", params={"distance_cm": (dist - PLACE_X - 0.02) * 100})
         return SkillCall(skill="place")
 
 
@@ -76,8 +82,8 @@ def test_skill_calls_are_whitelisted_and_clamped() -> None:
         SkillCall.model_validate({"skill": "fly"})
     with pytest.raises(ValidationError):
         SkillCall(skill="reach_left", params={"torque": 5.0})
-    assert SkillCall(skill="reach_left", params={"distance_cm": 500}).params["distance_cm"] == 20
-    assert SkillCall(skill="turn_left", params={"angle_deg": 500}).params["angle_deg"] == 45
+    assert SkillCall(skill="walk_forward", params={"distance_cm": 500}).params["distance_cm"] == 150
+    assert SkillCall(skill="turn_left", params={"angle_deg": 500}).params["angle_deg"] == 180
 
 
 @pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
@@ -94,7 +100,7 @@ def test_non_finite_params_in_model_output_are_rejected(text: str) -> None:
         SkillCall.model_validate(raw)
 
 
-def test_fake_place_without_turning_drops_the_box_outside_the_bin() -> None:
+def test_fake_place_without_walking_drops_the_box_outside_the_bin() -> None:
     sim = FakeSim()
     sim.reset(1234)
     box_y = sim.ground_truth().box_xyz[1]
@@ -115,16 +121,22 @@ def test_fake_refuses_a_reach_past_the_limit_without_moving() -> None:
     assert sim.observe().joint_state == before
 
 
-def test_fake_refuses_an_out_of_reach_skill_without_moving() -> None:
+def test_fake_refuses_a_walk_into_the_table_without_moving() -> None:
     sim = FakeSim()
     sim.reset(1234)
-    before = sim.observe().joint_state
-    result = sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 45}))
-    assert result.ok
-    for _ in range(3):
-        result = sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 45}))
-    assert not result.ok and result.error and not result.executed_actions
-    assert sim.observe().joint_state[1] == pytest.approx(before[1] + math.radians(135))
+    before = (sim.observe().joint_state, sim.pose())
+    result = sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 30}))
+    assert not result.ok and result.error and "table" in result.error and not result.executed_actions
+    assert (sim.observe().joint_state, sim.pose()) == before
+
+
+def test_fake_walks_and_turns_the_requested_amounts() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90}))
+    sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 50}))
+    assert sim.pose() == pytest.approx((-0.30, 0.50, math.pi / 2))
 
 
 def _to_the_bin(sim: FakeSim) -> None:

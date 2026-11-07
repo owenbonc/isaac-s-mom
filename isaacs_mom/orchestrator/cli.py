@@ -5,6 +5,7 @@ from pathlib import Path
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
+from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
     NO_CUDA,
     StubStudent,
@@ -26,14 +27,14 @@ def run_id(text: str) -> str:
     return text
 
 
-def make_sim(name: str) -> TruthSim:
+def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
     if name == "fake":
         from isaacs_mom.sim.fake import FakeSim
 
         return FakeSim()
     from isaacs_mom.sim.mujoco import MujocoSim
 
-    return MujocoSim()
+    return MujocoSim(TASKS[task])
 
 
 def main() -> None:
@@ -49,7 +50,10 @@ def main() -> None:
     )
     run.add_argument("--rounds", type=int, default=3)
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
+    run.add_argument("--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)")
     args = parser.parse_args()
+    if args.sim == "fake" and args.task != DEFAULT_TASK.name:
+        parser.error(f"--sim fake plays only the default task, {DEFAULT_TASK.name}")
 
     if args.student == "smolvlm" and args.rounds > 0 and not has_cuda():
         run.error(NO_CUDA)
@@ -61,7 +65,7 @@ def main() -> None:
     if teacher == "argon":
         argon.check()  # the stub has no key or model to check, so it spends nothing
     results = run_loop(
-        make_sim(args.sim),
+        make_sim(args.sim, args.task),
         run_dir,
         args.run_id,
         max_rounds=args.rounds,

@@ -1,12 +1,13 @@
 # pyright: reportAttributeAccessIssue=false
 # (mujoco's compiled bindings ship no type information, so every mujoco.* attribute looks unknown)
-"""Workstream 1: the real MuJoCo scene (SPEC §6 Gate A, rule 7).
+"""Workstream 1: the real MuJoCo scene with the walking G1 (SPEC §6 Gate A, rule 7).
 
 The physics tests run everywhere with a blank camera; only the tests that look at frames need a GL context.
 """
 
 import io
 import json
+import math
 from pathlib import Path
 
 import mujoco
@@ -18,7 +19,7 @@ from isaacs_mom.contracts import Observation, Perturbation, SkillCall
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.sim.mujoco import MujocoSim
-from isaacs_mom.sim.mujoco.preview import OraclePolicy
+from isaacs_mom.sim.mujoco.preview import OraclePolicy, run_scripted
 from isaacs_mom.sim.mujoco.scene import bin_pose
 from isaacs_mom.validator import replay, validate
 
@@ -104,6 +105,9 @@ def test_out_of_reach_skills_are_refused_not_executed(blind_sim: MujocoSim) -> N
 
 
 def test_a_reach_past_the_limit_is_refused_though_the_arms_could_make_it(blind_sim: MujocoSim) -> None:
+    # Closed hands, so 12 cm and 13 cm are both within the arms' reach and only the limit can refuse.
+    _put_box(blind_sim, (0.0, -1.0, 0.13))
+    blind_sim.execute(SkillCall(skill="hug"))
     assert blind_sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 12})).ok
     before = _state(blind_sim)
     result = blind_sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 1}))  # 13 cm: IK reaches it
@@ -113,7 +117,7 @@ def test_a_reach_past_the_limit_is_refused_though_the_arms_could_make_it(blind_s
 
 @pytest.mark.parametrize(
     ("skill", "target", "unreachable"),
-    [("reach_left", "BOX_X", 0.8), ("hug", "HUG_Z", 2.0), ("lift", "LIFT_DZ", 1.0)],
+    [("reach_left", "BOX_X", 0.8), ("hug", "_hug_z", 2.0), ("lift", "_lift_m", 1.0)],
 )
 def test_a_skill_whose_target_is_out_of_reach_changes_nothing(
     blind_sim: MujocoSim, monkeypatch: pytest.MonkeyPatch, skill: str, target: str, unreachable: float
@@ -123,7 +127,10 @@ def test_a_skill_whose_target_is_out_of_reach_changes_nothing(
         blind_sim.execute(SkillCall(skill="reach_left", params={"distance_cm": start[1] * 100}))
     if skill == "lift":
         blind_sim.execute(SkillCall(skill="hug"))
-    monkeypatch.setattr(f"isaacs_mom.sim.mujoco.sim.{target}", unreachable)
+    if target.startswith("_"):  # set from the task, so it lives on the sim
+        monkeypatch.setattr(blind_sim, target, unreachable)
+    else:
+        monkeypatch.setattr(f"isaacs_mom.sim.mujoco.sim.{target}", unreachable)
     before = _state(blind_sim)
     result = blind_sim.execute(SkillCall.model_validate({"skill": skill}))
     assert not result.ok and result.error and "can't reach" in result.error and not result.executed_actions
@@ -176,6 +183,8 @@ def _in_bin_frame(sim: MujocoSim, local_x: float) -> tuple[float, float, float]:
 
 
 def test_a_box_left_on_the_table_fails(sim: MujocoSim) -> None:
+    box_y = sim.ground_truth().box_xyz[1]
+    sim.execute(SkillCall(skill="reach_left", params={"distance_cm": box_y * 100}))  # lined up, never hugged
     _wait(sim, 1.6)
     gt = sim.ground_truth()
     assert gt.box_at_rest and not gt.box_on_bin_floor
@@ -202,6 +211,8 @@ def test_a_box_leaning_on_the_bins_outside_fails(sim: MujocoSim) -> None:
 
 
 def test_a_box_set_down_from_5_mm_is_at_rest_only_a_full_second_later(sim: MujocoSim) -> None:
+    # Line the open hands up with the box, so the stepping robot's forearms don't brush it.
+    sim.execute(SkillCall(skill="reach_left", params={"distance_cm": sim.ground_truth().box_xyz[1] * 100}))
     _wait(sim, 1.6)
     x, y, z = sim.ground_truth().box_xyz
     _put_box(sim, (x, y, z + 0.005))  # lands at 0.2 m/s and is still within 0.2 s
@@ -212,8 +223,8 @@ def test_a_box_set_down_from_5_mm_is_at_rest_only_a_full_second_later(sim: Mujoc
 
 
 def test_a_box_turning_in_place_is_not_at_rest(sim: MujocoSim) -> None:
-    x, y, z = sim.ground_truth().box_xyz
-    sim.execute(SkillCall(skill="reach_left", params={"distance_cm": y * 100}))  # open hands clear either side
+    # On the floor well clear of the robot: a spinning box's corners would reach the forearms at the table.
+    x, y, z = 0.0, -1.0, 0.125
     _put_box(sim, (x, y, z + 0.002))
     dof = sim.model.jnt_dofadr[sim.model.joint("box_free").id]
     sim.data.qvel[dof + 5] = 1.0  # turning about its vertical axis, its centre still
@@ -253,6 +264,16 @@ def test_a_shoved_robot_is_flagged_as_fallen(sim: MujocoSim) -> None:
     assert validate(gt).reason.split("; ")[0] == "robot fell"
 
 
+def test_joints_count_as_past_their_range_only_beyond_the_tolerance(sim: MujocoSim) -> None:
+    joint = sim.model.joint("left_shoulder_roll_joint").id
+    adr, low = sim.model.jnt_qposadr[joint], sim.model.jnt_range[joint][0]
+    assert sim.joints_past_limits() == []
+    sim.data.qpos[adr] = low - 0.01  # inside the 0.02 rad tolerance
+    assert sim.joints_past_limits() == []
+    sim.data.qpos[adr] = low - 0.05
+    assert sim.joints_past_limits() == ["left_shoulder_roll_joint"]
+
+
 def test_an_arm_forced_past_its_joint_range_is_flagged(sim: MujocoSim) -> None:
     joint = sim.model.joint("left_shoulder_roll_joint").id
     sim.data.qpos[sim.model.jnt_qposadr[joint]] = sim.model.jnt_range[joint][0] - 0.3  # a knock 0.3 rad past it
@@ -263,25 +284,134 @@ def test_an_arm_forced_past_its_joint_range_is_flagged(sim: MujocoSim) -> None:
 
 
 def _state(sim: MujocoSim) -> tuple[object, ...]:
-    return sim.work_y, sim.waist, sim.closed, sim.lifted, sim.data.time, sim.data.ctrl.tolist()
+    return (
+        sim.work_y,
+        sim.closed,
+        sim.lifted,
+        sim.goal_xy.tolist(),
+        sim.goal_yaw,
+        sim.pose(),
+        sim.data.time,
+        sim.data.ctrl.tolist(),
+    )
 
 
-def test_a_turn_past_the_limit_is_refused_and_changes_nothing(blind_sim: MujocoSim) -> None:
-    start = blind_sim.ground_truth().box_xyz
-    blind_sim.execute(SkillCall(skill="reach_left", params={"distance_cm": start[1] * 100}))
-    blind_sim.execute(SkillCall(skill="hug"))
-    blind_sim.execute(SkillCall(skill="lift"))
-    for _ in range(3):
-        assert blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 45})).ok
+def _carry(sim: MujocoSim) -> None:
+    box_y = sim.ground_truth().box_xyz[1]
+    for call in [
+        SkillCall(skill="reach_left", params={"distance_cm": box_y * 100}),
+        SkillCall(skill="hug"),
+        SkillCall(skill="lift"),
+        SkillCall(skill="walk_back", params={"distance_cm": 30}),
+    ]:
+        assert sim.execute(call).ok, call
+
+
+def _face_the_bin(sim: MujocoSim) -> float:
+    """Turn to the bin; its distance from the pelvis."""
+    x, y, heading = sim.pose()
+    bin_xy = sim.ground_truth().bin_xy
+    turn = math.degrees(math.remainder(math.atan2(bin_xy[1] - y, bin_xy[0] - x) - heading, math.tau))
+    assert sim.execute(SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})).ok
+    x, y, _ = sim.pose()
+    return math.hypot(bin_xy[0] - x, bin_xy[1] - y)
+
+
+def test_walking_into_the_bin_is_refused_and_changes_nothing(blind_sim: MujocoSim) -> None:
+    _carry(blind_sim)
+    dist = _face_the_bin(blind_sim)
     before = _state(blind_sim)
-    result = blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 45}))
-    assert not result.ok and result.error and "twist limit" in result.error and not result.executed_actions
+    result = blind_sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": dist * 100}))
+    assert not result.ok and result.error and "into the bin" in result.error and not result.executed_actions
     assert _state(blind_sim) == before
+
+
+def test_walking_into_the_table_is_refused_and_changes_nothing(blind_sim: MujocoSim) -> None:
+    before = _state(blind_sim)
+    result = blind_sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 30}))
+    assert not result.ok and result.error and "into the table" in result.error and not result.executed_actions
+    assert _state(blind_sim) == before
+
+
+def test_walk_forward_goes_the_requested_distance_on_its_own_feet(blind_sim: MujocoSim) -> None:
+    blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90}))
+    x, y, heading = blind_sim.pose()
+    assert blind_sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 60})).ok
+    x2, y2, heading2 = blind_sim.pose()
+    assert math.hypot(x2 - x, y2 - y) == pytest.approx(0.60, abs=0.05)
+    assert math.degrees(math.remainder(math.atan2(y2 - y, x2 - x) - heading, math.tau)) == pytest.approx(0, abs=5)
+    assert abs(math.degrees(math.remainder(heading2 - heading, math.tau))) < 4
+    assert not blind_sim.ground_truth().robot_fallen
+
+
+def test_turning_turns_the_whole_body_in_place(blind_sim: MujocoSim) -> None:
+    blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    x, y, heading = blind_sim.pose()
+    assert blind_sim.execute(SkillCall(skill="turn_right", params={"angle_deg": 135})).ok
+    x2, y2, heading2 = blind_sim.pose()
+    assert math.degrees(math.remainder(heading2 - heading, math.tau)) == pytest.approx(-135, abs=4)
+    assert math.hypot(x2 - x, y2 - y) < 0.06
+
+
+# SEED's box starts 9 cm left of centre, so turning right swings the left hand into its front corner. A 90 degree turn
+# ends with both hands clear of it, so only checking the sweep on the way round catches it.
+@pytest.mark.parametrize(("skill", "angle"), [("turn_right", 30), ("turn_left", 90), ("turn_right", 90)])
+def test_a_turn_that_would_sweep_the_arms_into_the_box_is_refused_and_changes_nothing(
+    blind_sim: MujocoSim, skill: str, angle: float
+) -> None:
+    before, qpos, qvel = _state(blind_sim), blind_sim.data.qpos.tobytes(), blind_sim.data.qvel.tobytes()
+    result = blind_sim.execute(SkillCall.model_validate({"skill": skill, "params": {"angle_deg": angle}}))
+    assert not result.ok and result.error and "sweep into the box" in result.error and not result.executed_actions
+    assert (_state(blind_sim), blind_sim.data.qpos.tobytes(), blind_sim.data.qvel.tobytes()) == (before, qpos, qvel)
+
+
+@pytest.mark.parametrize("start", ["ready", "backed_off", "holding_it"])
+def test_a_30_degree_turn_clear_of_the_box_still_turns(blind_sim: MujocoSim, start: str) -> None:
+    if start == "backed_off":  # the open arms swing round behind the box
+        assert blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30})).ok
+    elif start == "holding_it":
+        _carry(blind_sim)
+    box, heading = blind_sim.ground_truth().box_xyz, blind_sim.pose()[2]
+    assert blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30})).ok
+    assert math.degrees(math.remainder(blind_sim.pose()[2] - heading, math.tau)) == pytest.approx(30, abs=4)
+    if start != "holding_it":
+        assert blind_sim.ground_truth().box_xyz == pytest.approx(box, abs=0.005)
+
+
+def test_a_hugged_box_survives_walking_and_turning(blind_sim: MujocoSim) -> None:
+    _carry(blind_sim)
+    assert blind_sim.execute(SkillCall(skill="turn_right", params={"angle_deg": 120})).ok
+    assert blind_sim.execute(SkillCall(skill="walk_forward", params={"distance_cm": 80})).ok
+    x, y, heading = blind_sim.pose()
+    box = blind_sim.ground_truth().box_xyz
+    ahead = math.cos(heading) * (box[0] - x) + math.sin(heading) * (box[1] - y)
+    assert box[2] > 0.8 and 0.25 < ahead < 0.45  # still held up in front of the chest
+    assert not blind_sim.ground_truth().robot_fallen
+
+
+def test_a_robot_shoved_while_walking_is_flagged_as_fallen(blind_sim: MujocoSim) -> None:
+    blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    blind_sim.data.qvel[1] = 3.0  # a hard sideways shove on the pelvis
+    blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    _wait(blind_sim, 1.0)
+    gt = blind_sim.ground_truth()
+    assert gt.robot_fallen
+    assert "robot fell" in validate(gt).reason.split("; ")
+
+
+def test_the_scripted_policy_finds_a_bin_moved_mid_carry(blind_sim: MujocoSim) -> None:
+    verdict, _ = run_scripted(blind_sim, SEED, move_bin_at=5)
+    assert verdict.accepted, verdict.reason
 
 
 @pytest.mark.parametrize(
     ("waypoint", "unreachable"),
-    [("PLACE_X", 0.8), ("PLACE_Z", 0.4), ("RELEASE_HALF", 0.5)],  # the first, second, then only the last out of reach
+    [
+        ("_place_x", 0.8),
+        ("_place_z", 0.4),
+        ("_release_half", 0.5),
+    ],  # the first, second, then only the last out of reach
 )
 def test_a_place_with_any_waypoint_out_of_reach_changes_nothing(
     blind_sim: MujocoSim, monkeypatch: pytest.MonkeyPatch, waypoint: str, unreachable: float
@@ -290,7 +420,7 @@ def test_a_place_with_any_waypoint_out_of_reach_changes_nothing(
     blind_sim.execute(SkillCall(skill="reach_left", params={"distance_cm": start[1] * 100}))
     blind_sim.execute(SkillCall(skill="hug"))
     blind_sim.execute(SkillCall(skill="lift"))
-    monkeypatch.setattr(f"isaacs_mom.sim.mujoco.sim.{waypoint}", unreachable)
+    monkeypatch.setattr(blind_sim, waypoint, unreachable)  # set from the task, so it lives on the sim
     before = _state(blind_sim)
     result = blind_sim.execute(SkillCall(skill="place"))
     assert not result.ok and result.error and "can't reach" in result.error and not result.executed_actions
@@ -304,6 +434,33 @@ def test_moving_the_box_is_refused_once_it_is_hugged(sim: MujocoSim) -> None:
     held = sim.ground_truth()
     assert not sim.perturb(Perturbation(kind="move_box", seed=99))
     assert sim.ground_truth() == held
+
+
+def test_a_walk_that_never_arrives_reports_how_far_short(sim: MujocoSim, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(sim.walker, "command_to", lambda *args, **kwargs: np.zeros(3))  # legs that won't go anywhere
+    sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    result = sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 50}))
+    assert not result.ok and result.error and "short" in result.error
+    assert result.executed_actions  # it did try: the stepping it executed is still recorded (rule 4)
+
+
+def test_a_moved_box_never_lands_in_the_robots_arms(sim: MujocoSim) -> None:
+    box_geom = sim.model.geom("box").id
+    pelvis = sim.model.body("pelvis").id
+    robot = {g for g in range(sim.model.ngeom) if sim.model.body_rootid[sim.model.geom_bodyid[g]] == pelvis}
+    for reach in ("reach_left", "reach_right"):  # an arm swung in over the table, where a careless drop would hit it
+        for seed in range(8):
+            sim.reset(SEED)
+            sim.execute(SkillCall(skill=reach, params={"distance_cm": 10}))
+            if not sim.perturb(Perturbation(kind="move_box", seed=seed)):
+                continue
+            touching = {
+                g
+                for c in sim.data.contact[: sim.data.ncon]
+                for g in (c.geom1, c.geom2)
+                if box_geom in (c.geom1, c.geom2)
+            }
+            assert not touching & robot, f"{reach} move_box seed {seed}"
 
 
 @pytest.mark.parametrize("height", [0.13, 0.45])  # on the floor, in the bin
@@ -330,9 +487,16 @@ def test_a_box_out_of_the_closed_hands_still_moves(sim: MujocoSim) -> None:
 
 
 def test_a_moved_box_is_at_rest_only_a_full_second_later(sim: MujocoSim) -> None:
+    def line_up() -> None:  # so the stepping robot's forearms don't brush the box while it waits
+        dy = sim.ground_truth().box_xyz[1] - sim.work_y
+        sim.execute(SkillCall(skill="reach_left" if dy > 0 else "reach_right", params={"distance_cm": abs(dy) * 100}))
+
+    line_up()
     _wait(sim, 1.6)
+    assert sim.ground_truth().box_at_rest
     assert sim.perturb(Perturbation(kind="move_box", seed=99))
     assert not sim.ground_truth().box_at_rest
+    line_up()
     _wait(sim, 1.2)
     assert sim.ground_truth().box_at_rest
 
@@ -341,37 +505,35 @@ def test_a_placed_box_stays_in_the_bin_and_the_refused_perturbation_is_not_recor
     blind_sim: MujocoSim, tmp_path: Path
 ) -> None:
     events = EventLog(tmp_path, "t")
-    manifest = run_episode(
-        blind_sim,
-        OraclePolicy(blind_sim),
-        run_dir=tmp_path,
-        events=events,
-        seed=3,
-        split="dev",
-        round_=0,
-        instruction="hug",
-        perturb_at=7,  # seed 3 places on step 6, so the box is in the bin by then
-    )
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug"}
+    steps = len(run_episode(blind_sim, OraclePolicy(blind_sim), seed=3, **common).steps)
+    # Moved after the last step, the box is in the bin by then.
+    manifest = run_episode(blind_sim, OraclePolicy(blind_sim), seed=3, perturb_at=steps, **common)
     assert manifest.validation and manifest.validation.accepted, manifest.validation
     assert manifest.perturbations == []
     logged = [json.loads(line) for line in events.path.read_text().splitlines()]
-    assert not [e for e in logged if e["type"] == "perturbation"]
-    assert [e["data"]["step"] for e in logged if e["type"] == "error"] == [7]
+    mine = [e for e in logged if e["data"].get("episode_id") == manifest.episode_id]
+    assert not [e for e in mine if e["type"] == "perturbation"]
+    assert [e["data"]["step"] for e in mine if e["type"] == "error"] == [steps]
     assert replay(blind_sim, tmp_path / "episodes" / manifest.episode_id / "manifest.json")
 
 
 def test_moving_the_bin_is_refused_only_where_it_would_land_on_the_box(sim: MujocoSim) -> None:
-    x, y, yaw = _in_bin_frame(sim, 0.375)
-    _put_box(sim, (x, y, 0.13), yaw)  # on the floor, 1 cm outside the bin's far wall
+    def pose_for(seed: int) -> tuple[tuple[float, float], float]:
+        return bin_pose(np.random.default_rng(seed), sim.task, around=(float(sim.goal_xy[0]), float(sim.goal_xy[1])))
+
+    (x, y), yaw = pose_for(0)
+    _put_box(sim, (x, y, 0.13), yaw)  # on the floor exactly where seed 0 would put the bin
     _wait(sim, 1.0)
     before = sim.ground_truth()
     assert not before.penetration
-    assert not sim.perturb(Perturbation(kind="move_bin", seed=0))  # a pose that covers the box
+    assert not sim.perturb(Perturbation(kind="move_bin", seed=0))
     assert sim.ground_truth() == before
-    assert sim.perturb(Perturbation(kind="move_bin", seed=2))  # a pose clear of it
-    (bin_x, bin_y), bin_yaw = bin_pose(np.random.default_rng(2))
+    clear = next(s for s in range(1, 100) if math.dist(pose_for(s)[0], before.box_xyz[:2]) > 0.8)
+    expected = pose_for(clear)
+    assert sim.perturb(Perturbation(kind="move_bin", seed=clear))
     after = sim.ground_truth()
-    assert after.bin_xy == pytest.approx((bin_x, bin_y)) and after.bin_yaw == pytest.approx(bin_yaw)
+    assert after.bin_xy == pytest.approx(expected[0]) and after.bin_yaw == pytest.approx(expected[1])
     assert after.box_xyz == pytest.approx(before.box_xyz, abs=1e-6) and not after.penetration
 
 
@@ -419,25 +581,18 @@ def test_a_box_with_an_open_hand_against_it_still_moves(sim: MujocoSim) -> None:
     assert sim.ground_truth().box_xyz[:2] != pytest.approx(before[:2], abs=0.01)
 
 
-def test_a_moved_box_lands_between_the_open_hands(sim: MujocoSim) -> None:
-    assert sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 10})).ok
-    for seed in range(10):
-        assert sim.perturb(Perturbation(kind="move_box", seed=seed))
-        assert abs(sim.ground_truth().box_xyz[1] - sim.work_y) <= 0.10 + 1e-6, f"move_box seed {seed}"
-        sim.execute(SkillCall(skill="reobserve"))  # let it settle onto the table before the next move
-
-
 def test_moving_the_bin_onto_the_robot_is_refused(sim: MujocoSim, monkeypatch: pytest.MonkeyPatch) -> None:
-    monkeypatch.setattr("isaacs_mom.sim.mujoco.sim.bin_pose", lambda rng: ((0.0, 0.0), 0.0))  # where it stands
+    monkeypatch.setattr("isaacs_mom.sim.mujoco.sim.bin_pose", lambda *_, **__: ((0.0, 0.0), 0.0))  # where it stands
     before = sim.ground_truth()
     assert not sim.perturb(Perturbation(kind="move_bin", seed=0))
     assert sim.ground_truth() == before
 
 
-def test_ground_truth_heading_follows_the_waist_twist(sim: MujocoSim) -> None:
-    before = sim.ground_truth()
-    assert before.robot_yaw == pytest.approx(0.0, abs=np.deg2rad(3))
-    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
-    after = sim.ground_truth()
-    assert after.robot_yaw - before.robot_yaw == pytest.approx(np.deg2rad(30), abs=np.deg2rad(3))
-    assert np.hypot(after.robot_xy[0] - before.robot_xy[0], after.robot_xy[1] - before.robot_xy[1]) < 0.02
+def test_ground_truth_follows_the_robot_as_it_walks(blind_sim: MujocoSim) -> None:
+    start = blind_sim.ground_truth()
+    assert start.robot_xy == pytest.approx((0.0, 0.0), abs=0.04) and start.robot_yaw == pytest.approx(0.0, abs=0.05)
+    assert blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30})).ok
+    assert blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90})).ok
+    moved = blind_sim.ground_truth()
+    assert moved.robot_xy == pytest.approx((-0.30, 0.0), abs=0.05)
+    assert np.degrees(moved.robot_yaw) == pytest.approx(90, abs=5)
