@@ -89,6 +89,9 @@ def test_stream_turns_frame_paths_into_urls_and_hides_outside_paths(tmp_path: Pa
     assert frames == ["/frames/episodes/ep-1/frames/0000.jpg", None]
 
 
-def test_page_is_served(tmp_path: Path) -> None:
+def test_page_and_its_scripts_are_served_without_caching(tmp_path: Path) -> None:
     client = TestClient(create_app(make_run(tmp_path)))
-    assert "EventSource" in client.get("/").text
+    page = client.get("/")
+    assert "/static/app.js" in page.text and page.headers["cache-control"] == "no-cache"
+    assert "new EventSource" in client.get("/static/app.js").text
+    assert client.get("/static/style.css").headers["cache-control"] == "no-cache"

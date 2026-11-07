@@ -1,13 +1,34 @@
 <!doctype html>
 <html lang="en">
 <meta charset="utf-8">
-<title>Isaac's Mom</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<pre id="log">waiting for events</pre>
-<script>
-  const log = document.getElementById("log");
-  new EventSource("/events").onmessage = (e) => {
-    const event = JSON.parse(e.data);
-    log.textContent += "\n" + event.type + " " + JSON.stringify(event.data);
-  };
-</script>
+<title>Isaac's Mom</title>
+<link rel="stylesheet" href="/static/style.css">
+<body>
+<header class="bar">
+  <h1>Isaac's Mom</h1>
+  <span id="status"></span>
+  <div class="meta" id="meta"></div>
+</header>
+<div class="control" id="control" aria-live="polite"></div>
+<main>
+  <section class="panel col camera">
+    <header><h2>Head camera</h2><span id="chip-camera"></span></header>
+    <div class="stage" id="stage"></div>
+    <ol class="strip" id="strip" aria-label="Recent head-camera frames"></ol>
+  </section>
+  <section class="panel col">
+    <header><h2>Decisions</h2><span class="note" id="episode-line"></span><span id="chip-log"></span></header>
+    <ol class="log" id="log" tabindex="0" aria-label="Decision log"></ol>
+  </section>
+  <div class="col side">
+    <section class="panel" id="p-verdict"></section>
+    <section class="panel" id="p-rounds"></section>
+    <section class="panel" id="p-models"></section>
+    <section class="panel" id="p-diagnosis" hidden></section>
+  </div>
+</main>
+<script src="/static/state.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

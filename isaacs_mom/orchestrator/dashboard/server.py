@@ -6,6 +6,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
 
 from isaacs_mom.contracts import Event
@@ -13,6 +14,15 @@ from isaacs_mom.contracts import Event
 STATIC = Path(__file__).parent / "static"
 POLL_SECONDS = 0.25
 FRAME_SUFFIXES = {".jpg", ".jpeg"}
+
+
+class FreshStatic(StaticFiles):
+    """Static files the browser revalidates every load, so an edited page never serves stale."""
+
+    def file_response(self, *args, **kwargs):  # noqa: ANN002, ANN003, ANN201  # signature is Starlette's
+        response = super().file_response(*args, **kwargs)
+        response.headers["Cache-Control"] = "no-cache"
+        return response
 
 
 def frame_url(frame: object, run_dir: Path) -> str | None:
@@ -62,7 +72,7 @@ def create_app(run_dir: Path) -> FastAPI:
 
     @app.get("/")
     def page() -> FileResponse:
-        return FileResponse(STATIC / "index.html")
+        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
     @app.get("/events")
     def events(request: Request) -> StreamingResponse:
@@ -79,6 +89,7 @@ def create_app(run_dir: Path) -> FastAPI:
             raise HTTPException(status_code=404)
         return FileResponse(target, media_type="image/jpeg")
 
+    app.mount("/static", FreshStatic(directory=STATIC))
     return app
 
 
