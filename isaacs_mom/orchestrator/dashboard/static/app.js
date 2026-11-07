@@ -5,6 +5,7 @@ let renderQueued = false;
 let renderedRows = 0;
 let renderedEpisode = null;
 let renderedFocus = null;
+let flashedFrame = null;
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
 const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "gemini-4-argon, Gemini API", finetune: "LoRA on Modal A10G" };
 
@@ -100,10 +101,19 @@ function renderCamera() {
   const seen = last.step === null ? "" : `Seen by step ${esc(last.step)}`;
   const shot = last.url ? `<img src="${esc(last.url)}" alt="Head camera frame${seen ? ", " + seen.toLowerCase() : ""}">` : "";
   const moved = last.moved ? `<p class="caption moved">${esc(MOVED[ep.rows.findLast((r) => r.kind === "perturbation").what] || "Scene changed")} just before this frame. This is the first frame that shows it.</p>` : "";
-  $("stage").innerHTML = `<div class="frame"><div class="shot"${last.url ? "" : " data-missing"}>${shot}<div class="over">${tag(last.controller, last.checkpoint)}${seen ? `<span class="step">${seen}</span>` : ""}</div></div></div>${moved}`;
+  $("stage").innerHTML = `<div class="frame"><div class="shot${last.moved ? " moved" : ""}"${last.url ? "" : " data-missing"}>${shot}<div class="over">${tag(last.controller, last.checkpoint)}${seen ? `<span class="step">${seen}</span>` : ""}</div></div></div>${moved}`;
   $("strip").innerHTML = frames
     .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (block moved before this frame)</span>' : ""}</span></li>`)
     .join("");
+  // Flash once when the first frame after the block move reaches the stage; added outside the HTML so later
+  // identical writes are skipped and the animation runs to its end.
+  const key = `${ep.id}@${last.step}`;
+  if (last.moved && key !== flashedFrame) {
+    const shot = $("stage").querySelector(".shot");
+    shot.classList.add("flash");
+    shot.addEventListener("animationend", () => shot.classList.remove("flash"), { once: true });
+  }
+  flashedFrame = last.moved ? key : flashedFrame;
 }
 
 function logRow(row) {
@@ -186,9 +196,13 @@ function renderRounds() {
   if (rounds.length) {
     const first = rounds[0];
     const last = rounds[rounds.length - 1];
-    const delta = last.successes - first.successes;
-    const trend = rounds.length > 1 ? `<div class="note" style="margin-top:.35rem">${esc(first.checkpoint)} to ${esc(last.checkpoint)}: ${first.successes}/${first.n} to ${last.successes}/${last.n} (${delta >= 0 ? "+" : ""}${delta}${first.n === last.n ? `, n=${last.n} each` : ""}).</div>` : "";
-    body = `<table><thead><tr><th>Checkpoint</th><th class="num">Successes</th><th class="num">n</th><th class="num">Rate</th></tr></thead><tbody>${rounds.map((r) => `<tr><td class="mono">${esc(r.checkpoint)}</td><td class="num">${esc(r.successes)}</td><td class="num">${esc(r.n)}</td><td class="num">${pct(r.successes, r.n)}</td></tr>`).join("")}</tbody></table>${trend}`;
+    const both = rounds.length > 1;
+    const fig = both ? `${first.successes}/${first.n} → ${last.successes}/${last.n}` : `${first.successes}/${first.n}`;
+    const spoken = both ? `${first.successes} of ${first.n}, then ${last.successes} of ${last.n}` : `${first.successes} of ${first.n}`;
+    const n = first.n === last.n ? `n=${last.n}${both ? " each" : ""}` : `n=${first.n} and n=${last.n}`;
+    const span = both ? `${esc(first.checkpoint)} → ${esc(last.checkpoint)}` : esc(first.checkpoint);
+    const table = `<table><thead><tr><th>Checkpoint</th><th class="num">Successes</th><th class="num">n</th><th class="num">Rate</th></tr></thead><tbody>${rounds.map((r) => `<tr><td class="mono">${esc(r.checkpoint)}</td><td class="num">${esc(r.successes)}</td><td class="num">${esc(r.n)}</td><td class="num">${pct(r.successes, r.n)}</td></tr>`).join("")}</tbody></table>`;
+    body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note">${span}</span></div>${table}`;
   }
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip(rounds.length > 0)}</header><div class="body">${body}</div>`;
 }

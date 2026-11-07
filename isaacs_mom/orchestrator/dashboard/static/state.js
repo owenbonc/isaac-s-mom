@@ -1,7 +1,7 @@
 // Folds SPEC §4.4 events into the dashboard's state. Pure: no DOM, so node can test it.
 (function (root) {
   const CONTROLLERS = ["student", "teacher"];
-  const FILMSTRIP = 8;
+  const FILMSTRIP = 6;
   const FRESH_SECONDS = 20;
 
   function initial() {

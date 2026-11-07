@@ -33,7 +33,7 @@ header.bar h1{font-size:1.25rem}
 .presenter button[aria-pressed="true"]{background:var(--ink);color:var(--panel);border-color:var(--ink)}
 kbd{font-family:var(--mono);font-weight:600;padding:0 .3rem;border:1px solid currentColor;border-radius:3px}
 .chip.paused{background:var(--ink);color:var(--panel);border-color:var(--ink)}
-main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(0,1fr) minmax(0,.9fr);gap:.8rem;padding:.8rem}
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.95fr);gap:.8rem;padding:.8rem}
 .col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
 .side{display:flex;flex-direction:column;gap:.8rem;min-height:0;overflow-y:auto}
 .side .panel{flex:none}
@@ -71,7 +71,7 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minm
 [data-missing] img{visibility:hidden}
 [data-missing]::after{content:"Frame missing";position:absolute;inset:0;display:grid;place-items:center;color:var(--ph)}
 
-.strip{list-style:none;margin:0;padding:.1rem .7rem .7rem;display:grid;grid-template-columns:repeat(8,minmax(0,1fr));gap:.4rem;flex:none}
+.strip{list-style:none;margin:0;padding:.1rem .7rem .7rem;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));gap:.4rem;flex:none}
 .strip:empty{display:none}
 .strip li{display:flex;flex-direction:column;gap:.15rem;min-width:0}
 .strip .thumb{position:relative;aspect-ratio:4/3;background:#d8dde4;border-radius:3px;overflow:hidden}
@@ -81,6 +81,14 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minm
 .strip li.moved .st{background:var(--ink);color:#fff;border-radius:2px;padding:0 .3rem}
 .caption{margin:.5rem 0 0;padding:.35rem .6rem;border-radius:3px;font-weight:600}
 .caption.moved{background:var(--ink);color:#fff}
+/* The block move is the take's peak: the frame that first shows it stays outlined in ink, and flashes once on arrival. */
+.shot.moved{outline:.3rem solid var(--ink);outline-offset:.15rem}
+@media (prefers-reduced-motion:no-preference){
+  .shot.flash{animation:ring .7s var(--ease-out)}
+  .shot.flash::before{content:"";position:absolute;inset:0;z-index:1;background:var(--panel);pointer-events:none;animation:veil .45s var(--ease-out) forwards}
+}
+@keyframes ring{from{outline-offset:1.2rem;outline-color:transparent}}
+@keyframes veil{from{opacity:.75}to{opacity:0}}
 .stop{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:600;color:var(--ink)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .strip .st{color:var(--muted)}
@@ -103,7 +111,11 @@ ol.log li.event.take{background:var(--teacher-bg);color:var(--teacher)}
 ol.log li.event.bad{background:var(--bad-bg);color:var(--bad)}
 ol.log li.event.good{background:var(--ok-bg);color:var(--ok)}
 ol.log li.empty{display:block;max-width:none;margin:0;text-align:left;border-bottom:0}
-ol.log li.focus{box-shadow:inset 0 0 0 3px var(--ink)}
+ol.log li.event.moved{background:var(--ink);color:#fff}
+ol.log li.event.moved .n{color:#fff}
+ol.log li.focus{box-shadow:inset 0 0 0 3px var(--ink),inset 0 0 0 5px var(--panel)}
+.gain{display:flex;flex-wrap:wrap;align-items:baseline;gap:.2rem .6rem;margin-bottom:.6rem}
+.gain .fig{font-size:2.5rem;font-weight:700;line-height:1.1;letter-spacing:-.01em}
 ol.log li.fresh{animation:in .16s var(--ease-out)}
 @keyframes in{from{opacity:0;transform:translateY(4px)}}
 ol.log .err{grid-column:2 / 4;color:var(--bad);overflow-wrap:anywhere}
