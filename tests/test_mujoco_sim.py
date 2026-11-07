@@ -185,7 +185,7 @@ def test_a_box_pushed_into_the_table_is_flagged(sim: MujocoSim) -> None:
     sim.execute(SkillCall(skill="reobserve"))
     gt = sim.ground_truth()
     assert gt.penetration
-    assert "objects penetrated each other" in validate(gt).reason.split("; ")
+    assert "penetration" in validate(gt).reason.split("; ")
 
 
 def test_a_shoved_robot_is_flagged_as_fallen(sim: MujocoSim) -> None:

@@ -42,10 +42,10 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - If Argon is unreachable or over budget, the robot holds and re-observes, and the run reports it.
 
 ### 3.4 Validator and recorder (workstream 3)
-- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration. The reason lists every problem found, separated by "; ".
+- `validate_episode(episode_id) -> Validation` from simulator ground truth: box on the bin's floor, at rest for 1 s of sim time; the robot hasn't fallen, no joint-limit violation, no penetration. The reason lists every problem found, separated by "; ", in words and without measurements (rule 1): `robot fell`, `joint limit violated`, `penetration`, `box short of the bin`, `box past the bin`, `box on the rim`, `box still moving`. An episode the recorder refused gets `recording error: <why>` and counts as its own rejection kind.
 - Recorder writes `runs/<run_id>/episodes/<episode_id>/` (manifest §4.2, frames as JPEG, actions as `.npy`) and `runs/<run_id>/events.jsonl`. The manifest is rewritten after every step, so a crashed episode keeps its steps with `validation: null`; a step whose executed actions and timestamps differ in count or go back in time is refused.
 - `build_training_set(run_id, round) -> path` applies rules 2 and 3, and writes `training_r<round>.summary.json` (`TrainingSetSummary`: demonstrations seen, accepted, rejected by problem kind, unfinished, empty dev episodes, examples).
-- `replay(sim, manifest_path)` re-executes the stored skill calls and perturbations from the stored seed and reports whether the executed actions and the final verdict reproduce; it sets `replay_valid`. `replay_accepted(sim, run_dir)` replays every accepted episode in a run and writes `replay_report.json` (`ReplayReport`).
+- `replay(sim, manifest_path)` re-executes the stored skill calls and perturbations from the stored seed and reports whether the executed actions and the final verdict reproduce; it sets `replay_valid`. `replay_accepted(sim, run_dir)` replays every accepted episode in a run and writes `replay_report.json` (`ReplayReport`: reproduced out of replayed, with a reason for each failure); a failure or exception in one episode is recorded there and sets `replay_valid=false`, never raised.
 
 ### 3.5 Orchestrator, dashboard, demo (workstream 5)
 - One command, `uv run mom run`, executes the loop (§3.6) and writes events.

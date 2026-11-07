@@ -2,7 +2,7 @@ from pathlib import Path
 
 import numpy as np
 
-from isaacs_mom.contracts import EpisodeManifest, ReplayReport
+from isaacs_mom.contracts import EpisodeManifest, ReplayFailure, ReplayReport
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.validator.recorder import write_manifest
 from isaacs_mom.validator.rules import validate
@@ -18,44 +18,66 @@ def replay(sim: TruthSim, manifest_path: Path) -> bool:
     matches the stored one, so a rejected episode replays as valid when its failure reproduces.
     """
     manifest = EpisodeManifest.model_validate_json(manifest_path.read_text())
-    sim.reset(manifest.seed)
-    reproduced = True
-    for i, step in enumerate(manifest.steps):
-        _perturb_before(sim, manifest, i)
-        result = sim.execute(step.skill_call)
-        stored = np.load(manifest_path.parent / step.actions)
-        actual = np.asarray(result.executed_actions, dtype=np.float32)
-        reproduced = (
-            reproduced
-            and result.ok == step.ok
-            and actual.shape == stored.shape
-            and np.allclose(actual, stored, atol=TOLERANCE)
-            and np.allclose(result.timestamps, step.timestamps, atol=TOLERANCE)
-        )
-    _perturb_before(sim, manifest, len(manifest.steps))
-    reproduced = reproduced and validate(sim.ground_truth()) == manifest.validation
+    reproduced = _divergence(sim, manifest, manifest_path.parent) is None
     manifest.replay_valid = reproduced
     write_manifest(manifest_path, manifest)
     return reproduced
+
+
+def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
+    """Replay every accepted episode in a run (the ones that can become lessons); writes `replay_report.json`.
+
+    It runs at the end of every `mom run`, so one episode that can't be replayed is recorded as a failure with a
+    reason instead of raising and losing the finished run.
+    """
+    replayed = 0
+    failures: list[ReplayFailure] = []
+    for manifest_path in sorted((run_dir / "episodes").glob("*/manifest.json")):
+        try:
+            manifest = EpisodeManifest.model_validate_json(manifest_path.read_text())
+        except (OSError, ValueError) as error:
+            replayed += 1
+            failures.append(ReplayFailure(episode_id=manifest_path.parent.name, reason=f"manifest unreadable: {error}"))
+            continue
+        if manifest.validation is None or not manifest.validation.accepted:
+            continue
+        replayed += 1
+        try:
+            reason = _divergence(sim, manifest, manifest_path.parent)
+        except Exception as error:  # any simulator or file failure is that episode's result, not the run's
+            reason = f"replay raised {type(error).__name__}: {error}"
+        if reason is not None:
+            failures.append(ReplayFailure(episode_id=manifest.episode_id, reason=reason))
+        manifest.replay_valid = reason is None
+        write_manifest(manifest_path, manifest)
+    report = ReplayReport(replayed=replayed, reproduced=replayed - len(failures), failures=failures)
+    (run_dir / "replay_report.json").write_text(report.model_dump_json(indent=2))
+    return report
+
+
+def _divergence(sim: TruthSim, manifest: EpisodeManifest, episode_dir: Path) -> str | None:
+    """Where a re-run first differs from the recording, or None when it reproduces."""
+    sim.reset(manifest.seed)
+    for i, step in enumerate(manifest.steps):
+        _perturb_before(sim, manifest, i)
+        result = sim.execute(step.skill_call)
+        stored = np.load(episode_dir / step.actions)
+        actual = np.asarray(result.executed_actions, dtype=np.float32)
+        if result.ok != step.ok:
+            return f"step {i}: outcome differs"
+        if actual.shape != stored.shape or not np.allclose(actual, stored, atol=TOLERANCE):
+            return f"step {i}: executed actions differ"
+        if len(result.timestamps) != len(step.timestamps) or not np.allclose(
+            result.timestamps, step.timestamps, atol=TOLERANCE
+        ):
+            return f"step {i}: timestamps differ"
+    _perturb_before(sim, manifest, len(manifest.steps))
+    if validate(sim.ground_truth()) != manifest.validation:
+        return "final verdict differs"
+    return None
 
 
 def _perturb_before(sim: TruthSim, manifest: EpisodeManifest, step: int) -> None:
     for record in manifest.perturbations:
         if record.before_step == step:
             sim.perturb(record.perturbation)
-
-
-def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
-    """Replay every accepted episode in a run (the ones that can become lessons); writes `replay_report.json`."""
-    not_reproduced: list[str] = []
-    checked = 0
-    for manifest_path in sorted((run_dir / "episodes").glob("*/manifest.json")):
-        manifest = EpisodeManifest.model_validate_json(manifest_path.read_text())
-        if manifest.validation is None or not manifest.validation.accepted:
-            continue
-        checked += 1
-        if not replay(sim, manifest_path):
-            not_reproduced.append(manifest.episode_id)
-    report = ReplayReport(checked=checked, reproduced=checked - len(not_reproduced), not_reproduced=not_reproduced)
-    (run_dir / "replay_report.json").write_text(report.model_dump_json(indent=2))
-    return report

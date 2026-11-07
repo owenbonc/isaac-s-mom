@@ -166,10 +166,17 @@ class TrainingSetSummary(BaseModel):
     examples: int
 
 
+class ReplayFailure(BaseModel):
+    episode_id: str
+    reason: str
+
+
 class ReplayReport(BaseModel):
-    checked: int
+    """`reproduced` out of `replayed` accepted episodes, with why each of the others failed."""
+
+    replayed: int
     reproduced: int
-    not_reproduced: list[str]
+    failures: list[ReplayFailure]
 
 
 class EvaluationResult(BaseModel):

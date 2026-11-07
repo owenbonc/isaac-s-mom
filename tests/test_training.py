@@ -11,6 +11,8 @@ from isaacs_mom.contracts import (
     Validation,
 )
 from isaacs_mom.seeds import DEV_SEED_START, SealedSeedError, heldout_seeds
+from isaacs_mom.validator.recorder import RecordingError
+from isaacs_mom.validator.rules import recording_error_verdict
 from isaacs_mom.validator.training import build_training_set, training_examples
 
 ACCEPTED = Validation(task_success=True, physics_valid=True, reason="ok")
@@ -84,11 +86,7 @@ def _write(run_dir: Path, episode_id: str, episode: EpisodeManifest) -> None:
 
 
 def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
-    missed = Validation(
-        task_success=False,
-        physics_valid=True,
-        reason="box not in bin: 30 cm from its centre (inner half-width 22 cm), 70 cm high",
-    )
+    missed = Validation(task_success=False, physics_valid=True, reason="box short of the bin")
     unsafe = Validation(task_success=False, physics_valid=False, reason="joint limit violated; box still moving")
     exam = manifest(seed=min(heldout_seeds()), controllers=("student",)).model_copy(update={"split": "heldout"})
     _write(tmp_path, "a-accepted", manifest(controllers=("student", "teacher", "teacher")))
@@ -101,18 +99,21 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
         tmp_path, "g-unexplained", manifest(validation=Validation(task_success=False, physics_valid=True, reason="x"))
     )
     _write(tmp_path, "h-empty", manifest(validation=missed, controllers=()))
+    _write(
+        tmp_path, "i-sim-bug", manifest(validation=recording_error_verdict(RecordingError("timestamps go backwards")))
+    )
 
     training_set = build_training_set(tmp_path, 1)
 
     summary = TrainingSetSummary.model_validate_json(training_set.with_suffix(".summary.json").read_text())
     assert summary == TrainingSetSummary(
         round=1,
-        episodes_scanned=8,
-        demonstrations=5,
+        episodes_scanned=9,
+        demonstrations=6,
         accepted=1,
-        rejected=3,
+        rejected=4,
         unfinished=1,
-        rejected_by={"missed_bin": 1, "joint_limit": 1, "still_moving": 1, "other": 1},
+        rejected_by={"short_of_bin": 1, "joint_limit": 1, "still_moving": 1, "other": 1, "recording_error": 1},
         empty_dev_episodes=1,
         examples=2,
     )
