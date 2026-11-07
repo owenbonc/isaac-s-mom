@@ -11,6 +11,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 - Layout is a pure function of the seed and the task; `perturb` moves the box or the bin from `Perturbation.seed` and returns whether it applied (SPEC §3.1).
 - `ground_truth()` fills every `GroundTruth` field, including `box_at_rest` over the last 1 s of sim time.
 - See it: `uv run python -m isaacs_mom.sim.mujoco.preview --seed 3 --gif runs/seed3.gif` films a scripted episode; `--viewer` opens MuJoCo's viewer.
+- Extension (Isaac, after the readiness trial): the task generator (`isaacs_mom/tasks/`, SPEC §3.7) and the evaluation report (`mom eval`, SPEC §6 criterion 10). The lift-triggered `move_bin` and `mom eval` touch `orchestrator/episode.py` and the CLI, so they go on a branch from phase-1 after the WS5 dashboard PR lands; WS5 reviews.
 - Done: SPEC §6 criterion 1 (Gate A), covered by `tests/test_mujoco_sim.py`. Tests run headless (`MUJOCO_GL=osmesa` in CI).
 
 ## 2. Argon teacher — `isaacs_mom/teacher/`
