@@ -9,6 +9,7 @@ from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
+from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator.training import build_training_set
 
 INSTRUCTION = "Hug the orange box, lift it, and put it in the green bin."
@@ -48,6 +49,7 @@ def run_loop(
     dev_trials: int = DEV_TRIALS,
 ) -> list[EvaluationResult]:
     events = EventLog(run_dir, run_id)
+    argon = Argon(events)  # one budget for the whole run (SPEC §2 rule 5)
     checkpoint = BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):
@@ -72,7 +74,7 @@ def run_loop(
         diagnoses = []
         for manifest in failures:
             episode_dir = run_dir / "episodes" / manifest.episode_id
-            diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps])
+            diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps], argon)
             events.emit("diagnosis", episode_id=manifest.episode_id, **diagnosis.model_dump())
             diagnoses.append(diagnosis)
         for seed, diagnosis in zip(
@@ -82,7 +84,7 @@ def run_loop(
         ):
             run_episode(
                 sim,
-                ArgonPolicy(diagnosis),
+                ArgonPolicy(diagnosis, argon),
                 run_dir=run_dir,
                 events=events,
                 seed=seed,
