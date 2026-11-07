@@ -9,7 +9,7 @@ from pathlib import Path
 from isaacs_mom.contracts import EpisodeManifest, ExecResult, GroundTruth, Observation, Perturbation, SkillCall
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import INSTRUCTION
+from isaacs_mom.orchestrator.loop import INSTRUCTION, StudentFactory
 from isaacs_mom.orchestrator.video import record
 from isaacs_mom.seeds import assert_not_heldout
 from isaacs_mom.sim.base import TruthSim
@@ -82,13 +82,14 @@ def run_demo(
     run_id: str,
     fps: int = 2,
     argon: Argon,
+    make_student: StudentFactory = StudentPolicy,
 ) -> EpisodeManifest:
     assert_not_heldout(seed)
     capture = _ThirdPersonCapture(sim)
     events = EventLog(run_dir, run_id)
     manifest = run_episode(
         capture,
-        StudentPolicy(ckpt),
+        make_student(ckpt),
         run_dir=run_dir,
         events=events,
         seed=seed,

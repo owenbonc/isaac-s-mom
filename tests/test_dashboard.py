@@ -13,7 +13,7 @@ from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.fake import FakeSim
-from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy
+from isaacs_mom.student import BASE_CHECKPOINT, StubStudent, stub_finetune
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 
 JPEG = b"\xff\xd8\xff\xd9"
@@ -115,7 +115,7 @@ def test_frame_paths_find_the_same_file_whatever_directory_the_dashboard_starts_
     run_dir = Path("runs") / "r1"
     run_episode(
         FakeSim(),
-        StudentPolicy(BASE_CHECKPOINT),
+        StubStudent(BASE_CHECKPOINT),
         run_dir=run_dir,
         events=EventLog(run_dir, "r1"),
         seed=1,
@@ -135,7 +135,7 @@ def test_episode_started_names_the_simulator_so_the_page_can_label_fakesim_place
     events = EventLog(tmp_path, "r1")
     run_episode(
         sim,
-        StudentPolicy(BASE_CHECKPOINT),
+        StubStudent(BASE_CHECKPOINT),
         run_dir=tmp_path,
         events=events,
         seed=1,
@@ -150,7 +150,17 @@ def test_episode_started_names_the_simulator_so_the_page_can_label_fakesim_place
 
 def test_each_teacher_demonstration_names_the_failed_episode_whose_diagnosis_it_acts_on(tmp_path: Path) -> None:
     argon = Argon(EventLog(tmp_path, "r1"), generate=stub_generate)  # no network in tests
-    run_loop(FakeSim(), tmp_path, "r1", max_rounds=1, demos=3, dev_trials=2, argon=argon)
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "r1",
+        max_rounds=1,
+        demos=3,
+        dev_trials=2,
+        argon=argon,
+        make_student=StubStudent,
+        train_student=stub_finetune,
+    )
     events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
     starts = {e["data"]["episode_id"]: e["data"] for e in events if e["type"] == "episode_started"}
     diagnosed = [e["data"]["episode_id"] for e in events if e["type"] == "diagnosis"]
@@ -269,7 +279,17 @@ def test_a_slow_diagnosis_sends_heartbeats_for_the_episode_it_diagnoses(
         return stub_generate(purpose, parts)
 
     argon = Argon(EventLog(tmp_path, "r1"), generate=slow)
-    run_loop(FakeSim(), tmp_path, "r1", max_rounds=1, demos=1, dev_trials=1, argon=argon)
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "r1",
+        max_rounds=1,
+        demos=1,
+        dev_trials=1,
+        argon=argon,
+        make_student=StubStudent,
+        train_student=stub_finetune,
+    )
     events = logged(tmp_path)
     at = next(i for i, e in enumerate(events) if e["type"] == "diagnosis")
     beats = [e["data"]["episode_id"] for e in events[:at] if e["type"] == "heartbeat"]

@@ -6,7 +6,25 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
+from isaacs_mom.student import (
+    NO_CUDA,
+    StubStudent,
+    StudentPolicy,
+    finetune,
+    has_cuda,
+    stub_finetune,
+    valid_run_id,
+)
 from isaacs_mom.teacher.argon import Argon, stub_generate
+
+
+def run_id(text: str) -> str:
+    """Checked up front, because a bad id would only fail after a round's fine-tune."""
+    if not valid_run_id(text):
+        raise argparse.ArgumentTypeError(
+            f"{text!r}: use ASCII letters, digits, '.', '_' or '-', not starting or ending with '.'"
+        )
+    return text
 
 
 def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
@@ -25,7 +43,7 @@ def main() -> None:
     run = commands.add_parser("run", help="the teach -> fine-tune loop (SPEC §3.6)")
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--rounds", type=int, default=3)
-    run.add_argument("--run-id", default=time.strftime("run-%Y%m%d-%H%M%S"))
+    run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a run directory")
     dashboard.add_argument("--run", type=Path, required=True)
     dashboard.add_argument("--port", type=int, default=8200)
@@ -35,8 +53,11 @@ def main() -> None:
     demo.add_argument("--seed", type=int, required=True, help="an unseen scene; use >= 900000")
     demo.add_argument("--perturb-at", type=int, required=True)
     demo.add_argument("--out", type=Path, default=Path("demo.mp4"))
-    demo.add_argument("--run-id", default=time.strftime("demo-%Y%m%d-%H%M%S"))
+    demo.add_argument("--run-id", type=run_id, default=time.strftime("demo-%Y%m%d-%H%M%S"))
     for command in (run, demo):
+        command.add_argument(
+            "--student", choices=["smolvlm", "stub"], default="smolvlm", help="stub: no model, no training"
+        )
         command.add_argument(
             "--teacher",
             choices=["argon", "stub"],
@@ -53,6 +74,9 @@ def main() -> None:
         return
     if args.sim == "fake" and args.task != DEFAULT_TASK.name:
         parser.error(f"--sim fake plays only the default task, {DEFAULT_TASK.name}")
+    if args.command == "run" and args.student == "smolvlm" and args.rounds > 0 and not has_cuda():
+        run.error(NO_CUDA)
+    make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
     run_dir = Path("runs") / args.run_id
     # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
@@ -71,11 +95,20 @@ def main() -> None:
             run_dir=run_dir,
             run_id=args.run_id,
             argon=argon,
+            make_student=make_student,
         )
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
-    results = run_loop(make_sim(args.sim, args.task), run_dir, args.run_id, max_rounds=args.rounds, argon=argon)
+    results = run_loop(
+        make_sim(args.sim, args.task),
+        run_dir,
+        args.run_id,
+        max_rounds=args.rounds,
+        argon=argon,
+        make_student=make_student,
+        train_student=train_student,
+    )
     for r in results:
         print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")
     print(argon.summary() + (" (stub teacher)" if teacher == "stub" else ""))

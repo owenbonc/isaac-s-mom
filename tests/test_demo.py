@@ -11,6 +11,7 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.video import record
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
+from isaacs_mom.student import StubStudent
 from isaacs_mom.teacher.argon import Argon, stub_generate
 
 
@@ -53,6 +54,7 @@ def test_demo_records_every_step_and_the_perturbation(tmp_path: Path) -> None:
         run_dir=run_dir,
         run_id="demo",
         argon=Argon(EventLog(run_dir, "demo"), generate=stub_generate),  # no network in tests
+        make_student=StubStudent,
     )
     assert frame_count(out) == len(manifest.steps) > 3
     events = [Event.model_validate_json(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
@@ -73,6 +75,7 @@ def test_demo_refuses_a_heldout_seed(tmp_path: Path) -> None:
             run_dir=tmp_path,
             run_id="d",
             argon=Argon(EventLog(tmp_path, "d"), generate=stub_generate),  # no network in tests
+            make_student=StubStudent,
         )
     assert not (tmp_path / "d.mp4").exists()
 
@@ -88,6 +91,7 @@ def test_the_takes_captions_word_its_verdict_as_the_dashboard_does(tmp_path: Pat
         run_dir=run_dir,
         run_id="demo",
         argon=Argon(EventLog(run_dir, "demo"), generate=stub_generate),  # no network in tests
+        make_student=StubStudent,
     )
     took, failed = rescued.takeover_step, rescued.validation
     assert took is not None and failed is not None and not failed.accepted  # the stand-ins never finish the task

@@ -477,7 +477,9 @@ def test_the_documented_fake_run_needs_no_key_and_asking_for_argon_without_one_s
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     monkeypatch.setattr(argon_module, "ENV_PATH", tmp_path / "no.env")
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--rounds", "0", "--run-id", "doc"])
+    monkeypatch.setattr(
+        sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", "--rounds", "0", "--run-id", "doc"]
+    )
     cli.main()
     out = capsys.readouterr().out
     assert "(stub teacher)" in out and "argon: 0/" in out  # the stub spends nothing, not even a startup check
@@ -557,3 +559,12 @@ def test_failing_the_last_budgeted_call_ends_at_once_without_a_wait(tmp_path: Pa
     a, _ = argon(tmp_path, ArgonUnavailable("down"), budget=1, waits=waits)
     assert demo(ArgonPolicy(None, a)) == ["reobserve"]
     assert waits == []
+
+
+def test_a_budget_spent_on_the_last_attempt_is_reported_as_over_budget(tmp_path: Path) -> None:
+    down = ArgonUnavailable("down")
+    a, _ = argon(tmp_path, down, down, down, budget=ATTEMPTS)
+    call = ArgonPolicy(None, a).act(obs(), "task", "start")
+    assert call is not None and call.skill == "reobserve" and "budget" in call.reason
+    a2, _ = argon(tmp_path / "d", down, down, down, budget=ATTEMPTS)
+    assert "over budget" in diagnose(failed_episode(), [b"f"], a2).hypothesis

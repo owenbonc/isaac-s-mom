@@ -1,5 +1,7 @@
 import json
 import math
+import sys
+from collections.abc import Callable
 from pathlib import Path
 
 import numpy as np
@@ -7,11 +9,13 @@ import pytest
 from pydantic import ValidationError
 
 from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, SkillCall, SkillTarget
+from isaacs_mom.orchestrator import cli
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, PLACE_X, FakeSim
+from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 from isaacs_mom.validator import validate
@@ -261,7 +265,17 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
         return stub_generate(purpose, parts)
 
     argon = Argon(EventLog(tmp_path, "t"), generate=fake, sleep=lambda s: pytest.fail(f"waited {s} s"))
-    results = run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=2, dev_trials=2, argon=argon)
+    results = run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=2,
+        dev_trials=2,
+        argon=argon,
+        make_student=StubStudent,
+        train_student=stub_finetune,
+    )
     assert calls  # the teacher ran, on the fake: no live Gemini call even with a key in .env
     assert [r.round for r in results] == [0, 1]
     assert all(r.n == len(heldout_seeds()) for r in results)
@@ -307,3 +321,78 @@ def test_fake_sim_reports_the_robot_turned_by_its_waist() -> None:
     gt = sim.ground_truth()
     assert gt.robot_xy == (0.0, 0.0)
     assert gt.robot_yaw == pytest.approx(math.radians(30))
+
+
+def silent_argon(run_dir: Path, run_id: str) -> Argon:
+    """No live Gemini call: these tests are about the student seams."""
+    return Argon(EventLog(run_dir, run_id), generate=stub_generate)
+
+
+def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
+    built: list[str] = []
+
+    def make_student(checkpoint: str) -> StubStudent:
+        built.append(checkpoint)
+        return StubStudent(checkpoint)
+
+    def train_student(training_set: Path, previous_checkpoint: str, round_: int) -> str:
+        return f"trained-{round_}"
+
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=1,
+        dev_trials=1,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=make_student,
+        train_student=train_student,
+    )
+    assert built[0] == "ckpt-r0"
+    assert "trained-1" in built
+
+
+def test_the_cli_refuses_a_run_id_a_checkpoint_id_could_not_carry(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    argv = ["mom", "run", "--sim", "fake", "--student", "stub", "--rounds", "0", "--run-id", "demo 1"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(SystemExit) as exit_:
+        cli.main()
+    assert exit_.value.code == 2
+    assert not (tmp_path / "runs").exists()
+
+
+def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int], str]) -> tuple[dict, dict]:
+    run_dir = tmp_path / "some-run"
+    run_loop(
+        FakeSim(),
+        run_dir,
+        "some-run",
+        max_rounds=1,
+        demos=1,
+        dev_trials=1,
+        argon=silent_argon(run_dir, "some-run"),
+        make_student=StubStudent,
+        train_student=train_student,
+    )
+    events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    [started] = [e["data"] for e in events if e["type"] == "finetune_started"]
+    [completed] = [e["data"] for e in events if e["type"] == "finetune_completed"]
+    return started, completed
+
+
+def test_a_skipped_finetune_says_so_and_names_no_adapter(tmp_path: Path) -> None:
+    _, completed = finetune_events(tmp_path, stub_finetune)
+    assert (completed["skipped"], completed["examples"], completed["checkpoint_path"]) == (True, 0, None)
+    assert isinstance(completed["duration_s"], float)
+
+
+def test_a_finetune_reports_what_it_trained_on_how_long_and_where(tmp_path: Path) -> None:
+    started, completed = finetune_events(tmp_path, lambda training_set, previous, round_: f"some-run/ckpt-r{round_}")
+    assert (completed["checkpoint"], completed["skipped"]) == ("some-run/ckpt-r1", False)
+    assert completed["examples"] == len(Path(started["training_set"]).read_text().splitlines())
+    assert isinstance(completed["duration_s"], float) and completed["duration_s"] >= 0
+    assert Path(completed["checkpoint_path"]).parts == (*tmp_path.parts, "some-run", "checkpoints", "ckpt-r1")
