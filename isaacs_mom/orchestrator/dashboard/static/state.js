@@ -189,6 +189,19 @@
     return frames.slice(start, start + FILMSTRIP).map((f) => ({ ...f, moved: f === moved, now: f === stage }));
   }
 
+  // The shown episode's box or bin move: the last frame before it, the first frame that shows it, and the first
+  // decision made after it. Null for an episode without one.
+  function move(ep) {
+    if (!ep || ep.perturbedStep === null) return null;
+    const at = ep.perturbedStep;
+    return {
+      step: at,
+      before: ep.frames.findLast((f) => f.step < at) || null,
+      after: ep.frames.find((f) => f.step >= at) || null,
+      decision: ep.rows.find((r) => r.kind === "decision" && r.step >= at) || null,
+    };
+  }
+
   // The diagnosis a teacher demonstration acts on (SPEC §3.5): the diagnosed episode's id, its number in the run,
   // its diagnosis and the last frame it saw. Null for an episode that acts on none.
   function actedOn(s, ep) {
@@ -273,7 +286,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, actedOn, median, shown, held, following, accepted, teacherDrove, episode, target, keydown };
+  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, move, actedOn, median, shown, held, following, accepted, teacherDrove, episode, target, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

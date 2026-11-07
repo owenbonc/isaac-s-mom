@@ -587,3 +587,28 @@ def test_navigation_targets_say_where_each_key_leads_and_minus_one_for_nowhere_n
     )
     assert out[0] == {"ArrowLeft": 5, "ArrowRight": -1, "d": 3, "t": 4, "m": 5, "End": -1}
     assert out[1] == {"ArrowLeft": 0, "ArrowRight": 2, "d": 3, "t": 4, "m": 5, "End": 6}
+
+
+def test_the_move_pairs_the_last_frame_before_it_with_the_first_after_and_finds_the_first_decision_after() -> None:
+    events = stream(
+        started("a"),
+        decision(0),
+        executed(0, frame="/f/0.jpg"),
+        decision(1),
+        executed(1, frame="/f/1.jpg"),
+        ("perturbation", {"kind": "move_bin", "step": 2}),
+        decision(2),
+        executed(2, frame="/f/2.jpg"),
+        decision(3),
+        executed(3, frame="/f/3.jpg"),
+    )
+    out = run(
+        """
+        const s = S.initial();
+        for (const e of events) S.reduce(s, e);
+        const m = S.move(S.current(s));
+        return { before: m.before.url, after: m.after.url, decision: m.decision.step, none: S.move(null) };
+        """,
+        events,
+    )
+    assert out == {"before": "/f/1.jpg", "after": "/f/2.jpg", "decision": 2, "none": None}

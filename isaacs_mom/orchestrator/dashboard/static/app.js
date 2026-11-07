@@ -93,17 +93,27 @@ function renderCamera() {
     return;
   }
   const last = frames.find((f) => f.now);
-  const seen = last.step === null ? "" : `Seen by step ${esc(last.step)}`;
-  const shot = last.url ? `<img src="${esc(last.url)}" alt="Head camera frame${seen ? ", " + seen.toLowerCase() : ""}">` : "";
-  const moved = last.moved ? `<p class="caption moved">${esc(MOVED[ep.rows.findLast((r) => r.kind === "perturbation").what] || "Scene changed")} just before this frame. This is the first frame that shows it.</p>` : "";
-  $("stage").innerHTML = `<div class="frame"><div class="shot${last.moved ? " moved" : ""}"${last.url ? "" : " data-missing"}>${shot}<div class="over">${tag(last.controller, last.checkpoint)}${seen ? `<span class="step">${seen}</span>` : ""}</div></div></div>${moved}`;
+  const move = MomState.move(ep);
+  const what = move && esc(MOVED[ep.rows.findLast((r) => r.kind === "perturbation").what] || "Scene changed");
+  // The caption row is always there, so the peak's caption never shrinks the frame.
+  let frame, caption;
+  if (view.compare && move) {
+    frame = cell(move.before, '<span class="tag">Before the move</span>', false) + cell(move.after, '<span class="tag">After</span>', true);
+    caption = `<p class="caption moved">${what} between these frames${move.decision ? `, before decision ${esc(move.decision.step)}` : ""}.</p>`;
+  } else {
+    frame = cell(last, tag(last.controller, last.checkpoint), last.moved);
+    caption = last.moved
+      ? `<p class="caption moved">${what} just before this frame, the first to show it.</p>`
+      : `<p class="caption">${last.step === null ? "Head-camera frame." : `Seen before decision ${esc(last.step)}.`}</p>`;
+  }
+  $("stage").innerHTML = `<div class="frame">${frame}</div>${caption}`;
   $("strip").innerHTML = frames
     .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (the scene moved before this frame)</span>' : ""}</span></li>`)
     .join("");
   // Flash once when the first frame after the move reaches the stage; added outside the HTML so later
   // identical writes are skipped and the animation runs to its end.
   const key = `${ep.id}@${last.step}`;
-  if (last.moved && key !== flashedFrame) {
+  if (last.moved && !view.compare && key !== flashedFrame) {
     const shot = $("stage").querySelector(".shot");
     shot.classList.add("flash");
     shot.addEventListener("animationend", () => shot.classList.remove("flash"), { once: true });
@@ -111,11 +121,18 @@ function renderCamera() {
   flashedFrame = last.moved ? key : flashedFrame;
 }
 
+// One frame on the stage with its label; a missing frame keeps its place, hatched.
+function cell(f, label, moved) {
+  const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : `, seen before decision ${esc(f.step)}`}">` : "";
+  const step = f && f.step !== null ? `<span class="step">step ${esc(f.step)}</span>` : "";
+  return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}<div class="over">${label}${step}</div></div></div>`;
+}
+
 function logRow(row) {
   const step = row.step === null ? "" : esc(row.step);
   switch (row.kind) {
     case "perturbation":
-      return `<li class="event moved${view.compare && row.step === view.compare.step ? " focus" : ""}"><span class="n">${step}</span><span>${esc(MOVED[row.what] || "Scene changed")} <span class="d">by the orchestrator. The robot learns of it only from its camera${row.step === null ? "" : `, in the frame seen by step ${step}`}.</span></span></li>`;
+      return `<li class="event moved"><span class="n">${step}</span><span>${esc(MOVED[row.what] || "Scene changed")} <span class="d">by the orchestrator. The robot learns of it only from its camera${row.step === null ? "" : `, in the frame seen by step ${step}`}.</span></span></li>`;
     case "takeover":
       return `<li class="event take"><span class="n">${step}</span><span>Teacher takes over</span></li>`;
     case "error":
@@ -125,12 +142,13 @@ function logRow(row) {
   }
 }
 
-function decisionRow(row) {
+function decisionRow(row, after) {
   const outcome = !row.skill ? "" : row.ok === null ? '<span class="lat">running</span>' : row.ok ? '<span class="ok">executed</span>' : '<span class="no">failed</span>';
   const latency = row.latency === null ? "" : `<span class="lat">${duration(row.latency)}</span>`;
   const reason = row.reason ? `<div class="reason" title="${esc(row.reason)}">${esc(row.reason)}</div>` : '<div class="reason none">No reason given.</div>';
   const error = row.error ? `<div class="err">${esc(row.error)}</div>` : "";
-  return `<li class="${row.controller || "unknown"}"><span class="n">${esc(row.step ?? "")}</span><div class="line"><span class="skill">${skillText(row)}</span><span class="right">${latency}${outcome}</span></div>${reason}${error}</li>`;
+  const mark = after ? '<div class="after">First decision after the move</div>' : "";
+  return `<li class="${row.controller || "unknown"}${after && view.compare ? " focus" : ""}"><span class="n">${esc(row.step ?? "")}</span><div class="line"><span class="skill">${skillText(row)}</span><span class="right">${latency}${outcome}</span></div>${mark}${reason}${error}</li>`;
 }
 
 function verdictRow(ep) {
@@ -165,7 +183,8 @@ function renderLog() {
     renderedEpisode = null;
     return;
   }
-  const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
+  const move = MomState.move(ep);
+  const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
   const focus = view.compare && `${ep.id}@${view.compare.step}`;
   // Letting go of P drops the scroll it set, so the log follows new rows again.
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows || (renderedFocus !== null && focus === null);
