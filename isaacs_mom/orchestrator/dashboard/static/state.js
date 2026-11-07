@@ -103,7 +103,8 @@
           row.ok = d.ok === true;
           row.error = text(d.error) || null;
         }
-        ep.frames.push({ step, url: text(d.frame) || null, controller: row ? row.controller : null });
+        // The recorder stores the observation a decision was made on, so frame N is what decision N saw.
+        ep.frames.push({ step, url: text(d.frame) || null, controller: row ? row.controller : null, checkpoint: row ? row.checkpoint : null });
         break;
       }
       case "perturbation":

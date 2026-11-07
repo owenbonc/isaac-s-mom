@@ -38,7 +38,9 @@ const tag = (controller, checkpoint) => {
   const who = { student: "Student", teacher: "Teacher (Argon)" }[controller] || "Unknown controller";
   return `<span class="tag ${controller || "unknown"}">${who}${checkpoint ? ` <span class="mono">${esc(checkpoint)}</span>` : ""}</span>`;
 };
-const skillText = (row) => (row.skill ? esc(row.skill) + (row.params && row.params.distance_cm != null ? ` ${esc(row.params.distance_cm)} cm` : "") : "stopped (no skill)");
+const skillText = (row) => (row.skill ? esc(row.skill) + (row.params && row.params.distance_cm != null ? ` ${esc(row.params.distance_cm)} cm` : "") : '<span class="stop">Stopped, no skill chosen</span>');
+const SCENES = { dev: "Development scene", heldout: "Held-out test scene" };
+const MOVED = { move_block: "Block moved", move_target: "Target zone moved" };
 const ms = (v) => (v >= 100 ? Math.round(v) : v.toFixed(1)) + " ms";
 const pct = (k, n) => (n ? Math.round((100 * k) / n) + "%" : "n/a");
 const stat = (s) => (s ? `${ms(s.median)} <span class="note">n=${s.n}</span>` : '<span class="ph-text">no data</span>');
@@ -59,12 +61,12 @@ function renderControl() {
   const el = $("control");
   if (s.finetune.pending) {
     el.className = "control";
-    el.innerHTML = `<span class="what">Fine-tuning round ${esc(s.finetune.pending.round ?? "")}</span><span class="note">The student is not running.</span>`;
+    el.innerHTML = `<span class="what">Fine-tuning the student, round ${esc(s.finetune.pending.round ?? "")}</span><span class="note">No robot is moving. Held-out evaluation starts when the new checkpoint is ready.</span>`;
     return;
   }
   if (!ep || !ep.controller) {
     el.className = "control";
-    el.innerHTML = '<span class="what">Waiting for the first decision</span><span class="note">Start <span class="mono">uv run mom run</span> or <span class="mono">uv run mom demo</span>.</span>';
+    el.innerHTML = `<span class="what">${ep ? "Waiting for the first decision" : "Waiting for the run to start"}</span>`;
     return;
   }
   const took = ep.rows.find((r) => r.kind === "takeover");
@@ -88,11 +90,12 @@ function renderCamera() {
     return;
   }
   const last = frames[frames.length - 1];
-  const stepLabel = last.step === null ? "" : `<span class="step">Step ${esc(last.step)}</span>`;
-  const row = ep.rows.filter((r) => r.kind === "decision").pop();
-  $("stage").innerHTML = `<div class="shot"${last.url ? "" : " data-missing"}>${last.url ? `<img src="${esc(last.url)}" alt="Head camera, step ${esc(last.step)}">` : ""}<div class="over">${row ? tag(row.controller, row.checkpoint) : ""}${stepLabel}</div></div>`;
+  const seen = last.step === null ? "" : `Seen by step ${esc(last.step)}`;
+  const shot = last.url ? `<img src="${esc(last.url)}" alt="Head camera frame${seen ? ", " + seen.toLowerCase() : ""}">` : "";
+  const moved = last.moved ? `<p class="caption moved">${esc(MOVED[ep.rows.findLast((r) => r.kind === "perturbation").what] || "Scene changed")} just before this frame. This is the first frame that shows it.</p>` : "";
+  $("stage").innerHTML = `<div class="frame"><div class="shot"${last.url ? "" : " data-missing"}>${shot}<div class="over">${tag(last.controller, last.checkpoint)}${seen ? `<span class="step">${seen}</span>` : ""}</div></div></div>${moved}`;
   $("strip").innerHTML = frames
-    .map((f) => `<li class="${f === last ? "now" : ""}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}${f.moved ? '<span class="moved">block moved</span>' : ""}</div><span class="st">step ${esc(f.step)}</span></li>`)
+    .map((f) => `<li class="${[f === last ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (block moved before this frame)</span>' : ""}</span></li>`)
     .join("");
 }
 
@@ -100,7 +103,7 @@ function logRow(row) {
   const step = row.step === null ? "" : esc(row.step);
   switch (row.kind) {
     case "perturbation":
-      return `<li class="event"><span class="n">${step}</span><span>Block moved <span class="d">(${esc(row.what || "perturbation")}); the agent sees it only in the next frame.</span></span></li>`;
+      return `<li class="event moved"><span class="n">${step}</span><span>${esc(MOVED[row.what] || "Scene changed")} <span class="d">by the orchestrator. The robot learns of it only from its camera${row.step === null ? "" : `, in the frame seen by step ${step}`}.</span></span></li>`;
     case "takeover":
       return `<li class="event take"><span class="n">${step}</span><span>Teacher takes over</span></li>`;
     case "error":
@@ -133,7 +136,7 @@ function renderLog() {
     renderedEpisode = null;
     return;
   }
-  $("episode-line").innerHTML = `<span class="mono">${esc(ep.id)}</span> seed ${esc(ep.seed ?? "")}, ${esc(ep.split)}, round ${esc(ep.round ?? "")}`;
+  $("episode-line").innerHTML = `${esc(SCENES[ep.split] || "Scene")}, seed ${esc(ep.seed ?? "")}, round ${esc(ep.round ?? "")} <span class="mono">${esc(ep.id)}</span>`;
   const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows;
   list.innerHTML = html.join("");
@@ -169,8 +172,9 @@ function renderModels() {
   const s = MomState.summary(view.live);
   const any = s.student || s.teacher || s.argon || s.finetune;
   const row = (who, where, measured) => `<tr><td><b>${who}</b> ${where}</td><td class="num">${stat(measured)}</td></tr>`;
-  const rows = row("Student", CONFIGURED.student, s.student) + row("Teacher", CONFIGURED.teacher, s.teacher) + (s.argon ? row("", "Argon API calls", s.argon) : "") + row("Fine-tune", CONFIGURED.finetune, s.finetune);
-  $("p-models").innerHTML = `<header><h2>Where models run</h2>${panelChip(Boolean(any))}</header><div class="body"><table><thead><tr><th>Model and host <span class="chip config">Configured</span></th><th class="num">Median latency</th></tr></thead><tbody>${rows}</tbody></table></div>`;
+  const head = (what, measure) => `<tr><th>${what} <span class="chip config">Configured</span></th><th class="num">${measure}</th></tr>`;
+  const inference = row("Student", CONFIGURED.student, s.student) + row("Teacher", CONFIGURED.teacher, s.teacher) + (s.argon ? row("", "Argon API calls", s.argon) : "");
+  $("p-models").innerHTML = `<header><h2>Where models run</h2>${panelChip(Boolean(any))}</header><div class="body"><table><thead>${head("Model and host", "Median latency")}</thead><tbody>${inference}</tbody><tbody>${head("Fine-tune", "Median duration")}${row("", CONFIGURED.finetune, s.finetune)}</tbody></table></div>`;
 }
 
 function renderDiagnosis() {

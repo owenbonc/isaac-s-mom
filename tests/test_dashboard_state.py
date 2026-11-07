@@ -212,3 +212,15 @@ def test_an_unknown_controller_is_dropped_at_the_boundary() -> None:
     assert row["controller"] is None and out["ep"]["controller"] is None
     assert out["ep"]["frames"][0]["controller"] is None
     assert out["summary"]["student"] is None and out["summary"]["teacher"] is None
+
+
+def test_each_frame_keeps_the_controller_that_saw_it_after_a_takeover() -> None:
+    out = fold(
+        started("a"),
+        decision(4),
+        executed(4),
+        ("decision", {"controller": "teacher", "takeover": True, "step": 5, "skill": None}),
+    )
+    (frame,) = out["ep"]["frames"]
+    assert (frame["step"], frame["controller"], frame["checkpoint"]) == (4, "student", "ckpt-r0")
+    assert out["ep"]["controller"] == "teacher"

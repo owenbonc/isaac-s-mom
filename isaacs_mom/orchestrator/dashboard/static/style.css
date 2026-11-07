@@ -50,7 +50,8 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minm
 .verdict.good{background:var(--ok-bg);color:var(--ok)}
 .verdict svg{width:.95em;height:.95em}
 
-.stage{flex:1;min-height:0;display:grid;place-items:center;padding:.7rem;container-type:size}
+.stage{flex:1;min-height:0;display:flex;flex-direction:column;padding:.7rem}
+.frame{flex:1;min-height:0;display:grid;place-items:center;container-type:size}
 .shot{position:relative;width:min(100cqw,133.33cqh);aspect-ratio:4/3;background:#d8dde4;border-radius:3px;box-shadow:0 1px 2px rgba(18,23,31,.18);overflow:hidden}
 .shot img{display:block;width:100%;height:100%;object-fit:contain}
 .shot .over{position:absolute;left:.6rem;top:.6rem;display:flex;gap:.5rem;align-items:center}
@@ -67,7 +68,12 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.3fr) minm
 .strip .thumb{position:relative;aspect-ratio:4/3;background:#d8dde4;border-radius:3px;overflow:hidden}
 .strip img{display:block;width:100%;height:100%;object-fit:cover}
 .strip li.now .thumb{outline:2px solid var(--ink);outline-offset:1px}
-.strip .moved{position:absolute;left:.2rem;bottom:.2rem;background:var(--ink);color:#fff;font-size:.68rem;font-weight:600;padding:0 .3rem;border-radius:2px}
+.strip li.moved .thumb::after{content:"";position:absolute;top:0;right:0;border-style:solid;border-width:0 .9rem .9rem 0;border-color:transparent var(--ink) transparent transparent}
+.strip li.moved .st{background:var(--ink);color:#fff;border-radius:2px;padding:0 .3rem}
+.caption{margin:.5rem 0 0;padding:.35rem .6rem;border-radius:3px;font-weight:600}
+.caption.moved{background:var(--ink);color:#fff}
+.stop{font-family:system-ui,-apple-system,"Segoe UI",sans-serif;font-weight:600;color:var(--ink)}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .strip .st{color:var(--muted)}
 
 ol.log{list-style:none;margin:0;padding:0;overflow:auto;min-height:0;flex:1}
@@ -105,7 +111,7 @@ ol.log li.fresh{animation:none}}
   body{height:auto;overflow:auto}
   main{grid-template-columns:minmax(0,1fr)}
   .col{overflow:visible}
-  .stage{container-type:normal}
+  .frame{container-type:normal}
   .shot{width:100%}
   ol.log{max-height:24rem}
   .meta{display:none}
