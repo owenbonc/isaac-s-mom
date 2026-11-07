@@ -4,7 +4,16 @@ from pathlib import Path
 
 import numpy as np
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, ReplayFailure, ReplayReport, SkillCall
+from isaacs_mom.contracts import (
+    Controller,
+    EpisodeManifest,
+    Observation,
+    Perturbation,
+    PerturbationRecord,
+    ReplayFailure,
+    ReplayReport,
+    SkillCall,
+)
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
@@ -91,6 +100,17 @@ def test_replay_applies_the_recorded_mid_run_perturbation(tmp_path: Path) -> Non
     assert not replay(FakeSim(), path)
 
 
+def test_replay_rejects_a_recorded_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1606)
+    manifest = _load(path)
+    # The box is in the bin by the end, so moving it is refused and nothing else about the replay changes.
+    manifest.perturbations = [
+        PerturbationRecord(before_step=len(manifest.steps), perturbation=Perturbation(kind="move_box", seed=1))
+    ]
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)
+
+
 def test_replay_rejects_tampered_actions(tmp_path: Path) -> None:
     path = _record(tmp_path, GreedyHugger, seed=1603)
     first = path.parent / _load(path).steps[0].actions
@@ -152,3 +172,12 @@ def test_one_broken_episode_does_not_stop_the_whole_run_replay(tmp_path: Path) -
     assert report.failures[0].reason.startswith("replay raised FileNotFoundError")
     assert _load(broken).replay_valid is False
     assert _load(good).replay_valid is True
+
+
+def test_replay_rejects_a_mid_run_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1603)
+    manifest = _load(path)
+    lift = next(i for i, s in enumerate(manifest.steps) if s.skill_call.skill == "lift")  # the box is held by then
+    manifest.perturbations = [PerturbationRecord(before_step=lift, perturbation=Perturbation(kind="move_box", seed=1))]
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)  # every step and the verdict still match: only the refused move tells

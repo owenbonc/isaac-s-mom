@@ -22,7 +22,7 @@ ARM_JOINTS = {
 CONTROL_DT = 0.02  # 50 Hz targets; physics runs at the model timestep underneath
 IK_DAMPING = 1e-2
 IK_POSTURE_WEIGHT = 0.05
-IK_TOLERANCE = 0.01  # metres; a target further than this from the solved hand is out of reach
+IK_TOLERANCE_M = 0.01  # a target further than this from the solved hand is out of reach
 
 
 class Robot:
