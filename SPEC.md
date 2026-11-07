@@ -78,7 +78,7 @@ class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
     def render_third_person(self) -> bytes: ...  # JPEG, for the video
 ```
 - `Observation{episode_id, step, sim_time, head_rgb_jpeg: bytes, joint_state: list[float]}`
-- `SkillCall{skill: Skill, params: dict[str, float]}`; `ExecResult{ok, error, executed_actions: list[list[float]], timestamps: list[float]}`
+- `SkillTarget{skill: Skill, params: dict[str, float]}`; `SkillCall(SkillTarget){reason: str}`, where `reason` is shown on the dashboard and never trained on; `ExecResult{ok, error, executed_actions: list[list[float]], timestamps: list[float]}`
 - `Perturbation{kind: move_block | move_target, seed}`
 - `GroundTruth{block_xy, target_xy, target_radius, block_at_rest, joint_limit_violation, table_penetration}`
 - `Validation{task_success, physics_valid, reason}` is computed by the validator from `GroundTruth`.
@@ -87,7 +87,7 @@ class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
 `{episode_id, run_id, seed, split: dev|heldout, round, instruction, sim_version, robot_config, steps: [{step, sim_time, frame: "frames/0003.jpg", joint_state, skill_call, controller: student|teacher, checkpoint, actions: "actions/0003.npy", timestamps}], perturbations: [{before_step, perturbation: Perturbation}], takeover_step: int|null, diagnosis: Diagnosis|null, validation: Validation, replay_valid: bool|null}`
 
 ### 4.3 Training example (one JSON line)
-`{image: "<path to frame>", instruction, feedback, target: SkillCall}` from teacher steps of accepted dev episodes only.
+`{image: "<path to frame>", instruction, feedback, target: SkillTarget}` (skill and params only, never the reason) from teacher steps of accepted dev episodes only.
 
 ### 4.4 Events (`events.jsonl`)
 `{t, run_id, type, data}` with `type` in `episode_started, observation, decision, action_executed, perturbation, validation, diagnosis, finetune_started, finetune_completed, evaluation_result, argon_call, error`.
