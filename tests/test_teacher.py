@@ -557,3 +557,12 @@ def test_failing_the_last_budgeted_call_ends_at_once_without_a_wait(tmp_path: Pa
     a, _ = argon(tmp_path, ArgonUnavailable("down"), budget=1, waits=waits)
     assert demo(ArgonPolicy(None, a)) == ["reobserve"]
     assert waits == []
+
+
+def test_a_budget_spent_on_the_last_attempt_is_reported_as_over_budget(tmp_path: Path) -> None:
+    down = ArgonUnavailable("down")
+    a, _ = argon(tmp_path, down, down, down, budget=ATTEMPTS)
+    call = ArgonPolicy(None, a).act(obs(), "task", "start")
+    assert call is not None and call.skill == "reobserve" and "budget" in call.reason
+    a2, _ = argon(tmp_path / "d", down, down, down, budget=ATTEMPTS)
+    assert "over budget" in diagnose(failed_episode(), [b"f"], a2).hypothesis
