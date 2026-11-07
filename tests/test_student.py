@@ -7,7 +7,15 @@ from pathlib import Path
 import pytest
 import torch
 
-from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget, TrainingExample
+from isaacs_mom.contracts import (
+    MAX_ANGLE_DEG,
+    MAX_DISTANCE_CM,
+    SKILLS,
+    Observation,
+    SkillCall,
+    SkillTarget,
+    TrainingExample,
+)
 from isaacs_mom.orchestrator import cli
 from isaacs_mom.orchestrator.loop import INSTRUCTION
 from isaacs_mom.student import stub_finetune, tuning
@@ -58,7 +66,8 @@ def test_a_reason_in_the_reply_is_dropped() -> None:
 
 
 def test_reply_distance_is_clamped_to_the_skill_limit() -> None:
-    assert parse_reply('{"skill": "reach_left", "params": {"distance_cm": 90}}').params == {"distance_cm": 20.0}
+    reply = json.dumps({"skill": "reach_left", "params": {"distance_cm": MAX_DISTANCE_CM + 50}})
+    assert parse_reply(reply).params == {"distance_cm": MAX_DISTANCE_CM}
 
 
 def test_a_turn_reply_parses_its_angle() -> None:
@@ -67,7 +76,8 @@ def test_a_turn_reply_parses_its_angle() -> None:
 
 
 def test_reply_angle_is_clamped_to_the_skill_limit() -> None:
-    assert parse_reply('{"skill": "turn_right", "params": {"angle_deg": 90}}').params == {"angle_deg": 45.0}
+    reply = json.dumps({"skill": "turn_right", "params": {"angle_deg": MAX_ANGLE_DEG + 45}})
+    assert parse_reply(reply).params == {"angle_deg": MAX_ANGLE_DEG}
 
 
 def test_training_target_round_trips_through_the_parser() -> None:
@@ -88,8 +98,8 @@ def test_prompt_names_the_task_the_last_result_and_every_skill() -> None:
 
 def test_prompt_gives_each_param_its_limit_and_describes_the_humanoid_task() -> None:
     text = prompt_text(INSTRUCTION, "start")
-    assert "distance_cm" in text and "0 to 20" in text
-    assert "angle_deg" in text and "0 to 45" in text
+    assert f"distance_cm 0 to {MAX_DISTANCE_CM:g}" in text
+    assert f"angle_deg 0 to {MAX_ANGLE_DEG:g}" in text
     assert not {"arm", "block", "zone", "push"} & set(text.lower().replace(".", " ").replace(",", " ").split())
 
 
