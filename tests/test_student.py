@@ -366,5 +366,9 @@ def test_with_cuda_the_smolvlm_student_fine_tunes_locally(tmp_path: Path, monkey
     assert mom_run(monkeypatch, tmp_path, cuda=True)["train_student"] is finetune
 
 
+def test_evaluating_without_training_needs_no_cuda(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert mom_run(monkeypatch, tmp_path, "--rounds", "0", cuda=False)["train_student"] is finetune
+
+
 def test_the_stub_student_needs_no_cuda(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     assert mom_run(monkeypatch, tmp_path, "--student", "stub", cuda=False)["train_student"] is stub_finetune

@@ -30,6 +30,8 @@ IGNORE_INDEX = -100
 def lora_train(examples: list[dict[str, str]], images: dict[str, bytes], device: str) -> dict[str, bytes]:
     """Returns the adapter's files plus metrics.json, keyed by file name."""
     started = time.monotonic()
+    if device == "cuda":
+        torch.cuda.reset_peak_memory_stats()
     random.seed(SEED)
     torch.manual_seed(SEED)
     processor = vlm.load_processor()
@@ -93,6 +95,7 @@ def lora_train(examples: list[dict[str, str]], images: dict[str, bytes], device:
         "epoch_losses": epoch_losses,
         "train_skill_accuracy": {"correct": correct, "n": len(sample)},
         "seconds": round(time.monotonic() - started, 1),
+        "peak_gpu_memory_gb": round(torch.cuda.max_memory_allocated() / 2**30, 2) if device == "cuda" else None,
     }
     files["metrics.json"] = json.dumps(metrics, indent=2).encode()
     return files

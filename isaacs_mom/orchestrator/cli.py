@@ -44,7 +44,7 @@ def main() -> None:
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     args = parser.parse_args()
 
-    if args.student == "smolvlm" and not has_cuda():
+    if args.student == "smolvlm" and args.rounds > 0 and not has_cuda():
         run.error(NO_CUDA)
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     run_dir = Path("runs") / args.run_id

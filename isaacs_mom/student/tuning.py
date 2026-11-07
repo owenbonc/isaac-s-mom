@@ -13,7 +13,7 @@ from isaacs_mom.student.prompt import format_target
 
 Trainer = Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]
 log = logging.getLogger(__name__)
-NO_CUDA = "fine-tuning needs a CUDA GPU (the Windows RTX 5070 or 5060 machine); --student stub runs without one"
+NO_CUDA = "fine-tuning needs a CUDA GPU (the Windows RTX 5070 or 5060); --student stub or --rounds 0 runs without one"
 
 
 def has_cuda() -> bool:
