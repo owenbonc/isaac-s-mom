@@ -102,6 +102,8 @@ class FakeSim:
 
     def ground_truth(self) -> GroundTruth:
         return GroundTruth(
+            robot_xy=(float(self.xy[0]), float(self.xy[1])),
+            robot_yaw=float(self.heading),
             box_xyz=(float(self.box[0]), float(self.box[1]), self.box_z),
             bin_xy=(float(self.bin[0]), float(self.bin[1])),
             bin_yaw=self.bin_yaw,

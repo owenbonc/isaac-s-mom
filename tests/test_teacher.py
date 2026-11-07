@@ -56,9 +56,6 @@ class FakeArgon:
         return answer
 
 
-ASK_TRIES = len(RETRY_WAITS_S) + 1  # one call plus a retry after each wait
-
-
 def argon(
     tmp_path: Path, *answers: str | Exception, budget: int = 50, waits: list[float] | None = None
 ) -> tuple[Argon, FakeArgon]:
@@ -87,9 +84,6 @@ def demo(policy: ArgonPolicy, steps: int = 20) -> list[str]:
     raise AssertionError("the demo never ended")
 
 
-# --- deciding from the camera ---
-
-
 def test_act_parses_a_skill_call_and_sends_the_latest_frame(tmp_path: Path) -> None:
     a, fake = argon(tmp_path, STEP)
     call = ArgonPolicy(None, a).act(obs(frame=b"frame-7"), "do the task", "start")
@@ -104,9 +98,6 @@ def test_a_new_frame_and_the_last_result_reach_the_next_decision(tmp_path: Path)
     policy.act(obs(1, b"after the box moved"), "task", f"{MOVE}: ok")
     prompt, frame = fake.prompts[1]
     assert frame == b"after the box moved" and f"{MOVE}: ok" in str(prompt)
-
-
-# --- the done rule: exactly one closing reobserve, then None ---
 
 
 def test_done_ends_with_exactly_one_reobserve_then_none(tmp_path: Path) -> None:
@@ -154,11 +145,9 @@ def test_an_answer_that_never_parses_ends_the_demo_with_one_reobserve(tmp_path: 
 
 
 def test_a_huge_integer_in_a_diagnosis_is_unparseable_not_a_crash(tmp_path: Path) -> None:
-    a, _ = argon(tmp_path, '{"hypothesis": "x", "evidence": "y", "confidence": ' + "9" * 5000 + ', "lesson": "z"}')
+    huge = '{"hypothesis": "x", "evidence": "y", "confidence": ' + "9" * 5000 + ', "lesson": "z"}'
+    a, _ = argon(tmp_path, huge, budget=1)
     assert diagnose(failed_episode(), [b"f"], a).confidence == 0.0
-
-
-# --- unreachable: hold on the same frame, never two reobserves in a row mid-demo ---
 
 
 def test_an_unreachable_argon_is_retried_after_a_wait_without_recording_a_step(tmp_path: Path) -> None:
@@ -174,19 +163,20 @@ def test_a_rate_limit_waits_as_long_as_the_server_says_capped(tmp_path: Path) ->
     waits: list[float] = []
     limited = [ArgonUnavailable("429", retry_after_s=37.0), ArgonUnavailable("429", retry_after_s=999.0)]
     a, _ = argon(tmp_path, *limited, STEP, waits=waits)
-    assert a.ask("act", ["x"]) == STEP
+    call = ArgonPolicy(None, a).act(obs(), "task", "start")
+    assert call is not None and call.skill == MOVE
     assert waits == [37.0, 120.0]
 
 
 def test_a_minute_long_rate_limit_does_not_end_the_demo(tmp_path: Path) -> None:
     waits: list[float] = []
-    a, _ = argon(tmp_path, *[ArgonUnavailable("429")] * (ASK_TRIES - 1), STEP, DONE, waits=waits)
+    a, _ = argon(tmp_path, *[ArgonUnavailable("429")] * (ATTEMPTS - 1), STEP, DONE, waits=waits)
     assert demo(ArgonPolicy(None, a)) == [MOVE, "reobserve"]
     assert sum(waits) >= 60
 
 
 def test_argon_down_for_a_whole_step_ends_the_demo_with_one_reobserve(tmp_path: Path) -> None:
-    a, _ = argon(tmp_path, STEP, LOOK, *[ArgonUnavailable("offline")] * ASK_TRIES)
+    a, _ = argon(tmp_path, STEP, LOOK, *[ArgonUnavailable("offline")] * ATTEMPTS)
     assert demo(ArgonPolicy(None, a)) == [MOVE, "reobserve"]
 
 
@@ -199,7 +189,7 @@ def test_no_two_reobserves_in_a_row_before_the_end_whatever_argon_does(tmp_path:
 
 
 def test_an_empty_answer_is_a_failed_call_not_ok(tmp_path: Path) -> None:
-    a, _ = argon(tmp_path, *[""] * ASK_TRIES)
+    a, _ = argon(tmp_path, *[""] * ATTEMPTS)
     assert demo(ArgonPolicy(None, a)) == ["reobserve"]
     assert all(not e["ok"] and e["error"] == "empty answer" for e in events(tmp_path, "argon_call"))
 
@@ -263,9 +253,11 @@ def unreachable_errors() -> list[Exception]:
     return [
         errors.ServerError(503, {"error": {"message": "overloaded"}}),
         errors.ClientError(429, {"error": {"message": "rate limited"}}),
+        errors.ClientError(408, {"error": {"message": "request timeout"}}),
         errors.UnknownApiResponseError("not json"),
         httpx2.ConnectError("down"),
         httpx2.ReadTimeout("slow"),
+        httpx2.DecodingError("bad gzip"),
     ]
 
 
@@ -287,29 +279,40 @@ def test_other_4xx_errors_fail_fast(monkeypatch: pytest.MonkeyPatch, code: int) 
         gemini_generate()("act", ["hi"])
 
 
+def test_a_redirect_loop_is_a_setup_fault_not_an_outage(monkeypatch: pytest.MonkeyPatch) -> None:
+    import httpx2
+
+    fake_client(monkeypatch, [], httpx2.TooManyRedirects("loop"))
+    with pytest.raises(httpx2.TooManyRedirects):
+        gemini_generate()("act", ["hi"])
+
+
 def test_our_own_bug_inside_the_sdk_call_is_not_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
     fake_client(monkeypatch, [], KeyError("our bug"))
     with pytest.raises(KeyError):
         gemini_generate()("act", ["hi"])
 
 
+def test_the_startup_check_is_one_counted_logged_call(tmp_path: Path) -> None:
+    a, fake = argon(tmp_path, '{"done": true}')
+    a.check()
+    assert len(fake.prompts) == 1 and a.calls == 1
+    assert [e["purpose"] for e in events(tmp_path, "argon_call")] == ["startup"]
+
+
+def test_a_startup_check_that_gets_no_answer_stops_the_run(tmp_path: Path) -> None:
+    a, _ = argon(tmp_path, ArgonUnavailable("down"))
+    with pytest.raises(ArgonUnavailable, match="startup"):
+        a.check()
+
+
 @pytest.mark.parametrize("code", [401, 403, 404])
-def test_a_bad_key_or_a_wrong_model_stops_the_run_when_the_generator_is_built(
-    monkeypatch: pytest.MonkeyPatch, code: int
-) -> None:
+def test_a_bad_key_or_a_wrong_model_stops_the_run_at_the_startup_check(tmp_path: Path, code: int) -> None:
     from google.genai import errors
 
-    fake_client(monkeypatch, [], STEP, preflight=errors.ClientError(code, {"error": {"message": "no"}}))
+    a, _ = argon(tmp_path, errors.ClientError(code, {"error": {"message": "no"}}))
     with pytest.raises(errors.ClientError):
-        gemini_generate()
-
-
-def test_an_unreachable_server_at_startup_stops_the_run_too(monkeypatch: pytest.MonkeyPatch) -> None:
-    import httpx2
-
-    fake_client(monkeypatch, [], STEP, preflight=httpx2.ConnectError("down"))
-    with pytest.raises(ArgonUnavailable, match="startup"):
-        gemini_generate()
+        a.check()
 
 
 def test_the_server_wait_is_read_from_retry_info_or_the_header() -> None:
@@ -323,10 +326,14 @@ def test_the_server_wait_is_read_from_retry_info_or_the_header() -> None:
     assert retry_after_s(errors.ClientError(429, {"error": {"message": "q"}})) is None
 
 
-def test_tests_cannot_build_a_live_client(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_tests_cannot_build_a_live_client_or_send_a_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    from google.genai import models
+
     monkeypatch.setenv("GEMINI_API_KEY", "a-real-looking-key")
-    with pytest.raises(RuntimeError, match="live Gemini client"):
+    with pytest.raises(RuntimeError, match="live Gemini"):
         gemini_generate()
+    with pytest.raises(RuntimeError, match="live Gemini"):
+        models.Models.generate_content(object(), model="m", contents="hi")  # type: ignore[arg-type]
 
 
 def test_the_stub_teacher_needs_no_key_and_ends_each_demo_at_once(tmp_path: Path) -> None:
@@ -342,9 +349,6 @@ def test_the_summary_reports_failures_and_a_used_up_budget(tmp_path: Path) -> No
     assert a.summary() == "argon: 1/1 calls, 1 unavailable or empty, budget used up"
 
 
-# --- rule 5: the budget and the call log ---
-
-
 def test_every_call_counts_and_is_logged_even_when_it_fails_and_the_cap_stops_calls(tmp_path: Path) -> None:
     a, fake = argon(tmp_path, ArgonUnavailable("offline"), "", STEP, budget=2)
     assert [a.ask("act", ["x"]) for _ in range(3)] == [None, None, None]
@@ -353,9 +357,6 @@ def test_every_call_counts_and_is_logged_even_when_it_fails_and_the_cap_stops_ca
     assert [e["ok"] for e in logged] == [False, False]
     assert all(isinstance(e["latency_ms"], float) for e in logged)
     assert any("budget" in str(e["error"]) for e in events(tmp_path, "error"))
-
-
-# --- diagnose ---
 
 
 def failed_episode(seed: int = 1001, accepted: bool = False) -> EpisodeManifest:
@@ -398,10 +399,7 @@ def test_diagnose_reports_an_unparseable_or_missing_answer_instead_of_guessing(t
     a, _ = argon(tmp_path, '{"hypothesis": "x", "confidence": "high"}', budget=1)
     assert diagnose(failed_episode(), [b"f"], a).confidence == 0.0
     assert events(tmp_path, "error")[0]["raw"]
-    assert "unavailable" in diagnose(failed_episode(), [b"f"], a).hypothesis  # over budget now
-
-
-# --- choose_scenes: Owen's option D ---
+    assert "over budget" in diagnose(failed_episode(), [b"f"], a).hypothesis
 
 
 def test_choose_scenes_re_teaches_rejected_dev_seeds_first_then_fresh_ones() -> None:
@@ -425,9 +423,6 @@ def test_assert_not_heldout_still_guards_choose_scenes(monkeypatch: pytest.Monke
         teacher.choose_scenes([], 1, start=min(heldout_seeds()))
 
 
-# --- rule 1 and config ---
-
-
 def test_the_teacher_never_loads_the_simulator() -> None:
     probe = "import sys, isaacs_mom.teacher; print([m for m in sys.modules if m.startswith('isaacs_mom.sim')])"
     out = subprocess.run([sys.executable, "-c", probe], capture_output=True, text=True, check=True).stdout
@@ -443,9 +438,13 @@ def test_no_teacher_code_imports_the_simulator_even_inside_a_function() -> None:
             if isinstance(node, ast.ImportFrom):
                 names = [node.module or "", *(f"{node.module}.{a.name}" for a in node.names)]
                 assert not any(n.split(".")[-1] == "sim" or ".sim." in f"{n}." for n in names), path
-            if isinstance(node, ast.Call):  # importlib.import_module("isaacs_mom.sim..."), __import__(...)
-                strings = [x.value for x in node.args if isinstance(x, ast.Constant) and isinstance(x.value, str)]
-                assert not any(v.startswith("isaacs_mom.sim") or v == ".sim" for v in strings), path
+            # A computed module name can't be checked statically, so dynamic imports are banned outright here.
+            if isinstance(node, ast.Import):
+                assert not any(a.name.split(".")[0] == "importlib" for a in node.names), path
+            if isinstance(node, ast.ImportFrom):
+                assert (node.module or "").split(".")[0] != "importlib", path
+            if isinstance(node, ast.Name | ast.Attribute):
+                assert getattr(node, "id", getattr(node, "attr", "")) not in ("__import__", "import_module"), path
 
 
 @pytest.mark.parametrize(
@@ -456,12 +455,16 @@ def test_no_teacher_code_imports_the_simulator_even_inside_a_function() -> None:
         "GEMINI_API_KEY=abc # note",
         "GEMINI_API_KEY='abc'",
         'GEMINI_API_KEY="abc',  # unmatched quote
+        "GEMINI_API_KEY=abc\t# note after a tab",
+        "\ufeffGEMINI_API_KEY=abc",  # a BOM on line 1
+        "GEMINI_API_KEY=old\nGEMINI_API_KEY=abc",  # the last definition wins
+        "GEMINI_API_KEY=\nGEMINI_API_KEY=abc",  # an empty one doesn't stop the scan
     ],
 )
 def test_the_key_is_read_from_dotenv(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, line: str) -> None:
     monkeypatch.delenv("GEMINI_API_KEY", raising=False)
     env = tmp_path / ".env"
-    env.write_text(f"# comment\n{line}\n")
+    env.write_text(f"{line}\n# comment\n" if line.startswith("\ufeff") else f"# comment\n{line}\n", encoding="utf-8")
     assert env_value("GEMINI_API_KEY", env) == "abc"
     assert env_value("GEMINI_API_KEY", tmp_path / "missing") is None
 
@@ -476,7 +479,81 @@ def test_the_documented_fake_run_needs_no_key_and_asking_for_argon_without_one_s
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--rounds", "0", "--run-id", "doc"])
     cli.main()
-    assert "(stub teacher)" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "(stub teacher)" in out and "argon: 0/" in out  # the stub spends nothing, not even a startup check
     monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--teacher", "argon", "--rounds", "0"])
     with pytest.raises(MissingKey):
         cli.main()
+
+
+def test_the_mujoco_default_needs_a_key_and_stops_before_building_the_sim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from isaacs_mom.orchestrator import cli
+
+    built: list[str] = []
+    monkeypatch.setattr(cli, "make_sim", lambda name: built.append(name))
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(argon_module, "ENV_PATH", tmp_path / "no.env")
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "mujoco", "--rounds", "0"])
+    with pytest.raises(MissingKey):
+        cli.main()
+    assert built == []
+
+
+def test_a_bad_key_stops_the_cli_at_the_startup_check_before_the_sim(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from google.genai import errors
+
+    from isaacs_mom.orchestrator import cli
+
+    def bad_key(purpose: str, parts: list[Part]) -> str:
+        raise errors.ClientError(401, {"error": {"message": "API key not valid"}})
+
+    built: list[str] = []
+    monkeypatch.setattr(cli, "make_sim", lambda name: built.append(name))
+    monkeypatch.setattr(argon_module, "gemini_generate", lambda: bad_key)
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "mujoco", "--rounds", "0"])
+    with pytest.raises(errors.ClientError):
+        cli.main()
+    assert built == []
+
+
+@pytest.mark.parametrize("bad", ["-3s", "nans", "infs", "-1e9s"])
+def test_a_negative_or_non_finite_retry_delay_is_ignored(bad: str) -> None:
+    from google.genai import errors
+
+    info = {"@type": "type.googleapis.com/google.rpc.RetryInfo", "retryDelay": bad}
+    assert retry_after_s(errors.ClientError(429, {"error": {"message": "q", "details": [info]}})) is None
+    with_header = errors.ClientError(429, {"error": {"message": "q"}})
+    with_header.response = SimpleNamespace(headers={"retry-after": bad[:-1]})  # type: ignore[assignment]
+    assert retry_after_s(with_header) is None
+
+
+@pytest.mark.parametrize("server_wait", [-3.0, float("nan"), float("-inf")])
+def test_a_bad_server_wait_never_reaches_sleep_as_negative_or_nan(tmp_path: Path, server_wait: float) -> None:
+    waits: list[float] = []
+    a, _ = argon(tmp_path, ArgonUnavailable("429", retry_after_s=server_wait), STEP, waits=waits)
+    ArgonPolicy(None, a).act(obs(), "task", "start")
+    assert len(waits) == 1 and 0.0 <= waits[0] <= 120.0
+
+
+def test_a_fatal_4xx_is_still_logged_as_a_call(tmp_path: Path) -> None:
+    from google.genai import errors
+
+    a, _ = argon(tmp_path, errors.ClientError(401, {"error": {"message": "API key not valid"}}))
+    with pytest.raises(errors.ClientError):
+        a.check()
+    [call] = events(tmp_path, "argon_call")
+    assert call["purpose"] == "startup" and call["ok"] is False and "ClientError" in str(call["error"])
+    assert a.calls == 1
+
+
+def test_failing_the_last_budgeted_call_ends_at_once_without_a_wait(tmp_path: Path) -> None:
+    waits: list[float] = []
+    a, _ = argon(tmp_path, ArgonUnavailable("down"), budget=1, waits=waits)
+    assert demo(ArgonPolicy(None, a)) == ["reobserve"]
+    assert waits == []

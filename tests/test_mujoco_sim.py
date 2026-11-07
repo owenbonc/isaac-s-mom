@@ -561,3 +561,13 @@ def test_moving_the_bin_onto_the_robot_is_refused(sim: MujocoSim, monkeypatch: p
     before = sim.ground_truth()
     assert not sim.perturb(Perturbation(kind="move_bin", seed=0))
     assert sim.ground_truth() == before
+
+
+def test_ground_truth_follows_the_robot_as_it_walks(blind_sim: MujocoSim) -> None:
+    start = blind_sim.ground_truth()
+    assert start.robot_xy == pytest.approx((0.0, 0.0), abs=0.04) and start.robot_yaw == pytest.approx(0.0, abs=0.05)
+    assert blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30})).ok
+    assert blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90})).ok
+    moved = blind_sim.ground_truth()
+    assert moved.robot_xy == pytest.approx((-0.30, 0.0), abs=0.05)
+    assert np.degrees(moved.robot_yaw) == pytest.approx(90, abs=5)

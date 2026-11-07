@@ -487,3 +487,12 @@ def test_the_twisted_drop_aims_on_the_leaning_pose(blind_sim: MujocoSim) -> None
         feedback = f"{call.skill}: ok"
     verdict = validate(blind_sim.ground_truth())
     assert verdict.accepted, verdict.reason
+
+
+def test_ground_truth_heading_follows_the_waist_twist(sim: MujocoSim) -> None:
+    before = sim.ground_truth()
+    assert before.robot_yaw == pytest.approx(0.0, abs=np.deg2rad(3))
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
+    after = sim.ground_truth()
+    assert after.robot_yaw - before.robot_yaw == pytest.approx(np.deg2rad(30), abs=np.deg2rad(3))
+    assert np.hypot(after.robot_xy[0] - before.robot_xy[0], after.robot_xy[1] - before.robot_xy[1]) < 0.02
