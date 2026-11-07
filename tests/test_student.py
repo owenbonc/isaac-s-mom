@@ -57,6 +57,15 @@ def test_reply_distance_is_clamped_to_the_skill_limit() -> None:
     assert parse_reply('{"skill": "reach_left", "params": {"distance_cm": 90}}').params == {"distance_cm": 20.0}
 
 
+def test_a_turn_reply_parses_its_angle() -> None:
+    reply = '{"skill":"turn_left","params":{"angle_deg":30}}'
+    assert parse_reply(reply) == SkillCall(skill="turn_left", params={"angle_deg": 30})
+
+
+def test_reply_angle_is_clamped_to_the_skill_limit() -> None:
+    assert parse_reply('{"skill": "turn_right", "params": {"angle_deg": 90}}').params == {"angle_deg": 45.0}
+
+
 def test_training_target_round_trips_through_the_parser() -> None:
     call = SkillCall(skill="reach_right", params={"distance_cm": 7.26})
     assert parse_reply(format_target(call)) == SkillCall(skill="reach_right", params={"distance_cm": 7.3})
@@ -71,6 +80,13 @@ def test_prompt_names_the_task_the_last_result_and_every_skill() -> None:
     assert INSTRUCTION in text
     assert "reach_left: ok" in text
     assert all(skill in text for skill in SKILLS)
+
+
+def test_prompt_gives_each_param_its_limit_and_describes_the_humanoid_task() -> None:
+    text = prompt_text(INSTRUCTION, "start")
+    assert "distance_cm" in text and "0 to 20" in text
+    assert "angle_deg" in text and "0 to 45" in text
+    assert not {"arm", "block", "zone", "push"} & set(text.lower().replace(".", " ").replace(",", " ").split())
 
 
 def test_base_checkpoint_is_the_plain_model(tmp_path: Path) -> None:

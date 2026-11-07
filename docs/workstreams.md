@@ -17,7 +17,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 - Replace `diagnose`, `choose_scenes` and `ArgonPolicy.act` (SPEC §3.3). Model `gemini-4-argon` via the `google-genai` SDK; key from `GEMINI_API_KEY` in `.env`.
 - Input is only the head-camera JPEGs, the instruction, skill history and the validator's reason. Never import `isaacs_mom.sim` or call `ground_truth` (rule 1).
 - `choose_scenes` must keep calling `assert_not_heldout` (rule 2). Enforce `ARGON_CALL_BUDGET` and emit an `argon_call` event per call with latency (rule 5). When Argon is unreachable or over budget, `act` returns `reobserve` a few times, then `None`.
-- End every demonstration with exactly one `reobserve` once the block is in the zone, then return `None`. The student learns to stop from that recorded step and treats two `reobserve`s in a row as done. Re-observe between skills by reading the new frame, not by sending `reobserve`.
+- End every demonstration with exactly one `reobserve` once the box is in the bin, then return `None`. The student learns to stop from that recorded step and treats two `reobserve`s in a row as done. Re-observe between skills by reading the new frame, not by sending `reobserve`.
 - Done: SPEC §6 criterion 4 (Gate D). Tests use a fake Argon client; no live calls in CI.
 
 ## 3. Validator and dataset — `isaacs_mom/validator/`

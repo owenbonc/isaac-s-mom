@@ -5,7 +5,7 @@ import math
 
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import MAX_DISTANCE_CM, SKILLS, SkillCall, SkillTarget
+from isaacs_mom.contracts import PARAM_LIMITS, SKILLS, SkillCall, SkillTarget
 
 
 class UnparseableReply(ValueError):
@@ -13,13 +13,14 @@ class UnparseableReply(ValueError):
 
 
 def prompt_text(instruction: str, feedback: str) -> str:
+    limits = ", ".join(f"{name} 0 to {limit:g}" for name, limit in PARAM_LIMITS.items())
     return (
-        "You control a robot arm and see the table through its head camera.\n"
+        "You control a humanoid robot and see the table through its head camera.\n"
         f"Task: {instruction}\n"
         f"Result of your last skill: {feedback}\n"
-        f"Choose the next skill from: {', '.join(SKILLS)}. distance_cm is optional, 0 to {MAX_DISTANCE_CM:g}.\n"
-        'Answer with one JSON object only, for example {"skill": "push_forward", "params": {"distance_cm": 5}}. '
-        'When the block is inside the target zone, answer {"skill": "reobserve", "params": {}}.'
+        f"Choose the next skill from: {', '.join(SKILLS)}. Optional params: {limits}.\n"
+        'Answer with one JSON object only, for example {"skill": "reach_left", "params": {"distance_cm": 5}}. '
+        'When the box is inside the bin, answer {"skill": "reobserve", "params": {}}.'
     )
 
 

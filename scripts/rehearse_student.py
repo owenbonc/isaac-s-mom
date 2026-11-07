@@ -6,6 +6,7 @@ dashboard or in the pitch (SPEC §2 rules 1 and 6).
 
 import argparse
 import logging
+import math
 import time
 from pathlib import Path
 
@@ -14,7 +15,7 @@ from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import INSTRUCTION
 from isaacs_mom.seeds import heldout_seeds
-from isaacs_mom.sim.fake import BLOCK_HALF, FakeSim
+from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
 from isaacs_mom.validator.training import build_training_set
 
@@ -31,16 +32,22 @@ class Oracle:
 
     def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
         truth = self.sim.ground_truth()
-        dy = truth.block_xy[1] - obs.joint_state[1]
-        if abs(dy) > 0.01:
-            skill = "approach_right" if dy > 0 else "approach_left"
-            return SkillCall(skill=skill, params={"distance_cm": abs(dy) * 100})
-        gap = truth.target_xy[0] - truth.block_xy[0]
-        if gap > 0.01:
-            behind = truth.block_xy[0] - BLOCK_HALF - obs.joint_state[0]
-            return SkillCall(skill="push_forward", params={"distance_cm": min((behind + gap) * 100, 20)})
-        # Ends the way the teacher should: one reobserve on the finished scene, then stop.
-        return None if feedback.startswith("reobserve") else SkillCall(skill="reobserve")
+        work_y, waist, closed, lifted = obs.joint_state
+        if truth.box_on_bin_floor:
+            # Ends the way the teacher does (SPEC §3.3): one reobserve on the finished scene, then stop.
+            return None if feedback.startswith("reobserve") else SkillCall(skill="reobserve")
+        if not closed:
+            dy = truth.box_xyz[1] - work_y
+            if abs(dy) > 0.01:
+                skill = "reach_left" if dy > 0 else "reach_right"
+                return SkillCall(skill=skill, params={"distance_cm": abs(dy) * 100})
+            return SkillCall(skill="hug")
+        if not lifted:
+            return SkillCall(skill="lift")
+        turn = math.degrees(math.atan2(truth.bin_xy[1], truth.bin_xy[0]) - waist)
+        if abs(turn) > 2:
+            return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
+        return SkillCall(skill="place")
 
 
 def succeeded(manifest: EpisodeManifest) -> bool:
