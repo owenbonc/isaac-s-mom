@@ -3,21 +3,22 @@
 Argon sees only head-camera JPEGs, the instruction, the skill history and the validator's reason, never simulator
 ground truth (rule 1), so nothing here imports `isaacs_mom.sim`.
 
-Done rule (agreed in #7): a demo ends with exactly one `reobserve`, then None; the student reads two `reobserve`s in a
-row as done. So the teacher never records a stray `reobserve` for an answer it could not parse; it asks again.
+Done rule: a demo ends with exactly one `reobserve`, then None, and the student reads two `reobserve`s in a row as
+done. So the teacher never records a second `reobserve` in a row before the end: an unreachable Argon or an unusable
+answer is asked again on the same frame after a wait, and neither records a step.
 """
 
 import json
+from collections.abc import Callable
 from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
 from isaacs_mom.contracts import Controller, Diagnosis, EpisodeManifest, Observation, SkillCall
 from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
-from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.teacher.argon import Argon, Part, Purpose
 
-OFFLINE_REOBSERVES = 3  # holds this many times when Argon is unreachable or over budget, then gives up (SPEC §3.3)
-PARSE_ATTEMPTS = 3  # asks this many times for an answer it can parse, then ends the demo
+ATTEMPTS = 3  # per step, on the same frame, waiting between them (SPEC §3.3); then the demo ends
 DIAGNOSIS_FRAMES = 4  # the first frame and the last three: the start and how it went wrong, at a bounded cost
 RAW_LOG_CHARS = 500
 
@@ -28,14 +29,20 @@ You act by choosing one whitelisted skill at a time; a controller turns it into 
 Skills are refused with a reason if they would go out of reach; the next feedback tells you."""
 
 Done = Literal["done"]
+OverBudget = Literal["over budget"]
+
+
+def _json(answer: str) -> object:
+    """Parsed JSON, or None. ValueError covers a 4,300+-digit integer as well as malformed text."""
+    try:
+        return json.loads(answer)
+    except (ValueError, RecursionError):
+        return None
 
 
 def _strict(model: type[BaseModel], answer: str) -> BaseModel | None:
     """The answer as `model`, or None if it is not exactly that object: no extra keys, no "7" for 7."""
-    try:
-        raw = json.loads(answer)
-    except (json.JSONDecodeError, RecursionError):
-        return None
+    raw = _json(answer)
     if not isinstance(raw, dict) or set(raw) - set(model.model_fields):
         return None
     try:
@@ -46,15 +53,36 @@ def _strict(model: type[BaseModel], answer: str) -> BaseModel | None:
 
 def parse_step(answer: str) -> SkillCall | Done | None:
     """A skill call, "done", or None for anything else (including "done" alongside a skill)."""
-    try:
-        raw = json.loads(answer)
-    except (json.JSONDecodeError, RecursionError):
-        return None
+    raw = _json(answer)
     if isinstance(raw, dict) and "done" in raw:
         ok = raw["done"] is True and set(raw) <= {"done", "reason"} and isinstance(raw.get("reason", ""), str)
         return "done" if ok else None
     call = _strict(SkillCall, answer)
     return call if isinstance(call, SkillCall) else None
+
+
+def ask_parsed[T](
+    argon: Argon, purpose: Purpose, parts: list[Part], parse: Callable[[str], T | None]
+) -> T | OverBudget | None:
+    """Up to ATTEMPTS calls on the same input, waiting between them: the parsed answer, "over budget", or None when
+    Argon stayed unreachable or unusable."""
+    for attempt in range(ATTEMPTS):
+        if argon.exhausted:
+            return "over budget"
+        answer = argon.ask(purpose, parts)
+        if answer is not None:
+            parsed = parse(answer)
+            if parsed is not None:
+                return parsed
+            argon.error(purpose, "unparseable or non-whitelisted Argon answer", raw=answer[:RAW_LOG_CHARS])
+        if attempt < ATTEMPTS - 1 and not argon.exhausted:  # over budget ends at once, without a last wait
+            argon.wait(attempt)
+    return None
+
+
+def _diagnosis(answer: str) -> Diagnosis | None:
+    parsed = _strict(Diagnosis, answer)
+    return parsed if isinstance(parsed, Diagnosis) else None
 
 
 def diagnose(failed: EpisodeManifest, frames: list[bytes], argon: Argon) -> Diagnosis:
@@ -77,19 +105,16 @@ Diagnose the most likely cause of the failure from this evidence only. Answer wi
 {{"hypothesis": str, "evidence": str, "confidence": number 0-1, "lesson": str}}
 `lesson` is one sentence the teacher should apply when demonstrating this task."""
     shown = frames if len(frames) <= DIAGNOSIS_FRAMES else [frames[0], *frames[-(DIAGNOSIS_FRAMES - 1) :]]
-    answer = argon.ask("diagnose", [prompt, *shown])
-    if answer is None:
-        return Diagnosis(hypothesis="not diagnosed: Argon unavailable", evidence=reason, confidence=0.0, lesson="")
-    diagnosis = _strict(Diagnosis, answer)
+    diagnosis = ask_parsed(argon, "diagnose", [prompt, *shown], _diagnosis)
     if isinstance(diagnosis, Diagnosis):
         return diagnosis
-    argon.error("diagnose", "unparseable Argon answer", raw=answer[:RAW_LOG_CHARS])
-    return Diagnosis(hypothesis="not diagnosed: unparseable Argon answer", evidence=reason, confidence=0.0, lesson="")
+    why = "Argon over budget" if diagnosis == "over budget" else "Argon unavailable or no usable answer"
+    return Diagnosis(hypothesis=f"not diagnosed: {why}", evidence=reason, confidence=0.0, lesson="")
 
 
 def choose_scenes(failures: list[EpisodeManifest], n: int, start: int = DEV_SEED_START) -> list[int]:
-    """Owen's option D: re-teach the dev seeds whose trials the validator rejected, in order, then fresh dev seeds up
-    to n. Pass or fail is validator output, so no layout or ground truth is read (rule 1)."""
+    """The dev seeds whose trials the validator rejected, in order, then fresh dev seeds up to n. Pass or fail is
+    validator output, so no layout or ground truth is read (rule 1)."""
     rejected = [m.seed for m in failures if m.split == "dev" and m.validation and not m.validation.accepted]
     seeds = list(dict.fromkeys(s for s in rejected if s not in heldout_seeds()))[:n]
     fresh = (s for s in range(start, start + 10 * n + len(heldout_seeds())) if s not in heldout_seeds())
@@ -111,7 +136,6 @@ class ArgonPolicy:
         self.argon = argon
         self.history: list[SkillCall] = []
         self.results: list[str] = []
-        self.offline = 0
         self.finished = False
 
     def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
@@ -119,21 +143,17 @@ class ArgonPolicy:
             self.results.append(feedback)
         if self.finished:
             return None
-        for _ in range(PARSE_ATTEMPTS):
-            answer = self.argon.ask("act", [self._prompt(obs, instruction), obs.head_rgb_jpeg])
-            if answer is None:
-                return self._hold()
-            self.offline = 0
-            step = parse_step(answer)
-            if step == "done":
-                return self._finish("Argon: the task looks complete")
-            if isinstance(step, SkillCall):
-                if step.skill == "reobserve" and self._last_was_reobserve():
-                    return self._finish(step.reason)  # a second look in a row would read as "done" to the student
-                self.history.append(step)
-                return step
-            self.argon.error("act", "unparseable or non-whitelisted Argon answer", raw=answer[:RAW_LOG_CHARS])
-        return self._finish("ended: no parseable Argon answer")
+        step = ask_parsed(self.argon, "act", [self._prompt(obs, instruction), obs.head_rgb_jpeg], parse_step)
+        if step == "over budget":
+            return self._finish("ended: Argon call budget used up")
+        if step is None:
+            return self._finish("ended: Argon unreachable or no usable answer")
+        if step == "done":
+            return self._finish("Argon: the task looks complete")
+        if step.skill == "reobserve" and self._last_was_reobserve():
+            return self._finish(step.reason)  # a second look in a row would read as "done" to the student
+        self.history.append(step)
+        return step
 
     def _last_was_reobserve(self) -> bool:
         return bool(self.history) and self.history[-1].skill == "reobserve"
@@ -144,14 +164,6 @@ class ArgonPolicy:
         if self._last_was_reobserve():
             return None
         call = SkillCall(skill="reobserve", reason=reason or "done")
-        self.history.append(call)
-        return call
-
-    def _hold(self) -> SkillCall | None:
-        self.offline += 1
-        if self.offline > OFFLINE_REOBSERVES:
-            return None
-        call = SkillCall(skill="reobserve", reason="Argon unavailable: holding and re-observing")
         self.history.append(call)
         return call
 

@@ -37,6 +37,7 @@ def manifest(
     validation: Validation | None = ACCEPTED,
     seed: int = DEV_SEED_START,
     controllers: tuple[Controller, ...] = ("teacher",),
+    driver: Controller | None = None,
 ) -> EpisodeManifest:
     return EpisodeManifest(
         episode_id="ep",
@@ -48,6 +49,7 @@ def manifest(
         sim_version="test",
         robot_config="test",
         steps=[step(i, c) for i, c in enumerate(controllers)],
+        driver=driver or (controllers[0] if controllers else "teacher"),
         validation=validation,
     )
 
@@ -99,6 +101,8 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
         tmp_path, "g-unexplained", manifest(validation=Validation(task_success=False, physics_valid=True, reason="x"))
     )
     _write(tmp_path, "h-empty", manifest(validation=missed, controllers=()))
+    # A held-out episode the teacher drove is still an exam, never a demonstration.
+    _write(tmp_path, "j-exam-teacher", manifest(seed=min(heldout_seeds())).model_copy(update={"split": "heldout"}))
     _write(
         tmp_path, "i-sim-bug", manifest(validation=recording_error_verdict(RecordingError("timestamps go backwards")))
     )
@@ -108,13 +112,39 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
     summary = TrainingSetSummary.model_validate_json(training_set.with_suffix(".summary.json").read_text())
     assert summary == TrainingSetSummary(
         round=1,
-        episodes_scanned=9,
-        demonstrations=6,
+        episodes_scanned=10,
+        demonstrations=7,
         accepted=1,
-        rejected=4,
+        rejected=5,
         unfinished=1,
-        rejected_by={"short_of_bin": 1, "joint_limit": 1, "still_moving": 1, "other": 1, "recording_error": 1},
+        rejected_by={"short_of_bin": 2, "joint_limit": 1, "still_moving": 1, "other": 1, "recording_error": 1},
         empty_dev_episodes=1,
         examples=2,
     )
     assert len(training_set.read_text().splitlines()) == summary.examples
+
+
+def test_a_teacher_refused_at_its_first_step_is_a_rejected_demonstration(tmp_path: Path) -> None:
+    refused = recording_error_verdict(RecordingError("timestamps go backwards"))
+    _write(tmp_path, "refused-at-once", manifest(validation=refused, controllers=(), driver="teacher"))
+
+    summary = TrainingSetSummary.model_validate_json(
+        build_training_set(tmp_path, 1).with_suffix(".summary.json").read_text()
+    )
+
+    assert (summary.demonstrations, summary.rejected) == (1, 1)
+    assert summary.rejected_by == {"recording_error": 1}
+    assert summary.empty_dev_episodes == 1
+
+
+def test_a_students_recording_error_is_not_counted_as_a_demonstration(tmp_path: Path) -> None:
+    refused = recording_error_verdict(RecordingError("timestamps go backwards"))
+    _write(tmp_path, "student-trial", manifest(validation=refused, controllers=(), driver="student"))
+
+    summary = TrainingSetSummary.model_validate_json(
+        build_training_set(tmp_path, 1).with_suffix(".summary.json").read_text()
+    )
+
+    assert (summary.demonstrations, summary.rejected) == (0, 0)
+    assert summary.rejected_by == {}
+    assert summary.empty_dev_episodes == 1

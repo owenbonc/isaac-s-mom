@@ -37,6 +37,7 @@ def run_episode(
         instruction=instruction,
         sim_version=sim.sim_version,
         robot_config=sim.robot_config,
+        driver=policy.controller,
     )
     events.emit("episode_started", episode_id=episode_id, seed=seed, split=split, round=round_)
     feedback = "start"
@@ -58,9 +59,17 @@ def run_episode(
         for _ in range(max_steps):
             if total_steps == perturb_at:
                 perturbation = Perturbation(kind="move_box", seed=seed + PERTURB_SEED_OFFSET)
-                sim.perturb(perturbation)
-                recorder.add_perturbation(perturbation)
-                events.emit("perturbation", episode_id=episode_id, kind=perturbation.kind, step=total_steps)
+                if sim.perturb(perturbation):
+                    recorder.add_perturbation(perturbation)
+                    events.emit("perturbation", episode_id=episode_id, kind=perturbation.kind, step=total_steps)
+                else:
+                    # Recorded and shown only when it happened, so nothing downstream claims a change that wasn't made.
+                    events.emit(
+                        "error",
+                        episode_id=episode_id,
+                        step=total_steps,
+                        error=f"{perturbation.kind} not applied: the sim refused it and nothing moved",
+                    )
             obs = sim.observe()
             started = time.perf_counter()
             call = active.act(obs, instruction, feedback)

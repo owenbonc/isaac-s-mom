@@ -198,16 +198,23 @@ def test_second_reobserve_in_a_row_means_done() -> None:
     assert policy.act(frame(1), "hug", "reobserve: ok") is None
 
 
-def test_an_unparseable_reply_breaks_a_reobserve_streak() -> None:
-    policy = StudentPolicy(generate=scripted(REOBSERVE, "??", REOBSERVE))
+def test_an_unparseable_reply_after_a_reobserve_means_done() -> None:
+    policy = StudentPolicy(generate=scripted(REOBSERVE, "??"))
+    assert policy.act(frame(0), "hug", "start") == SkillCall(skill="reobserve")
+    assert policy.act(frame(1), "hug", "reobserve: ok") is None
+
+
+def test_two_unparseable_replies_in_a_row_mean_done() -> None:
+    policy = StudentPolicy(generate=scripted("??", "??"))
+    assert policy.act(frame(0), "hug", "start") == SkillCall(skill="reobserve")
+    assert policy.act(frame(1), "hug", "reobserve: ok") is None
+
+
+def test_a_skill_between_reobserves_starts_the_streak_over() -> None:
+    policy = StudentPolicy(generate=scripted("??", '{"skill": "hug", "params": {}}', REOBSERVE))
     policy.act(frame(0), "hug", "start")
     policy.act(frame(1), "hug", "reobserve: ok")
-    assert policy.act(frame(2), "hug", "reobserve: ok") == SkillCall(skill="reobserve")
-
-
-def test_unparseable_replies_never_end_the_episode() -> None:
-    policy = StudentPolicy(generate=scripted("??", "??", "??"))
-    assert all(policy.act(frame(i), "hug", "start") == SkillCall(skill="reobserve") for i in range(3))
+    assert policy.act(frame(2), "hug", "hug: ok") == SkillCall(skill="reobserve")
 
 
 def test_reobserve_streak_starts_over_in_a_new_episode() -> None:

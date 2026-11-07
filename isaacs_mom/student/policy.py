@@ -47,12 +47,16 @@ class StudentPolicy:
                 error,
                 text[:200],
             )
-            self._last_skill = None
-            return SkillCall(skill="reobserve")
-        log.info(
-            "student %s step %d: %s in %.0f ms", self.checkpoint, obs.step, call.model_dump_json(), self.last_latency_ms
-        )
-        # SPEC §3.2/§3.3: the teacher ends every demo with one reobserve, so a second in a row from the model is done.
+            call = SkillCall(skill="reobserve")
+        else:
+            log.info(
+                "student %s step %d: %s in %.0f ms",
+                self.checkpoint,
+                obs.step,
+                call.model_dump_json(),
+                self.last_latency_ms,
+            )
+        # SPEC §3.2: demos end with one reobserve (§3.3), so a second in a row, fallback or not, is done.
         if call.skill == "reobserve" and self._last_skill == "reobserve":
             return None
         self._last_skill = call.skill

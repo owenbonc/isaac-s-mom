@@ -4,19 +4,20 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCall, SkillTarget
+from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, SkillCall, SkillTarget
 from isaacs_mom.orchestrator import cli
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
-from isaacs_mom.sim.fake import FakeSim
+from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, FakeSim
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
-from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 from isaacs_mom.validator import validate
 from isaacs_mom.validator.training import build_training_set, training_examples
 
@@ -126,6 +127,85 @@ def test_fake_refuses_an_out_of_reach_skill_without_moving() -> None:
     assert sim.observe().joint_state[1] == pytest.approx(before[1] + math.radians(135))
 
 
+def _to_the_bin(sim: FakeSim) -> None:
+    policy = ScriptedPolicy(sim)
+    while call := policy.act(sim.observe(), "", ""):
+        assert sim.execute(call).ok
+
+
+def test_fake_moves_the_box_only_while_it_rests_on_the_table_out_of_the_hands() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    start = sim.ground_truth()
+    assert sim.perturb(Perturbation(kind="move_box", seed=99))
+    assert sim.ground_truth().box_xyz != start.box_xyz
+
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
+    sim.execute(SkillCall(skill="hug"))  # turned away from the table, so the hands close on nothing
+    sim.execute(SkillCall(skill="turn_right", params={"angle_deg": 30}))
+    missed = sim.ground_truth()
+    assert sim.closed and not sim.held
+    assert sim.perturb(Perturbation(kind="move_box", seed=100))
+    assert sim.ground_truth().box_xyz != missed.box_xyz
+
+    sim.reset(1234)
+    box_y = sim.ground_truth().box_xyz[1]
+    sim.execute(SkillCall(skill="reach_left" if box_y > 0 else "reach_right", params={"distance_cm": abs(box_y) * 100}))
+    sim.execute(SkillCall(skill="hug"))
+    hugged = sim.ground_truth()
+    assert sim.held
+    assert not sim.perturb(Perturbation(kind="move_box", seed=99))
+    assert sim.ground_truth() == hugged
+
+    sim.reset(1234)
+    _to_the_bin(sim)
+    placed = sim.ground_truth()
+    assert placed.box_on_bin_floor
+    assert not sim.perturb(Perturbation(kind="move_box", seed=99))
+    assert sim.ground_truth() == placed
+
+
+def test_fake_moves_the_bin_only_clear_of_the_box() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    _to_the_bin(sim)
+    placed = sim.ground_truth()
+    assert not sim.perturb(Perturbation(kind="move_bin", seed=99))
+    assert sim.ground_truth() == placed and validate(placed).accepted
+
+    sim.reset(1234)
+    assert sim.perturb(Perturbation(kind="move_bin", seed=99))  # the box is on the table, above the bin
+    landing = sim.ground_truth()
+    outward = np.array([math.cos(landing.bin_yaw), math.sin(landing.bin_yaw)])
+    # On the floor beside where the bin would go: centred 10 cm past its wall the box still reaches under it.
+    for past_wall, clear in [(0.10, False), (0.30, True)]:
+        sim.reset(1234)
+        sim.box, sim.box_z = np.array(landing.bin_xy) + (BIN_OUTER_HALF + past_wall) * outward, FLOOR_Z
+        on_floor = sim.ground_truth()
+        assert sim.perturb(Perturbation(kind="move_bin", seed=99)) is clear
+        assert (sim.ground_truth().bin_xy == landing.bin_xy) is clear
+        assert sim.ground_truth().box_xyz == on_floor.box_xyz
+
+
+def test_a_perturbation_the_sim_refuses_is_reported_not_recorded(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug"}
+    steps = len(run_episode(sim, ScriptedPolicy(sim), seed=1505, **common).steps)
+    late = run_episode(sim, ScriptedPolicy(sim), seed=1505, perturb_at=steps, **common)  # the box is in the bin
+    early = run_episode(sim, ScriptedPolicy(sim), seed=1505, perturb_at=0, **common)  # the box is on the table
+    logged = [json.loads(line) for line in events.path.read_text().splitlines()]
+
+    def of(manifest: EpisodeManifest, type_: str) -> list[int]:
+        return [
+            e["data"]["step"] for e in logged if e["type"] == type_ and e["data"]["episode_id"] == manifest.episode_id
+        ]
+
+    assert late.validation and late.validation.accepted
+    assert late.perturbations == [] and of(late, "perturbation") == [] and of(late, "error") == [steps]
+    assert [p.before_step for p in early.perturbations] == [0] and of(early, "perturbation") == [0]
+
+
 def test_scripted_episode_succeeds_and_takeover_is_recorded(tmp_path: Path) -> None:
     sim = FakeSim()
     events = EventLog(tmp_path, "t")
@@ -168,9 +248,11 @@ def test_training_set_takes_only_accepted_teacher_steps_from_dev(tmp_path: Path)
 def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
     calls: list[object] = []
 
-    def fake_argon(events: EventLog) -> Argon:
-        return Argon(events, generate=lambda parts: calls.append(parts) or '{"done": true}')
+    def fake(purpose: Purpose, parts: list[Part]) -> str:
+        calls.append(parts)
+        return stub_generate(purpose, parts)
 
+    argon = Argon(EventLog(tmp_path, "t"), generate=fake, sleep=lambda s: pytest.fail(f"waited {s} s"))
     results = run_loop(
         FakeSim(),
         tmp_path,
@@ -178,9 +260,9 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
         max_rounds=1,
         demos=2,
         dev_trials=2,
+        argon=argon,
         make_student=StubStudent,
         train_student=stub_finetune,
-        make_argon=fake_argon,
     )
     assert calls  # the teacher ran, on the fake: no live Gemini call even with a key in .env
     assert [r.round for r in results] == [0, 1]
@@ -219,9 +301,19 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
     assert lines and all("reason" not in json.loads(line)["target"] for line in lines)
 
 
-def silent_argon(events: EventLog) -> Argon:
+def test_fake_sim_reports_the_robot_turned_by_its_waist() -> None:
+    sim = FakeSim()
+    sim.reset(1700)
+    assert sim.ground_truth().robot_yaw == 0.0
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
+    gt = sim.ground_truth()
+    assert gt.robot_xy == (0.0, 0.0)
+    assert gt.robot_yaw == pytest.approx(math.radians(30))
+
+
+def silent_argon(run_dir: Path, run_id: str) -> Argon:
     """No live Gemini call: these tests are about the student seams."""
-    return Argon(events, generate=lambda parts: '{"done": true}')
+    return Argon(EventLog(run_dir, run_id), generate=stub_generate)
 
 
 def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
@@ -241,9 +333,9 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
         max_rounds=1,
         demos=1,
         dev_trials=1,
+        argon=silent_argon(tmp_path, "t"),
         make_student=make_student,
         train_student=train_student,
-        make_argon=silent_argon,
     )
     assert built[0] == "ckpt-r0"
     assert "trained-1" in built
@@ -270,9 +362,9 @@ def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int], st
         max_rounds=1,
         demos=1,
         dev_trials=1,
+        argon=silent_argon(run_dir, "some-run"),
         make_student=StubStudent,
         train_student=train_student,
-        make_argon=silent_argon,
     )
     events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
     [started] = [e["data"] for e in events if e["type"] == "finetune_started"]

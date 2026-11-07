@@ -1,10 +1,23 @@
 import math
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import mujoco
 import numpy as np
+import pytest
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, ReplayFailure, ReplayReport, SkillCall
+from isaacs_mom.contracts import (
+    Controller,
+    EpisodeManifest,
+    ExecResult,
+    Observation,
+    Perturbation,
+    PerturbationRecord,
+    ReplayFailure,
+    ReplayReport,
+    SkillCall,
+)
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
@@ -63,20 +76,25 @@ def _record(tmp_path: Path, make_policy: Callable[[FakeSim], Policy], seed: int,
     return tmp_path / "episodes" / manifest.episode_id / "manifest.json"
 
 
+def _accepted(path: Path) -> bool:
+    verdict = _load(path).validation
+    return verdict is not None and verdict.accepted
+
+
 def _load(path: Path) -> EpisodeManifest:
     return EpisodeManifest.model_validate_json(path.read_text())
 
 
 def test_replay_reproduces_an_accepted_episode_and_marks_the_manifest(tmp_path: Path) -> None:
     path = _record(tmp_path, GreedyHugger, seed=1600)
-    assert _load(path).validation.accepted  # type: ignore[union-attr]
+    assert _accepted(path)
     assert replay(FakeSim(), path)
     assert _load(path).replay_valid is True
 
 
 def test_replay_reproduces_a_rejected_episode(tmp_path: Path) -> None:
     path = _record(tmp_path, lambda _: ReobserveOnce(), seed=1601)
-    assert not _load(path).validation.accepted  # type: ignore[union-attr]
+    assert not _accepted(path)
     assert replay(FakeSim(), path)
 
 
@@ -87,6 +105,17 @@ def test_replay_applies_the_recorded_mid_run_perturbation(tmp_path: Path) -> Non
     assert replay(FakeSim(), path)
 
     manifest.perturbations = []
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)
+
+
+def test_replay_rejects_a_recorded_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1606)
+    manifest = _load(path)
+    # The box is in the bin by the end, so moving it is refused and nothing else about the replay changes.
+    manifest.perturbations = [
+        PerturbationRecord(before_step=len(manifest.steps), perturbation=Perturbation(kind="move_box", seed=1))
+    ]
     path.write_text(manifest.model_dump_json())
     assert not replay(FakeSim(), path)
 
@@ -125,7 +154,7 @@ def test_replay_accepted_checks_every_accepted_episode_in_a_run(tmp_path: Path) 
     good = _record(tmp_path, GreedyHugger, seed=1606)
     _record(tmp_path, lambda _: ReobserveOnce(), seed=1607)  # rejected, so not checked
     tampered = _record(tmp_path, GreedyHugger, seed=1608)
-    assert _load(good).validation.accepted and _load(tampered).validation.accepted  # type: ignore[union-attr]
+    assert all(_accepted(p) for p in (good, tampered))
     first = tampered.parent / _load(tampered).steps[0].actions
     np.save(first, np.zeros_like(np.load(first)))
 
@@ -152,3 +181,91 @@ def test_one_broken_episode_does_not_stop_the_whole_run_replay(tmp_path: Path) -
     assert report.failures[0].reason.startswith("replay raised FileNotFoundError")
     assert _load(broken).replay_valid is False
     assert _load(good).replay_valid is True
+
+
+def test_replay_notices_a_step_with_fewer_timestamps(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1611)
+    manifest = _load(path)
+    # Two timestamps against ten neither match nor broadcast, so only the length check gives a clean reason.
+    manifest.steps[0].timestamps = manifest.steps[0].timestamps[:2]
+    path.write_text(manifest.model_dump_json())
+
+    report = replay_accepted(FakeSim(), tmp_path)
+
+    assert [f.reason for f in report.failures] == ["step 0: timestamps differ"]
+
+
+def test_an_unreadable_manifest_counts_as_replayed_and_failed(tmp_path: Path) -> None:
+    _record(tmp_path, GreedyHugger, seed=1612)
+    garbled = tmp_path / "episodes" / "garbled"
+    garbled.mkdir()
+    (garbled / "manifest.json").write_text("{not json")
+
+    report = replay_accepted(FakeSim(), tmp_path)
+
+    assert (report.replayed, report.reproduced) == (2, 1)
+    assert report.failures[0].episode_id == "garbled"
+    assert report.failures[0].reason.startswith("manifest unreadable")
+
+
+def test_a_replay_result_that_cannot_be_saved_is_a_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    _record(tmp_path, GreedyHugger, seed=1613)
+
+    def read_only(path: Path, manifest: EpisodeManifest) -> None:
+        raise PermissionError("read-only folder")
+
+    # The package exports the `replay` function under the module's own name, so patch through sys.modules.
+    monkeypatch.setattr(sys.modules["isaacs_mom.validator.replay"], "write_manifest", read_only)
+
+    report = replay_accepted(FakeSim(), tmp_path)
+
+    assert (report.replayed, report.reproduced) == (1, 0)
+    assert report.failures[0].reason == "could not save the replay result: read-only folder"
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        mujoco.FatalError("simulation unstable"),  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
+        TypeError("simulation unstable"),
+        AttributeError("simulation unstable"),
+    ],
+)
+def test_a_simulator_crash_is_a_failed_replay_not_a_lost_run(tmp_path: Path, error: Exception) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1614)
+
+    class CrashingSim(FakeSim):
+        def execute(self, call: SkillCall) -> ExecResult:
+            raise error
+
+    report = replay_accepted(CrashingSim(), tmp_path)
+
+    assert (report.replayed, report.reproduced) == (1, 0)
+    assert report.failures[0].reason == f"replay raised {type(error).__name__}: simulation unstable"
+    assert _load(path).replay_valid is False
+
+
+def test_a_save_failure_keeps_the_divergence_it_found(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1615)
+    first = path.parent / _load(path).steps[0].actions
+    np.save(first, np.zeros_like(np.load(first)))
+
+    def read_only(path: Path, manifest: EpisodeManifest) -> None:
+        raise PermissionError("read-only folder")
+
+    monkeypatch.setattr(sys.modules["isaacs_mom.validator.replay"], "write_manifest", read_only)
+
+    report = replay_accepted(FakeSim(), tmp_path)
+
+    assert report.failures[0].reason == (
+        "step 0: executed actions differ; could not save the replay result: read-only folder"
+    )
+
+
+def test_replay_rejects_a_mid_run_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1603)
+    manifest = _load(path)
+    lift = next(i for i, s in enumerate(manifest.steps) if s.skill_call.skill == "lift")  # the box is held by then
+    manifest.perturbations = [PerturbationRecord(before_step=lift, perturbation=Perturbation(kind="move_box", seed=1))]
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)  # every step and the verdict still match: only the refused move tells

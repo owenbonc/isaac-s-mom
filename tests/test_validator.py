@@ -1,5 +1,7 @@
 import math
 
+import pytest
+
 from isaacs_mom.contracts import GroundTruth
 from isaacs_mom.validator.recorder import RecordingError
 from isaacs_mom.validator.rules import failure_categories, recording_error_verdict, validate
@@ -15,8 +17,10 @@ def _truth(
     joint_limit_violation: bool = False,
     penetration: bool = False,
 ) -> GroundTruth:
-    # A bin at the origin keeps the offsets exact; with bin_yaw 0 its x axis, away from the robot, is world +x.
+    # A bin at the origin keeps the offsets exact; the robot stands behind it facing +x, so +x is "past".
     return GroundTruth(
+        robot_xy=(-0.45, 0.0),
+        robot_yaw=0.0,
         box_xyz=(box_x, 0.0, 0.445),
         bin_xy=(0.0, 0.0),
         bin_yaw=bin_yaw,
@@ -61,11 +65,6 @@ def test_offset_is_measured_in_the_turned_bins_frame() -> None:
     # 25 cm along x is about 18 cm along each side of a bin turned by 45 degrees, so it is inside.
     assert validate(_truth(0.25, bin_yaw=math.pi / 4)).accepted is True
     assert validate(_truth(0.25)).accepted is False
-
-
-def test_short_and_past_follow_the_bins_turn() -> None:
-    # Turned half a circle, the bin's away-from-the-robot axis is world -x.
-    assert validate(_truth(0.30, on_floor=False, bin_yaw=math.pi)).reason == "box short of the bin"
 
 
 def test_moving_box_in_the_bin_is_not_success() -> None:
@@ -139,3 +138,62 @@ def test_a_recording_error_is_its_own_rejection_kind() -> None:
     assert verdict.accepted is False
     assert verdict.reason == "recording error: 2 executed actions but 1 timestamps"
     assert failure_categories(verdict.reason) == ["recording_error"]
+
+
+ROBOT_YAW = 2.0  # turned well away from +x, so the test can't pass in world axes by accident
+BIN_TURN = 0.9  # the bin turned well apart from the robot, so naming misses in the bin's frame would fail
+
+
+def _missed(forward: float, left: float) -> GroundTruth:
+    """The bin straight ahead of a turned robot, the box `forward` and `left` of the bin in the robot's frame."""
+    ahead = (math.cos(ROBOT_YAW), math.sin(ROBOT_YAW))
+    leftward = (-math.sin(ROBOT_YAW), math.cos(ROBOT_YAW))
+    bin_xy = (0.45 * ahead[0], 0.45 * ahead[1])
+    return GroundTruth(
+        robot_xy=(0.0, 0.0),
+        robot_yaw=ROBOT_YAW,
+        box_xyz=(
+            bin_xy[0] + forward * ahead[0] + left * leftward[0],
+            bin_xy[1] + forward * ahead[1] + left * leftward[1],
+            0.1,
+        ),
+        bin_xy=bin_xy,
+        bin_yaw=ROBOT_YAW + BIN_TURN,
+        bin_inner_half=0.22,
+        box_on_bin_floor=False,
+        box_at_rest=True,
+        robot_fallen=False,
+        joint_limit_violation=False,
+        penetration=False,
+    )
+
+
+@pytest.mark.parametrize(
+    ("forward", "left", "reason", "kind"),
+    [
+        (-0.35, 0.0, "box short of the bin", "short_of_bin"),
+        (0.35, 0.0, "box past the bin", "past_bin"),
+        (0.0, 0.35, "box left of the bin", "left_of_bin"),
+        (0.0, -0.35, "box right of the bin", "right_of_bin"),
+        (-0.35, 0.35, "box short-left of the bin", "short_left_of_bin"),
+        (-0.35, -0.35, "box short-right of the bin", "short_right_of_bin"),
+        (0.35, 0.35, "box past-left of the bin", "past_left_of_bin"),
+        (0.35, -0.35, "box past-right of the bin", "past_right_of_bin"),
+    ],
+)
+def test_a_miss_is_named_in_the_turned_robots_frame(forward: float, left: float, reason: str, kind: str) -> None:
+    verdict = validate(_missed(forward, left))
+    assert verdict.task_success is False
+    assert verdict.reason == reason
+    assert failure_categories(verdict.reason) == [kind]
+
+
+def test_a_near_miss_names_only_the_axis_it_clearly_missed_on() -> None:
+    # Clearly past, but only a little to the left: inside the dead zone sideways, so no second label.
+    assert validate(_missed(0.30, 0.15)).reason == "box past the bin"
+
+
+def test_a_near_miss_inside_both_dead_zones_still_names_its_main_direction() -> None:
+    # Outside the turned bin's walls, yet within the dead zone on both of the robot's axes.
+    gt = _missed(0.21, 0.15).model_copy(update={"bin_yaw": ROBOT_YAW + math.pi / 4})
+    assert validate(gt).reason == "box past the bin"
