@@ -48,9 +48,17 @@ class _ThirdPersonCapture:
         return self._sim.render_third_person()
 
 
-def _captions(manifest: EpisodeManifest, perturb_at: int) -> list[str]:
+def _verdict(manifest: EpisodeManifest) -> str:
+    """The take's verdict in the dashboard's words (SPEC §3.5): whether the student finished it alone."""
     verdict = manifest.validation
-    final = ("accepted" if verdict.accepted else f"rejected: {verdict.reason}") if verdict else "pending"
+    if verdict is None:
+        return "pending"
+    took = "" if manifest.takeover_step is None else f" after the teacher took over at step {manifest.takeover_step}"
+    return f"succeeded{took or ', by the student alone'}" if verdict.accepted else f"failed{took}: {verdict.reason}"
+
+
+def _captions(manifest: EpisodeManifest, perturb_at: int) -> list[str]:
+    final = _verdict(manifest)
     moved = manifest.perturbations[0].perturbation.kind.removeprefix("move_") if manifest.perturbations else "scene"
     captions = []
     for i, step in enumerate(manifest.steps):

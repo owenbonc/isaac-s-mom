@@ -5,8 +5,8 @@ import imageio.v3 as iio
 import pytest
 from PIL import Image
 
-from isaacs_mom.contracts import Event
-from isaacs_mom.orchestrator.demo import run_demo
+from isaacs_mom.contracts import EpisodeManifest, Event, Validation
+from isaacs_mom.orchestrator.demo import _captions, run_demo
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.video import record
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
@@ -75,3 +75,31 @@ def test_demo_refuses_a_heldout_seed(tmp_path: Path) -> None:
             argon=Argon(EventLog(tmp_path, "d"), generate=stub_generate),  # no network in tests
         )
     assert not (tmp_path / "d.mp4").exists()
+
+
+def test_the_takes_captions_word_its_verdict_as_the_dashboard_does(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "demo"
+    rescued = run_demo(
+        FakeSim(),
+        ckpt="ckpt-r0",
+        seed=900_001,
+        perturb_at=3,
+        out=tmp_path / "demo.mp4",
+        run_dir=run_dir,
+        run_id="demo",
+        argon=Argon(EventLog(run_dir, "demo"), generate=stub_generate),  # no network in tests
+    )
+    took, failed = rescued.takeover_step, rescued.validation
+    assert took is not None and failed is not None and not failed.accepted  # the stand-ins never finish the task
+    done = Validation(task_success=True, physics_valid=True, reason="box at rest inside bin")
+    alone = rescued.model_copy(update={"validation": done, "takeover_step": None})
+
+    def last(manifest: EpisodeManifest) -> str:
+        return _captions(manifest, 3)[-1].split("validator: ")[1]
+
+    assert last(rescued) == f"failed after the teacher took over at step {took}: {failed.reason}"
+    assert (
+        last(rescued.model_copy(update={"validation": done})) == f"succeeded after the teacher took over at step {took}"
+    )
+    assert last(alone) == "succeeded, by the student alone"
+    assert _captions(rescued, 3)[0].endswith("validator: pending")
