@@ -10,8 +10,9 @@ from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
-from isaacs_mom.sim.fake import PLACE_X, FakeSim
+from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.teacher import choose_scenes
+from isaacs_mom.validator import validate
 from isaacs_mom.validator.training import build_training_set, training_examples
 
 
@@ -36,7 +37,7 @@ class ScriptedPolicy:
             return SkillCall(skill="hug")
         if not lifted:
             return SkillCall(skill="lift")
-        turn = math.degrees(math.atan2(gt.bin_xy[1], gt.bin_xy[0]) - math.atan2(work_y, PLACE_X) - waist)
+        turn = math.degrees(math.atan2(gt.bin_xy[1], gt.bin_xy[0]) - waist)
         if abs(turn) > 2:
             return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
         return SkillCall(skill="place")
@@ -71,6 +72,41 @@ def test_skill_calls_are_whitelisted_and_clamped() -> None:
         SkillCall(skill="reach_left", params={"torque": 5.0})
     assert SkillCall(skill="reach_left", params={"distance_cm": 500}).params["distance_cm"] == 20
     assert SkillCall(skill="turn_left", params={"angle_deg": 500}).params["angle_deg"] == 45
+
+
+@pytest.mark.parametrize("value", [math.nan, math.inf, -math.inf])
+def test_non_finite_skill_params_are_rejected(value: float) -> None:
+    with pytest.raises(ValidationError):
+        SkillCall(skill="turn_left", params={"angle_deg": value})
+
+
+@pytest.mark.parametrize("text", ["NaN", "Infinity", "-Infinity"])
+def test_non_finite_params_in_model_output_are_rejected(text: str) -> None:
+    # json.loads accepts these, so a model's raw answer can carry them.
+    raw = json.loads(f'{{"skill": "reach_left", "params": {{"distance_cm": {text}}}}}')
+    with pytest.raises(ValidationError):
+        SkillCall.model_validate(raw)
+
+
+def test_fake_place_without_turning_drops_the_box_outside_the_bin() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    box_y = sim.ground_truth().box_xyz[1]
+    sim.execute(SkillCall(skill="reach_left" if box_y > 0 else "reach_right", params={"distance_cm": abs(box_y) * 100}))
+    for skill in ("hug", "lift", "place"):
+        assert sim.execute(SkillCall(skill=skill)).ok
+    gt = sim.ground_truth()
+    assert not gt.box_on_bin_floor
+    assert not validate(gt).accepted
+
+
+def test_fake_refuses_a_reach_past_the_limit_without_moving() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    before = sim.observe().joint_state
+    result = sim.execute(SkillCall(skill="reach_left", params={"distance_cm": 20}))
+    assert not result.ok and result.error and not result.executed_actions
+    assert sim.observe().joint_state == before
 
 
 def test_fake_refuses_an_out_of_reach_skill_without_moving() -> None:

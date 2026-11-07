@@ -12,9 +12,9 @@ import mujoco
 import numpy as np
 from PIL import Image
 
-from isaacs_mom.contracts import Controller, Observation, SkillCall
+from isaacs_mom.contracts import MAX_ANGLE_DEG, Controller, Observation, SkillCall
 from isaacs_mom.sim.mujoco.scene import TABLE_TOP_Z
-from isaacs_mom.sim.mujoco.sim import MAX_TURN_STEP_DEG, PLACE_X, MujocoSim
+from isaacs_mom.sim.mujoco.sim import MujocoSim
 
 
 class OraclePolicy:
@@ -37,12 +37,11 @@ class OraclePolicy:
         if sim.closed and not sim.lifted:
             return SkillCall(skill="lift")
         if sim.lifted:
-            aim = np.arctan2(gt.bin_xy[1], gt.bin_xy[0]) - np.arctan2(sim.work_y, PLACE_X)
-            turn = np.degrees(aim - sim.waist)
+            turn = np.degrees(np.arctan2(gt.bin_xy[1], gt.bin_xy[0]) - sim.waist)
             if abs(turn) > 2:
                 return SkillCall(
                     skill="turn_left" if turn > 0 else "turn_right",
-                    params={"angle_deg": min(abs(turn), MAX_TURN_STEP_DEG)},
+                    params={"angle_deg": min(abs(turn), MAX_ANGLE_DEG)},
                 )
             return SkillCall(skill="place")
         return None

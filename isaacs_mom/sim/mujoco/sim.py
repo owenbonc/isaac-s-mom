@@ -3,8 +3,8 @@
 """MujocoSim: the TruthSim over the free-standing G1 scene (SPEC §3.1, §4.1).
 
 The arms work around a point in front of the torso. `reach_*` slides that point sideways, `hug` closes the hands on
-it, `lift` raises them, `turn_*` twists the waist, and `place` reaches out, lowers and lets go. A skill that would
-leave the reachable range is refused and reported, never executed (rule 7).
+it, `lift` raises them, `turn_*` twists the waist, and `place` centres the box, reaches out, lowers and lets go.
+A skill that would leave the reachable range is refused and reported, never executed (rule 7).
 """
 
 import io
@@ -41,12 +41,13 @@ RELEASE_HALF = 0.22  # 4 cm clear of the box, and still within reach with the ar
 PLACE_X = 0.38  # reach out over the bin centre before letting go
 PLACE_Z = 0.86
 REACH_LIMIT = 0.12
+BOX_SHIFT_LIMIT = 0.10  # a moved box stays this close to the table's centre line, as at reset
 TURN_LIMIT = np.deg2rad(150)
 DEFAULT_REACH_CM = 5.0
 DEFAULT_TURN_DEG = 30.0
-MAX_TURN_STEP_DEG = 45.0  # SkillCall clamps angle_deg to this
 TURN_SPEED = np.deg2rad(60)  # rad/s
-SETTLE_S = 2.5  # the drop and bounce take ~0.5 s, then the 1 s at-rest window
+SETTLE_STEP_S = 0.5
+MAX_SETTLE_S = 6.0  # a box that lands leaning on a wall can take several seconds to tip flat
 FALLEN_Z = 0.6
 PENETRATION_TOL = 0.02  # a dropped box dips ~1 cm into the bin floor for a step; tunnelling goes far deeper
 AT_REST_SPEED = 0.02  # m/s
@@ -68,8 +69,8 @@ class MujocoSim:
         self.model = build_model()
         self.data = mujoco.MjData(self.model)
         self.robot = Robot(self.model)
-        self._head = mujoco.Renderer(self.model, HEAD_SIZE[1], HEAD_SIZE[0])
-        self._third = mujoco.Renderer(self.model, THIRD_SIZE[1], THIRD_SIZE[0])
+        # Made on first use, so the physics runs (and is tested) where no GL context exists.
+        self._renderers: dict[str, mujoco.Renderer] = {}
         self._box = self.model.body("box").id
         self._box_qadr = self.model.jnt_qposadr[self.model.joint("box_free").id]
         self._box_dadr = self.model.jnt_dofadr[self.model.joint("box_free").id]
@@ -114,12 +115,11 @@ class MujocoSim:
         return self.episode_id
 
     def observe(self) -> Observation:
-        self._head.update_scene(self.data, camera="head")
         return Observation(
             episode_id=self.episode_id,
             step=self.step,
             sim_time=float(self.data.time),
-            head_rgb_jpeg=_jpeg(self._head.render()),
+            head_rgb_jpeg=self._render("head", HEAD_SIZE),
             joint_state=[float(v) for v in self.data.qpos[self.robot.actuated_qadr]],
         )
 
@@ -131,16 +131,14 @@ class MujocoSim:
 
     def ground_truth(self) -> GroundTruth:
         d = self.data
-        recent = [s for t, s in self._speeds if t >= d.time - AT_REST_WINDOW]
-        settled_long_enough = bool(self._speeds) and self._speeds[0][0] <= d.time - AT_REST_WINDOW
         bin_yaw = 2 * float(np.arctan2(d.mocap_quat[self._bin][3], d.mocap_quat[self._bin][0]))
         return GroundTruth(
-            box_xyz=tuple(float(v) for v in d.xpos[self._box]),  # type: ignore[arg-type]
+            box_xyz=(float(d.xpos[self._box][0]), float(d.xpos[self._box][1]), float(d.xpos[self._box][2])),
             bin_xy=(float(d.mocap_pos[self._bin][0]), float(d.mocap_pos[self._bin][1])),
             bin_yaw=bin_yaw,
             bin_inner_half=BIN_INNER_HALF,
             box_on_bin_floor=any({c.geom1, c.geom2} == {self._box_geom, self._bin_floor} for c in d.contact[: d.ncon]),
-            box_at_rest=settled_long_enough and max(recent, default=0.0) < AT_REST_SPEED,
+            box_at_rest=self._box_at_rest(),
             robot_fallen=self._fallen,
             joint_limit_violation=self._limit_violated,
             penetration=self._penetrated,
@@ -149,14 +147,24 @@ class MujocoSim:
     def perturb(self, perturbation: Perturbation) -> None:
         rng = np.random.default_rng(perturbation.seed)
         if perturbation.kind == "move_box":
-            self._put_box(box_xy(rng))
+            if self.closed:  # the box is in the robot's grip, as FakeSim treats it
+                return
+            x, y = box_xy(rng)
+            # Land between the open hands, never inside one.
+            self._put_box((x, float(np.clip(self.work_y + y, -BOX_SHIFT_LIMIT, BOX_SHIFT_LIMIT))))
         else:
             self._put_bin(*bin_pose(rng))
         mujoco.mj_forward(self.model, self.data)
 
     def render_third_person(self) -> bytes:
-        self._third.update_scene(self.data, camera="third_person")
-        return _jpeg(self._third.render())
+        return self._render("third_person", THIRD_SIZE)
+
+    def _render(self, camera: str, size: tuple[int, int]) -> bytes:
+        if camera not in self._renderers:
+            self._renderers[camera] = mujoco.Renderer(self.model, size[1], size[0])
+        renderer = self._renderers[camera]
+        renderer.update_scene(self.data, camera=camera)
+        return _jpeg(renderer.render())
 
     def _run(self, call: SkillCall) -> str | None:
         half = CLOSED_HALF if self.closed else OPEN_HALF
@@ -194,10 +202,11 @@ class MujocoSim:
             case "place":
                 height = self._hand_point()[2]
                 goals, ctrl = [], self.data.ctrl.copy()
+                # Straight ahead, so the box goes out as far as the arms reach and lands clear of the near wall.
                 for point, side_half in [
-                    ((PLACE_X, self.work_y, height), half),
-                    ((PLACE_X, self.work_y, PLACE_Z), half),
-                    ((PLACE_X - 0.03, self.work_y, PLACE_Z + 0.04), RELEASE_HALF),
+                    ((PLACE_X, 0.0, height), half),
+                    ((PLACE_X, 0.0, PLACE_Z), half),
+                    ((PLACE_X - 0.03, 0.0, PLACE_Z + 0.04), RELEASE_HALF),
                 ]:
                     ctrl, error = self._plan_hands(point, side_half, ctrl)
                     if error:
@@ -206,7 +215,11 @@ class MujocoSim:
                 for goal, duration in zip(goals, (0.6, 0.8, 0.5), strict=True):
                     move(self.model, self.data, goal, duration, self._tick)
                 self.closed = self.lifted = False
-                move(self.model, self.data, self.data.ctrl.copy(), SETTLE_S, self._tick)
+                self.work_y = 0.0
+                waited = 0.0
+                while waited < MAX_SETTLE_S and not self._box_at_rest():
+                    move(self.model, self.data, self.data.ctrl.copy(), SETTLE_STEP_S, self._tick)
+                    waited += SETTLE_STEP_S
         return None
 
     def _hand_point(
@@ -236,6 +249,13 @@ class MujocoSim:
         if error is None:
             move(self.model, self.data, goal, duration, self._tick)
         return error
+
+    def _box_at_rest(self) -> bool:
+        """The box has moved slower than AT_REST_SPEED for the last AT_REST_WINDOW of sim time."""
+        now = self.data.time
+        if not self._speeds or self._speeds[0][0] > now - AT_REST_WINDOW:
+            return False
+        return max((s for t, s in self._speeds if t >= now - AT_REST_WINDOW), default=0.0) < AT_REST_SPEED
 
     def _tick(self) -> None:
         d = self.data

@@ -175,19 +175,19 @@ def _add_world(spec: mujoco.MjSpec) -> None:
     # A mocap body, so `reset` and `perturb` can place it anywhere without it being knocked about.
     green = [0.25, 0.62, 0.35, 1]
     bin_body = world.add_body(name="bin", mocap=True, pos=[0.0, 0.5, 0.0])
+    outer = BIN_INNER_HALF + BIN_WALL
     bin_body.add_geom(
         name="bin_stand",
         type=mujoco.mjtGeom.mjGEOM_BOX,
-        size=[BIN_INNER_HALF * 0.7, BIN_INNER_HALF * 0.7, BIN_FLOOR_Z / 2],
+        size=[outer, outer, BIN_FLOOR_Z / 2],  # as wide as the bin, so nothing can get under its floor
         pos=[0, 0, BIN_FLOOR_Z / 2],
         rgba=[0.35, 0.35, 0.38, 1],
     )
-    outer = BIN_INNER_HALF + BIN_WALL
     wall_h = (BIN_RIM_Z - BIN_FLOOR_Z) / 2
     bin_body.add_geom(
         name="bin_floor",
         type=mujoco.mjtGeom.mjGEOM_BOX,
-        size=[outer, outer, 0.01],
+        size=[BIN_INNER_HALF, BIN_INNER_HALF, 0.01],  # inside the walls, so only a box in the bin can touch it
         pos=[0, 0, BIN_FLOOR_Z + 0.01],
         rgba=green,
     )

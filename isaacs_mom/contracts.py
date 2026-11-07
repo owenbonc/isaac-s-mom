@@ -1,5 +1,6 @@
 """Shared types for every workstream (SPEC §4). A change here updates every caller in the same PR."""
 
+import math
 from typing import Literal, get_args
 
 from pydantic import BaseModel, Field, field_validator
@@ -40,6 +41,10 @@ class SkillTarget(BaseModel):
         unknown = set(params) - set(PARAM_LIMITS)
         if unknown:
             raise ValueError(f"unknown skill params: {sorted(unknown)}")
+        # json.loads accepts NaN and Infinity, and clamping can't fix them: min/max pass NaN straight through.
+        non_finite = sorted(k for k, v in params.items() if not math.isfinite(v))
+        if non_finite:
+            raise ValueError(f"skill params must be finite: {non_finite}")
         return {k: min(max(v, 0.0), PARAM_LIMITS[k]) for k, v in params.items()}
 
 
@@ -73,7 +78,8 @@ class Perturbation(BaseModel):
 
 class GroundTruth(BaseModel):
     """Simulator facts for the validator and orchestrator only (SPEC §2 rule 1). The bin is square, `bin_inner_half`
-    wide either side of its centre and turned by `bin_yaw`; the box is in it when it touches the bin's floor."""
+    wide either side of its centre and turned by `bin_yaw`; `box_on_bin_floor` means touching the floor inside its
+    walls."""
 
     box_xyz: tuple[float, float, float]
     bin_xy: tuple[float, float]

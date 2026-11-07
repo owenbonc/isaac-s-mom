@@ -8,7 +8,7 @@ from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Skill
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
-from isaacs_mom.sim.fake import PLACE_X, FakeSim
+from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.validator import replay
 
 
@@ -33,7 +33,7 @@ class GreedyHugger:
             return SkillCall(skill="hug")
         if not lifted:
             return SkillCall(skill="lift")
-        turn = math.degrees(math.atan2(gt.bin_xy[1], gt.bin_xy[0]) - math.atan2(work_y, PLACE_X) - waist)
+        turn = math.degrees(math.atan2(gt.bin_xy[1], gt.bin_xy[0]) - waist)
         if abs(turn) > 2:
             return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
         return SkillCall(skill="place")

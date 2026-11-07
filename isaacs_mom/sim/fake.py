@@ -1,7 +1,7 @@
 """FakeSim: a top-down 2D stand-in for the MuJoCo scene so every workstream and CI can run the loop.
 
 It mirrors MujocoSim's skills with trivial physics: the hug catches the box only when the hands are lined up with it
-and the waist faces the table, and `place` drops it where the hands are, into the bin or onto the floor.
+and the waist faces the table, and `place` drops it straight ahead of the torso, into the bin or onto the floor.
 """
 
 import io
@@ -138,9 +138,10 @@ class FakeSim:
                     self.box_z = HELD_Z
             case "place":
                 if self.held and self.lifted:
-                    self.box = self._hands(PLACE_X)
+                    self.box = _rot(self.waist, (PLACE_X, 0.0))
                     self.box_z = BIN_Z if self._over_bin() else FLOOR_Z
                 self.closed = self.lifted = self.held = False
+                self.work_y = 0.0
             case "reobserve":
                 pass
         return None
@@ -149,8 +150,13 @@ class FakeSim:
         return _rot(self.waist, (forward, self.work_y))
 
     def _over_bin(self) -> bool:
-        local = _rot(-self.bin_yaw, (self.box[0] - self.bin[0], self.box[1] - self.bin[1]))
-        return bool(np.all(np.abs(local) <= BIN_INNER_HALF - min(BOX_HALF)))
+        """Every corner of the box, which is turned with the waist, is inside the bin's walls."""
+        corners = [(sx * BOX_HALF[0], sy * BOX_HALF[1]) for sx in (-1, 1) for sy in (-1, 1)]
+        for corner in corners:
+            x, y = self.box + _rot(self.waist, corner) - self.bin
+            if np.any(np.abs(_rot(-self.bin_yaw, (x, y))) > BIN_INNER_HALF):
+                return False
+        return True
 
     def _render(self) -> bytes:
         image = Image.new("RGB", SIZE, (205, 205, 200))
