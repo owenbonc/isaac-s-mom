@@ -1,5 +1,6 @@
 from pathlib import Path
 
+import mujoco
 import numpy as np
 
 from isaacs_mom.contracts import EpisodeManifest, ReplayFailure, ReplayReport
@@ -9,6 +10,9 @@ from isaacs_mom.validator.rules import validate
 
 # The recorder saves actions as float32, so a faithful re-run matches only to float32 precision.
 TOLERANCE = 1e-5
+# What a re-run can raise: missing or corrupt frames and actions, bad simulator input, and MuJoCo's own FatalError,
+# which subclasses none of the others.
+REPLAY_ERRORS = (OSError, ValueError, RuntimeError, ArithmeticError, LookupError, mujoco.FatalError)
 
 
 def replay(sim: TruthSim, manifest_path: Path) -> bool:
@@ -44,7 +48,7 @@ def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
         replayed += 1
         try:
             reason = _divergence(sim, manifest, manifest_path.parent)
-        except Exception as error:  # the simulator is third-party code; whatever it raises is this episode's result
+        except REPLAY_ERRORS as error:
             reason = f"replay raised {type(error).__name__}: {error}"
         manifest.replay_valid = reason is None
         try:

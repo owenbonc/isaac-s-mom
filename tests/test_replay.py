@@ -3,10 +3,19 @@ import sys
 from collections.abc import Callable
 from pathlib import Path
 
+import mujoco
 import numpy as np
 import pytest
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, ReplayFailure, ReplayReport, SkillCall
+from isaacs_mom.contracts import (
+    Controller,
+    EpisodeManifest,
+    ExecResult,
+    Observation,
+    ReplayFailure,
+    ReplayReport,
+    SkillCall,
+)
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
@@ -201,3 +210,18 @@ def test_a_replay_result_that_cannot_be_saved_is_a_failure(tmp_path: Path, monke
 
     assert (report.replayed, report.reproduced) == (1, 0)
     assert report.failures[0].reason == "could not save the replay result: read-only folder"
+
+
+class CrashingSim(FakeSim):
+    def execute(self, call: SkillCall) -> ExecResult:
+        raise mujoco.FatalError("simulation unstable")
+
+
+def test_a_simulator_crash_is_a_failed_replay_not_a_lost_run(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1614)
+
+    report = replay_accepted(CrashingSim(), tmp_path)
+
+    assert (report.replayed, report.reproduced) == (1, 0)
+    assert report.failures[0].reason == "replay raised FatalError: simulation unstable"
+    assert _load(path).replay_valid is False

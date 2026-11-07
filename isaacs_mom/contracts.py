@@ -79,8 +79,11 @@ class Perturbation(BaseModel):
 class GroundTruth(BaseModel):
     """Simulator facts for the validator and orchestrator only (SPEC §2 rule 1). The bin is square, `bin_inner_half`
     wide either side of its centre and turned by `bin_yaw`; `box_on_bin_floor` means touching the floor inside its
-    walls."""
+    walls. `robot_xy` is the pelvis on the floor and `robot_yaw` the torso heading (pelvis heading plus waist twist),
+    the frame the head camera and the skills share."""
 
+    robot_xy: tuple[float, float]
+    robot_yaw: float
     box_xyz: tuple[float, float, float]
     bin_xy: tuple[float, float]
     bin_yaw: float
