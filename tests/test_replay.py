@@ -92,3 +92,25 @@ def test_replay_rejects_tampered_actions(tmp_path: Path) -> None:
     np.save(first, np.zeros_like(np.load(first)))
     assert not replay(FakeSim(), path)
     assert _load(path).replay_valid is False
+
+
+class StopImmediately:
+    controller: Controller = "student"
+    checkpoint: str | None = "ckpt-r0"
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        return None
+
+
+def test_replay_of_a_zero_step_episode_reproduces(tmp_path: Path) -> None:
+    path = _record(tmp_path, lambda _: StopImmediately(), seed=1604)
+    assert _load(path).steps == []
+    assert replay(FakeSim(), path)
+
+
+def test_replay_without_validation_is_false(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyPusher, seed=1605)
+    manifest = _load(path)
+    manifest.validation = None
+    path.write_text(manifest.model_dump_json())
+    assert not replay(FakeSim(), path)
