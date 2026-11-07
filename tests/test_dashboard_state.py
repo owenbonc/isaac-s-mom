@@ -180,11 +180,12 @@ def test_a_diagnosis_stays_with_the_episode_it_diagnoses() -> None:
     assert b["diagnosis"] is None
 
 
-def provenance(events: list[dict], now: float, episode: int | None = None) -> str:
+def provenance(events: list[dict], now: float, episode: int | None = None, paused: bool = False) -> str:
     script = f"""
-    const s = S.initial();
-    for (const e of events) S.reduce(s, e);
-    return S.provenance(s, {now}, {"null" if episode is None else f"s.episodes[{episode}]"});
+    const v = S.view();
+    for (const e of events) S.reduce(v.live, e);
+    if ({"true" if paused else "false"}) S.keydown(v, {{ key: " " }});
+    return S.provenance(v, {now}, {"null" if episode is None else f"S.shown(v).episodes[{episode}]"});
     """
     return run(script, events)
 
@@ -204,6 +205,29 @@ def test_a_real_run_is_live_while_events_arrive_or_a_finetune_is_pending_and_rec
     assert provenance(events, now=5.0, episode=1) == "live"
     pending = stream(started("a"), ("finetune_started", {"round": 1}))
     assert provenance(pending, now=500.0) == "live"
+
+
+def test_a_run_stops_being_live_20_s_after_its_last_event() -> None:
+    events = stream(started("a"))  # last event at t=0
+    assert provenance(events, now=19.9) == "live"
+    assert provenance(events, now=20.1) == "recorded"
+
+
+def test_a_pending_finetune_keeps_a_run_live_for_at_most_30_minutes() -> None:
+    pending = stream(started("a"), ("finetune_started", {"round": 1}))  # started at t=1
+    assert provenance(pending, now=1 + 1799.9) == "live"
+    assert provenance(pending, now=1 + 1800.1) == "recorded"
+    done = stream(started("a"), ("finetune_started", {"round": 1}), ("finetune_completed", {"round": 1}))
+    assert provenance(done, now=100.0) == "recorded"
+
+
+def test_a_paused_view_of_a_live_run_is_labelled_paused_not_recorded() -> None:
+    events = stream(started("a"), started("b"))
+    assert provenance(events, now=5.0, paused=True) == "paused"
+    assert provenance(events, now=5.0, episode=1, paused=True) == "paused"
+    assert provenance(events, now=5.0, episode=0, paused=True) == "recorded"  # a finished episode stays recorded
+    assert provenance(events, now=500.0, paused=True) == "recorded"
+    assert provenance(stream(started("a", "fake-1")), now=1.0, paused=True) == "placeholder"
 
 
 def test_an_unknown_controller_is_dropped_at_the_boundary() -> None:
@@ -229,9 +253,10 @@ def test_each_frame_keeps_the_controller_that_saw_it_after_a_takeover() -> None:
 VIEW = """
 const v = S.view();
 const feed = (n) => { for (const e of events.splice(0, n)) S.reduce(v.live, e); };
+const press = (key) => S.keydown(v, { key });
 const look = () => {
   const ep = S.episode(v);
-  return { shown: S.shown(v).eventCount, held: S.held(v), episode: ep && ep.id, focus: v.focus };
+  return { shown: S.shown(v).eventCount, held: S.held(v), episode: ep && ep.id, focus: v.compare && v.compare.step };
 };
 """
 
@@ -243,7 +268,7 @@ def presenter(script: str, events: list[dict]) -> Any:
 def test_pausing_holds_the_shown_view_and_buffers_new_events_until_resume() -> None:
     events = stream(started("a"), decision(0), started("b"), decision(0), decision(1))
     out = presenter(
-        "feed(2); S.togglePause(v); feed(3); const paused = look(); S.togglePause(v); return [paused, look()];",
+        "feed(2); press(' '); feed(3); const paused = look(); press(' '); return [paused, look()];",
         events,
     )
     assert out[0] == {"shown": 2, "held": 3, "episode": "a", "focus": None}
@@ -255,9 +280,9 @@ def test_a_reconnect_while_paused_keeps_the_frozen_view_and_resumes_onto_the_rep
     out = presenter(
         """
         const all = [...events];
-        feed(2); S.togglePause(v); S.reconnect(v);
+        feed(2); press(" "); S.reconnect(v);
         for (const e of all) S.reduce(v.live, e);
-        const paused = look(); S.togglePause(v); return [paused, look()];
+        const paused = look(); press(" "); return [paused, look()];
         """,
         events,
     )
@@ -271,9 +296,12 @@ def test_arrows_move_between_episodes_and_moving_past_the_last_follows_the_run_a
         """
         feed(3);
         const seen = [];
-        for (const d of [-1, -1, -1, 1]) { S.move(v, d); seen.push(look().episode); }
+        for (const key of ["ArrowLeft", "ArrowLeft", "ArrowLeft", "ArrowRight"]) {
+          press(key);
+          seen.push(look().episode);
+        }
         feed(1); seen.push(look().episode);
-        S.move(v, 1); S.move(v, 1); seen.push(look().episode);
+        press("ArrowRight"); press("ArrowRight"); seen.push(look().episode);
         return seen;
         """,
         events,
@@ -293,12 +321,12 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
     out = presenter(
         """
         feed(events.length - 1);
-        S.jumpToPerturbation(v);
+        press("p");
         const jumped = look();
-        const strip = S.filmstrip(S.episode(v), v.focus).map((f) => [f.step, f.moved, f.now]);
+        const strip = S.filmstrip(S.episode(v), v.compare.step).map((f) => [f.step, f.moved, f.now]);
         feed(1);
         const pinned = look();
-        S.jumpToPerturbation(v);
+        press("P");
         return { jumped, strip, pinned, again: look() };
         """,
         events,
@@ -306,12 +334,67 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
     assert out["jumped"]["focus"] == 2 and out["jumped"]["episode"] == "a"
     assert [f for f in out["strip"] if f[2]] == [[2, True, True]]
     assert out["pinned"]["episode"] == "a"
-    assert out["again"]["focus"] is None
+    # pressing P again returns to where the view was: following the run, now on "b"
+    assert out["again"] == {"shown": len(events), "held": 0, "episode": "b", "focus": None}
+
+
+def test_p_pressed_again_returns_to_a_pinned_episode() -> None:
+    events = stream(
+        started("a"),
+        started("b"),
+        decision(0),
+        executed(0),
+        ("perturbation", {"kind": "move_block", "step": 1}),
+        decision(1),
+        executed(1),
+        started("c"),
+    )
+    out = presenter(
+        """
+        feed(events.length);
+        press("ArrowLeft");
+        const before = look();
+        press("p");
+        const during = look();
+        press("p");
+        return [before, during, look()];
+        """,
+        events,
+    )
+    assert [o["episode"] for o in out] == ["b", "b", "b"]
+    assert [o["focus"] for o in out] == [None, 1, None]
 
 
 def test_p_does_nothing_on_an_episode_without_a_perturbation() -> None:
     out = presenter(
-        "feed(3); S.jumpToPerturbation(v); return look();",
+        "feed(3); press('p'); return look();",
         stream(started("a"), decision(0), executed(0)),
     )
     assert out == {"shown": 3, "held": 0, "episode": "a", "focus": None}
+
+
+def test_space_pauses_from_any_focus_claims_the_key_and_acts_once_while_held() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        const button = { tagName: "BUTTON" };  // a focused presenter button sends the key too
+        const claimed = S.keydown(v, { key: " ", target: button });
+        const paused = Boolean(v.frozen);
+        const held = S.keydown(v, { key: " ", repeat: true, target: button });
+        const stillPaused = Boolean(v.frozen);
+        const ctrl = S.keydown(v, { key: " ", ctrlKey: true });
+        const other = S.keydown(v, { key: "q" });
+        S.keydown(v, { key: " " });
+        return { claimed, paused, held, stillPaused, ctrl, other, resumed: !v.frozen };
+        """,
+        stream(started("a")),
+    )
+    assert out == {
+        "claimed": True,
+        "paused": True,
+        "held": True,
+        "stillPaused": True,
+        "ctrl": False,
+        "other": False,
+        "resumed": True,
+    }

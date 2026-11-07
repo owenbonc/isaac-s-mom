@@ -28,12 +28,8 @@ const CHECK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l2.6 2
 const now = () => Date.now() / 1000;
 const label = (kind) => kind[0].toUpperCase() + kind.slice(1);
 const chip = (kind, text = label(kind)) => `<span class="chip ${kind}">${text}</span>`;
-// The label for a panel: placeholder when it has no data, else the run's (or its episode's) provenance.
-const panelChip = (hasData, ep = null) => {
-  if (!hasData) return chip("placeholder");
-  const kind = MomState.provenance(MomState.shown(view), now(), ep);
-  return chip(view.frozen && kind === "live" ? "recorded" : kind); // a paused view is not live
-};
+// The label for a panel: placeholder when it has no data, else what the view shows of the run (or its episode).
+const panelChip = (hasData, ep = null) => chip(hasData ? MomState.provenance(view, now(), ep) : "placeholder");
 const simName = (s) => {
   const sims = s.episodes.map((e) => e.sim);
   if (sims.some((sim) => sim === null)) return "simulator not stated";
@@ -53,12 +49,10 @@ const pct = (k, n) => (n ? Math.round((100 * k) / n) + "%" : "n/a");
 const stat = (s) => (s ? `${duration(s.median)} <span class="note">n=${s.n}</span>` : '<span class="ph-text">no data</span>');
 
 function renderHeader() {
-  const run = view.live;
-  const kind = MomState.provenance(run, now());
-  const status = run.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)} · ${simName(run)}`);
-  const paused = view.frozen ? " " + chip("paused", `Paused · ${MomState.held(view)} new events`) : "";
-  $("status").innerHTML = status + paused + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
   const s = MomState.shown(view);
+  const kind = MomState.provenance(view, now());
+  const status = s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)} · ${simName(s)}`);
+  $("status").innerHTML = status + (connection === "lost" ? ' <span class="note">connection lost, retrying</span>' : "");
   const ep = MomState.current(s);
   const robot = ep && ep.sim && ep.sim.robot;
   $("meta").innerHTML = s.eventCount
@@ -93,7 +87,7 @@ function renderControl() {
 
 function renderCamera() {
   const ep = MomState.episode(view);
-  const frames = MomState.filmstrip(ep, view.focus);
+  const frames = MomState.filmstrip(ep, view.compare && view.compare.step);
   $("chip-camera").innerHTML = panelChip(frames.length > 0, ep);
   if (!frames.length) {
     $("stage").innerHTML = '<div class="empty">No head-camera frame yet. The latest frame appears here after each executed skill.</div>';
@@ -123,7 +117,7 @@ function logRow(row) {
   const step = row.step === null ? "" : esc(row.step);
   switch (row.kind) {
     case "perturbation":
-      return `<li class="event moved${row.step === view.focus ? " focus" : ""}"><span class="n">${step}</span><span>${esc(MOVED[row.what] || "Scene changed")} <span class="d">by the orchestrator. The robot learns of it only from its camera${row.step === null ? "" : `, in the frame seen by step ${step}`}.</span></span></li>`;
+      return `<li class="event moved${view.compare && row.step === view.compare.step ? " focus" : ""}"><span class="n">${step}</span><span>${esc(MOVED[row.what] || "Scene changed")} <span class="d">by the orchestrator. The robot learns of it only from its camera${row.step === null ? "" : `, in the frame seen by step ${step}`}.</span></span></li>`;
     case "takeover":
       return `<li class="event take"><span class="n">${step}</span><span>Teacher takes over</span></li>`;
     case "error":
@@ -156,8 +150,9 @@ function renderEpisode() {
   $("b-prev").disabled = at <= 0;
   $("b-next").disabled = at < 0 || at === s.episodes.length - 1;
   $("b-moved").disabled = !ep || ep.perturbedStep === null;
-  $("b-moved").setAttribute("aria-pressed", String(view.focus !== null));
-  $("b-pause").lastElementChild.textContent = view.frozen ? "Resume" : "Pause";
+  $("b-moved").setAttribute("aria-pressed", String(view.compare !== null));
+  $("b-pause").setAttribute("aria-pressed", String(view.frozen !== null));
+  $("b-pause").lastElementChild.textContent = view.frozen ? `Resume · ${MomState.held(view)} new events` : "Pause";
 }
 
 function renderLog() {
@@ -170,13 +165,14 @@ function renderLog() {
     return;
   }
   const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
-  const fromStart = renderedEpisode !== ep.id || html.length < renderedRows;
+  const focus = view.compare && `${ep.id}@${view.compare.step}`;
+  // Letting go of P drops the scroll it set, so the log follows new rows again.
+  const fromStart = renderedEpisode !== ep.id || html.length < renderedRows || (renderedFocus !== null && focus === null);
   // Stay at the bottom only when the reader is already there, so scrolling back to point at a row holds.
   const atBottom = list.scrollHeight - list.scrollTop - list.clientHeight < 8;
   list.innerHTML = html.join("");
   if (!fromStart) [...list.children].slice(renderedRows).forEach((li) => li.classList.add("fresh"));
   if (fromStart || atBottom) list.scrollTop = list.scrollHeight;
-  const focus = view.focus === null ? null : `${ep.id}@${view.focus}`;
   const row = list.querySelector(".focus");
   if (focus !== renderedFocus && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
   renderedFocus = focus;
@@ -257,26 +253,18 @@ document.addEventListener(
   true,
 );
 
-// Presenter controls (SPEC §3.5): the same actions from the keyboard and from the buttons that label them.
-const ACTIONS = {
-  " ": () => MomState.togglePause(view),
-  ArrowLeft: () => MomState.move(view, -1),
-  ArrowRight: () => MomState.move(view, 1),
-  p: () => MomState.jumpToPerturbation(view),
-};
+// Presenter controls (SPEC §3.5): the same actions from the keyboard, whatever has focus, and from the buttons that label them.
 document.addEventListener("keydown", (e) => {
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  if (!ACTIONS[key] || e.metaKey || e.ctrlKey || e.altKey) return;
-  if (key === " " && e.target.closest("button")) return; // a focused button handles its own Space
-  e.preventDefault();
-  if (e.repeat) return;
-  ACTIONS[key]();
+  if (!MomState.keydown(view, e)) return;
+  e.preventDefault(); // also keeps a focused button from taking Space as a click
   schedule();
 });
+// Some browsers click a focused button on Space's keyup; the keydown above already acted.
+document.addEventListener("keyup", (e) => e.key === " " && e.preventDefault());
 document.querySelector(".presenter").addEventListener("click", (e) => {
   const button = e.target.closest("button[data-key]");
   if (!button) return;
-  ACTIONS[button.dataset.key]();
+  MomState.keydown(view, { key: button.dataset.key });
   schedule();
 });
 

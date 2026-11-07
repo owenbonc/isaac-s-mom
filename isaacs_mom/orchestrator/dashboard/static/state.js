@@ -3,6 +3,7 @@
   const CONTROLLERS = ["student", "teacher"];
   const FILMSTRIP = 6;
   const FRESH_SECONDS = 20;
+  const FINETUNE_SECONDS = 30 * 60;
 
   function initial() {
     return {
@@ -19,8 +20,9 @@
   }
 
   // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing;
-  // `selected` pins an episode (null follows the latest); `focus` is a step to show instead of the latest frame.
-  const view = () => ({ live: initial(), frozen: null, selected: null, focus: null });
+  // `selected` pins an episode (null follows the latest); `compare` is the block move P shows ({ step, back }),
+  // with the selection to return to when P is pressed again.
+  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
@@ -151,13 +153,19 @@
 
   const isReal = (sim) => sim !== null && !sim.version.startsWith("fake");
 
-  // Rule 6: placeholder unless every episode ran on a real simulator; then live while events arrive or a
-  // fine-tune is pending. Pass an episode for a panel that shows one: only the current episode can be live.
-  function provenance(s, now, ep = null) {
+  // SPEC §3.5: live while events arrive, or while a fine-tune started under 30 minutes ago has not completed.
+  const running = (s, now) =>
+    now - s.lastT < FRESH_SECONDS || (s.finetune.pending !== null && now - s.finetune.pending.t < FINETUNE_SECONDS);
+
+  // Rule 6 for what the view shows: placeholder unless every shown episode ran on a real simulator; live while the
+  // run is, paused instead of live while the presenter holds the view, recorded otherwise. Pass an episode for a
+  // panel that shows one: only the run's current episode can be live.
+  function provenance(v, now, ep = null) {
+    const s = shown(v);
     const episodes = ep ? [ep] : s.episodes;
     if (!episodes.length || !episodes.every((e) => isReal(e.sim))) return "placeholder";
-    const live = now - s.lastT < FRESH_SECONDS || s.finetune.pending !== null;
-    return live && (!ep || ep === current(s)) ? "live" : "recorded";
+    if (!running(v.live, now) || (ep && ep !== current(s))) return "recorded";
+    return v.frozen ? "paused" : "live";
   }
 
   // Median latency with its sample size; null when there is no data.
@@ -198,18 +206,33 @@
     if (at < 0) return;
     const next = Math.min(episodes.length - 1, Math.max(0, at + delta));
     v.selected = next === episodes.length - 1 ? null : episodes[next].id;
-    v.focus = null;
+    v.compare = null;
   }
 
-  // Shows the first frame after the shown episode's perturbation and pins the episode; pressing again lets go.
-  function jumpToPerturbation(v) {
+  // Shows the shown episode's block move; pressing again returns to the selection from before.
+  function compareMove(v) {
+    if (v.compare) {
+      v.selected = v.compare.back;
+      v.compare = null;
+      return;
+    }
     const ep = episode(v);
     if (!ep || ep.perturbedStep === null) return;
+    v.compare = { step: ep.perturbedStep, back: v.selected };
     v.selected = ep.id;
-    v.focus = v.focus === null ? ep.perturbedStep : null;
   }
 
-  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, median, shown, held, togglePause, episode, move, jumpToPerturbation };
+  const KEYS = { " ": togglePause, ArrowLeft: (v) => move(v, -1), ArrowRight: (v) => move(v, 1), p: compareMove };
+  // Presenter keys (SPEC §3.5), whatever has focus. True when the key is the dashboard's, so the page claims it
+  // (a focused button must not also take Space as a click); a held key acts once.
+  function keydown(v, e) {
+    const action = KEYS[e.key.length === 1 ? e.key.toLowerCase() : e.key];
+    if (!action || e.metaKey || e.ctrlKey || e.altKey) return false;
+    if (!e.repeat) action(v);
+    return true;
+  }
+
+  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, median, shown, held, episode, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
