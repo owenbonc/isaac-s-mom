@@ -215,14 +215,32 @@ function renderModels() {
   $("p-models").innerHTML = `<header><h2>Where models run</h2>${panelChip(Boolean(any))}</header><div class="body"><table><thead>${head("Model and host", "Median latency")}</thead><tbody>${inference}</tbody><tbody>${head("Fine-tune", "Median duration")}${row("", CONFIGURED.finetune, s.finetune)}</tbody></table></div>`;
 }
 
+const diagnosisText = (d) =>
+  `<div>${esc(d.hypothesis)}</div>${d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : ""}${d.confidence === null ? "" : `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>`}`;
+
+// A teacher demonstration shows the diagnosis it acts on, named by the diagnosed episode, with that episode's last frame.
+function actingOnBody(a) {
+  if (a.number === null) return `<div class="body ph-text">Acting on a diagnosis of episode <span class="mono">${esc(a.id)}</span>, which is not in this run's events.</div>`;
+  const head = `<p class="acting-on">Acting on diagnosis from episode ${a.number}</p>`;
+  if (!a.diagnosis) return `<div class="body stack">${head}<div class="ph-text">Episode ${a.number} has no diagnosis in the events yet.</div></div>`;
+  const shot = a.frame && a.frame.url
+    ? `<figure class="cited"><div class="thumb"><img src="${esc(a.frame.url)}" alt="Episode ${a.number}'s last head-camera frame"></div><figcaption class="note">Its last frame${a.frame.step === null ? "" : `, step ${esc(a.frame.step)}`}</figcaption></figure>`
+    : "";
+  return `<div class="body stack">${head}<div class="cited-row">${shot}<div class="stack">${diagnosisText(a.diagnosis)}</div></div></div>`;
+}
+
 function renderDiagnosis() {
+  const s = MomState.shown(view);
   const ep = MomState.episode(view);
+  const acting = MomState.actedOn(s, ep);
   const d = ep && ep.diagnosis;
-  const conf = d && d.confidence !== null ? `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>` : "";
-  const body = d
-    ? `<div class="body stack"><div>${esc(d.hypothesis)}</div>${d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : ""}${conf}</div>`
-    : `<div class="body ph-text">${ep ? "No diagnosis for this episode. The teacher diagnoses failed student episodes on development seeds." : "No episode yet."}</div>`;
-  $("p-diagnosis").innerHTML = `<header><h2>Teacher's diagnosis</h2>${panelChip(Boolean(d), ep)}</header>${body}`;
+  const body = acting
+    ? actingOnBody(acting)
+    : d
+      ? `<div class="body stack">${diagnosisText(d)}</div>`
+      : `<div class="body ph-text">${ep ? "No diagnosis for this episode. The teacher diagnoses failed student episodes on development seeds, then demonstrates on new ones." : "No episode yet."}</div>`;
+  const title = acting ? "Diagnosis it acts on" : "Teacher's diagnosis";
+  $("p-diagnosis").innerHTML = `<header><h2>${title}</h2>${panelChip(Boolean(acting ? acting.diagnosis : d), ep)}</header>${body}`;
 }
 
 function render() {

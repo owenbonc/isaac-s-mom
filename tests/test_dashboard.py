@@ -8,6 +8,7 @@ from isaacs_mom.contracts import Event
 from isaacs_mom.orchestrator.dashboard.server import create_app, tail_events
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
+from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy
 
@@ -108,6 +109,19 @@ def test_episode_started_names_the_simulator_so_the_page_can_label_fakesim_place
     first = json.loads((tmp_path / "events.jsonl").read_text().splitlines()[0])
     assert first["type"] == "episode_started"
     assert (first["data"]["sim_version"], first["data"]["robot_config"]) == (sim.sim_version, sim.robot_config)
+
+
+def test_each_teacher_demonstration_names_the_failed_episode_whose_diagnosis_it_acts_on(tmp_path: Path) -> None:
+    run_loop(FakeSim(), tmp_path, "r1", max_rounds=1, demos=3, dev_trials=2)
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    starts = {e["data"]["episode_id"]: e["data"] for e in events if e["type"] == "episode_started"}
+    diagnosed = [e["data"]["episode_id"] for e in events if e["type"] == "diagnosis"]
+    teacher = {
+        e["data"]["episode_id"] for e in events if e["type"] == "decision" and e["data"]["controller"] == "teacher"
+    }
+    assert len(diagnosed) == 2 and len(teacher) == 3  # the stand-in student fails both trials
+    assert [starts[t]["acting_on"] for t in sorted(teacher, key=list(starts).index)] == [*diagnosed, diagnosed[0]]
+    assert all(start["acting_on"] is None for episode_id, start in starts.items() if episode_id not in teacher)
 
 
 def test_page_and_its_scripts_are_served_without_caching(tmp_path: Path) -> None:

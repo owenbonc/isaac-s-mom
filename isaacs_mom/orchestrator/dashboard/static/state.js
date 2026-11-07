@@ -62,6 +62,7 @@
           split: text(d.split),
           round: num(d.round),
           sim: text(d.sim_version) ? { version: d.sim_version, robot: text(d.robot_config) } : null,
+          actingOn: text(d.acting_on) || null,
           rows: [],
           frames: [],
           verdict: null,
@@ -187,6 +188,20 @@
     return frames.slice(start, start + FILMSTRIP).map((f) => ({ ...f, moved: f === moved, now: f === stage }));
   }
 
+  // The diagnosis a teacher demonstration acts on (SPEC §3.5): the diagnosed episode's id, its number in the run,
+  // its diagnosis and the last frame it saw. Null for an episode that acts on none.
+  function actedOn(s, ep) {
+    if (!ep || !ep.actingOn) return null;
+    const at = s.episodes.findIndex((e) => e.id === ep.actingOn);
+    const target = s.episodes[at];
+    return {
+      id: ep.actingOn,
+      number: target ? at + 1 : null,
+      diagnosis: target ? target.diagnosis : null,
+      frame: target ? target.frames[target.frames.length - 1] || null : null,
+    };
+  }
+
   // Presenter controls (SPEC §3.5). Events keep folding into `live` while paused; resuming shows them all.
   const shown = (v) => v.frozen || v.live;
   const held = (v) => (v.frozen ? Math.max(0, v.live.eventCount - v.frozen.eventCount) : 0);
@@ -232,7 +247,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, median, shown, held, episode, keydown };
+  const api = { initial, view, reconnect, reduce, current, provenance, summary, filmstrip, actedOn, median, shown, held, episode, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

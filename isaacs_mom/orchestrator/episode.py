@@ -24,8 +24,12 @@ def run_episode(
     takeover: Policy | None = None,
     perturb_at: int | None = None,
     max_steps: int = MAX_STEPS,
+    acting_on: str | None = None,
 ) -> EpisodeManifest:
-    """One recorded episode. If `policy` stops without success, `takeover` (when given) continues from there."""
+    """One recorded episode. If `policy` stops without success, `takeover` (when given) continues from there.
+
+    `acting_on` names the failed episode whose diagnosis a teacher demonstration acts on (SPEC §3.5).
+    """
     episode_id = sim.reset(seed)
     recorder = Recorder.start(
         run_dir,
@@ -46,6 +50,7 @@ def run_episode(
         round=round_,
         sim_version=sim.sim_version,
         robot_config=sim.robot_config,
+        acting_on=acting_on,
     )
     feedback = "start"
     total_steps = 0

@@ -398,3 +398,35 @@ def test_space_pauses_from_any_focus_claims_the_key_and_acts_once_while_held() -
         "other": False,
         "resumed": True,
     }
+
+
+def test_a_teacher_demonstration_finds_the_diagnosis_and_last_frame_of_the_episode_it_acts_on() -> None:
+    diagnosis = {"hypothesis": "pushed too early", "evidence": "block left of hand", "confidence": 0.7, "lesson": ""}
+    events = stream(
+        started("trial"),
+        decision(0),
+        executed(0, frame="/f/0.jpg"),
+        decision(1),
+        executed(1, frame="/f/1.jpg"),
+        started("other"),
+        ("diagnosis", {"episode_id": "trial", **diagnosis}),
+        ("episode_started", {"episode_id": "demo", "acting_on": "trial"}),
+        ("episode_started", {"episode_id": "lost", "acting_on": "not-in-this-run"}),
+    )
+    out = run(
+        """
+        const s = S.initial();
+        for (const e of events) S.reduce(s, e);
+        const [trial, other, demo, lost] = s.episodes;
+        const pick = (a) => a && {
+          id: a.id, number: a.number, hypothesis: a.diagnosis && a.diagnosis.hypothesis, frame: a.frame && a.frame.url,
+        };
+        return [demo, lost, trial].map((ep) => pick(S.actedOn(s, ep)));
+        """,
+        events,
+    )
+    assert out == [
+        {"id": "trial", "number": 1, "hypothesis": "pushed too early", "frame": "/f/1.jpg"},
+        {"id": "not-in-this-run", "number": None, "hypothesis": None, "frame": None},
+        None,
+    ]

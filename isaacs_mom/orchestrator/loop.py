@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from isaacs_mom.contracts import EpisodeManifest, EvaluationResult
+from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
@@ -69,15 +69,15 @@ def run_loop(
             )
             if manifest.validation and not manifest.validation.accepted:
                 failures.append(manifest)
-        diagnoses = []
+        diagnosed: list[tuple[str, Diagnosis]] = []
         for manifest in failures:
             episode_dir = run_dir / "episodes" / manifest.episode_id
             diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps])
             events.emit("diagnosis", episode_id=manifest.episode_id, **diagnosis.model_dump())
-            diagnoses.append(diagnosis)
-        for seed, diagnosis in zip(
-            choose_scenes(diagnoses, demos, start=trial_start + 500),
-            (diagnoses or [None]) * demos,
+            diagnosed.append((manifest.episode_id, diagnosis))
+        for seed, (failed_id, diagnosis) in zip(
+            choose_scenes([d for _, d in diagnosed], demos, start=trial_start + 500),
+            (diagnosed or [(None, None)]) * demos,
             strict=False,
         ):
             run_episode(
@@ -89,6 +89,7 @@ def run_loop(
                 split="dev",
                 round_=round_,
                 instruction=INSTRUCTION,
+                acting_on=failed_id,
             )
         training_set = build_training_set(run_dir, round_ + 1)
         events.emit("finetune_started", round=round_ + 1, training_set=str(training_set))
