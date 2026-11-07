@@ -50,6 +50,7 @@ def run_episode(
             if total_steps == perturb_at:
                 perturbation = Perturbation(kind="move_block", seed=seed + PERTURB_SEED_OFFSET)
                 sim.perturb(perturbation)
+                recorder.add_perturbation(perturbation)
                 events.emit("perturbation", episode_id=episode_id, kind=perturbation.kind, step=total_steps)
             obs = sim.observe()
             call = active.act(obs, instruction, feedback)

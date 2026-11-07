@@ -103,6 +103,11 @@ class StepRecord(BaseModel):
     error: str | None = None
 
 
+class PerturbationRecord(BaseModel):
+    before_step: int
+    perturbation: Perturbation
+
+
 class EpisodeManifest(BaseModel):
     episode_id: str
     run_id: str
@@ -113,6 +118,7 @@ class EpisodeManifest(BaseModel):
     sim_version: str
     robot_config: str
     steps: list[StepRecord] = Field(default_factory=list)
+    perturbations: list[PerturbationRecord] = Field(default_factory=list)
     takeover_step: int | None = None
     diagnosis: Diagnosis | None = None
     validation: Validation | None = None

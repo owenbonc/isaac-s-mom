@@ -44,7 +44,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 - `validate_episode(episode_id) -> Validation` from simulator ground truth: block inside the target zone, at rest for 1 s of sim time, no joint-limit violation, no table penetration.
 - Recorder writes `runs/<run_id>/episodes/<episode_id>/` (manifest §4.2, frames as JPEG, actions as `.npy`) and `runs/<run_id>/events.jsonl`.
 - `build_training_set(run_id, round) -> path` applies rules 2 and 3.
-- `replay(episode_id)` re-executes stored actions from the stored seed and reports whether the final state validates.
+- `replay(sim, manifest_path)` re-executes the stored skill calls and perturbations from the stored seed and reports whether the executed actions and the final verdict reproduce; it sets `replay_valid`.
 
 ### 3.5 Orchestrator, dashboard, demo (workstream 5)
 - One command, `uv run mom run`, executes the loop (§3.6) and writes events.
@@ -84,7 +84,7 @@ class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
 - `Validation{task_success, physics_valid, reason}` is computed by the validator from `GroundTruth`.
 
 ### 4.2 Episode manifest (`manifest.json`)
-`{episode_id, run_id, seed, split: dev|heldout, round, instruction, sim_version, robot_config, steps: [{step, sim_time, frame: "frames/0003.jpg", joint_state, skill_call, controller: student|teacher, checkpoint, actions: "actions/0003.npy", timestamps}], takeover_step: int|null, diagnosis: Diagnosis|null, validation: Validation, replay_valid: bool|null}`
+`{episode_id, run_id, seed, split: dev|heldout, round, instruction, sim_version, robot_config, steps: [{step, sim_time, frame: "frames/0003.jpg", joint_state, skill_call, controller: student|teacher, checkpoint, actions: "actions/0003.npy", timestamps}], perturbations: [{before_step, perturbation: Perturbation}], takeover_step: int|null, diagnosis: Diagnosis|null, validation: Validation, replay_valid: bool|null}`
 
 ### 4.3 Training example (one JSON line)
 `{image: "<path to frame>", instruction, feedback, target: SkillCall}` from teacher steps of accepted dev episodes only.
