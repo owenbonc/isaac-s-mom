@@ -12,7 +12,7 @@ from isaacs_mom.validator.rules import validate
 TOLERANCE = 1e-5
 # What a re-run can raise: missing or corrupt frames and actions, bad simulator input, and MuJoCo's own FatalError,
 # which subclasses none of the others.
-REPLAY_ERRORS = (OSError, ValueError, RuntimeError, ArithmeticError, LookupError, mujoco.FatalError)
+REPLAY_ERRORS = (OSError, ValueError, RuntimeError, ArithmeticError, LookupError, mujoco.FatalError)  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
 
 
 def replay(sim: TruthSim, manifest_path: Path) -> bool:

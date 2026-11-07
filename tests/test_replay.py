@@ -214,7 +214,7 @@ def test_a_replay_result_that_cannot_be_saved_is_a_failure(tmp_path: Path, monke
 
 class CrashingSim(FakeSim):
     def execute(self, call: SkillCall) -> ExecResult:
-        raise mujoco.FatalError("simulation unstable")
+        raise mujoco.FatalError("simulation unstable")  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
 
 
 def test_a_simulator_crash_is_a_failed_replay_not_a_lost_run(tmp_path: Path) -> None:
