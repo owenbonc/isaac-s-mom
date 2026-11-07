@@ -203,3 +203,13 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
     assert examples and all(type(e.target) is SkillTarget for e in examples)
     lines = build_training_set(tmp_path, 1).read_text().splitlines()
     assert lines and all("reason" not in json.loads(line)["target"] for line in lines)
+
+
+def test_fake_sim_reports_the_robot_turned_by_its_waist() -> None:
+    sim = FakeSim()
+    sim.reset(1700)
+    assert sim.ground_truth().robot_yaw == 0.0
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
+    gt = sim.ground_truth()
+    assert gt.robot_xy == (0.0, 0.0)
+    assert gt.robot_yaw == pytest.approx(math.radians(30))

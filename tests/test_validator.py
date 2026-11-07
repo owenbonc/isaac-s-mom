@@ -141,7 +141,7 @@ def test_a_recording_error_is_its_own_rejection_kind() -> None:
 
 
 ROBOT_YAW = 2.0  # turned well away from +x, so the test can't pass in world axes by accident
-BIN_TURN = 0.3  # the bin turned differently again, so its walls aren't lined up with the robot
+BIN_TURN = 0.9  # the bin turned well apart from the robot, so naming misses in the bin's frame would fail
 
 
 def _missed(forward: float, left: float) -> GroundTruth:

@@ -234,3 +234,12 @@ def test_moving_the_box_is_ignored_once_it_is_hugged(sim: MujocoSim) -> None:
     held = sim.ground_truth().box_xyz
     sim.perturb(Perturbation(kind="move_box", seed=99))
     assert sim.ground_truth().box_xyz == held
+
+
+def test_ground_truth_heading_follows_the_waist_twist(sim: MujocoSim) -> None:
+    before = sim.ground_truth()
+    assert before.robot_yaw == pytest.approx(0.0, abs=np.deg2rad(3))
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
+    after = sim.ground_truth()
+    assert after.robot_yaw - before.robot_yaw == pytest.approx(np.deg2rad(30), abs=np.deg2rad(3))
+    assert np.hypot(after.robot_xy[0] - before.robot_xy[0], after.robot_xy[1] - before.robot_xy[1]) < 0.02
