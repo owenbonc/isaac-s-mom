@@ -14,7 +14,7 @@ Guidance for every agent and teammate working in this repo.
 - Domain logic lives in plain, tested modules; servers, the CLI and the dashboard are thin adapters.
 - Risky logic ships with a behaviour test. SPEC §2's rules each have one.
 - Done means `scripts/verify.sh` prints READY and the real thing was exercised.
-- Priority: tokens first.
+- Priority: middle ground.
 - Stay inside your workstream's folder (SPEC §5). A change to `contracts.py` updates every caller in the same PR and is called out in the PR body.
 - Stop a server you started by its port (`lsof -ti tcp:<port> -sTCP:LISTEN | xargs kill`), never by name.
 - Never commit secrets (`.env`), `runs/`, model weights, or personal content.

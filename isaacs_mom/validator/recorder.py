@@ -7,6 +7,8 @@ from isaacs_mom.contracts import (
     EpisodeManifest,
     ExecResult,
     Observation,
+    Perturbation,
+    PerturbationRecord,
     SkillCall,
     Split,
     StepRecord,
@@ -71,6 +73,11 @@ class Recorder:
                 ok=result.ok,
                 error=result.error,
             )
+        )
+
+    def add_perturbation(self, perturbation: Perturbation) -> None:
+        self.manifest.perturbations.append(
+            PerturbationRecord(before_step=len(self.manifest.steps), perturbation=perturbation)
         )
 
     def mark_takeover(self) -> None:
