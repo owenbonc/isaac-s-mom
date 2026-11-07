@@ -75,7 +75,6 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minm
 /* The row wraps by whole items wherever it runs out of width, so no value or label is ever clipped. */
 footer.models{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem 1rem;padding:.45rem 1.1rem;background:var(--panel);border-top:1px solid var(--rule)}
 footer.models .item{white-space:nowrap}
-footer.models h2{font-size:1rem}
 footer.models .chip:last-child{margin-left:auto}
 footer.models .v{color:var(--muted)}
 .panel{background:var(--panel);border:1px solid var(--rule);border-radius:6px;min-width:0;min-height:0}

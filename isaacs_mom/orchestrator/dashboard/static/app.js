@@ -294,9 +294,12 @@ function renderLog() {
     list.scrollTop = shown ? shown.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop : list.scrollHeight;
     logAnchor = list.scrollTop;
   }
-  // M and P park the log with the move row a third of the way down.
+  // M and P park the log with the move row a third of the way down, and it stays parked until the reader scrolls.
   const row = list.querySelector("li.event.moved");
-  if (focus !== null && focus !== renderedFocus && row) list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
+  if (focus !== null && focus !== renderedFocus && row) {
+    list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
+    logFollowing = false;
+  }
   renderedFocus = focus;
   renderedRows = html.length;
   renderedEpisode = ep.id;
@@ -324,7 +327,8 @@ function renderModels() {
   const s = MomState.summary(MomState.shown(view));
   const item = (who, where, measured) => `<span class="item"><b>${who}</b> ${where} <span class="v">${stat(measured)}</span></span>`;
   $("models").innerHTML =
-    `<h2>Models</h2><span class="chip quiet config">Configured</span>` +
+    // The item names say what the row is; the heading stays for screen readers so the row fits 1280 px.
+    `<h2 class="sr">Models</h2><span class="chip quiet config">Configured</span>` +
     item("Student", CONFIGURED.student, s.student) +
     item("Teacher", CONFIGURED.teacher, s.teacher) +
     item("Fine-tune", CONFIGURED.finetune, s.finetune) +
