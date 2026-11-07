@@ -18,7 +18,7 @@ from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, PLACE_X, FakeSim
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
-from isaacs_mom.validator import validate
+from isaacs_mom.validator import replay, validate
 from isaacs_mom.validator.training import build_training_set, training_examples
 
 
@@ -216,6 +216,38 @@ def test_a_perturbation_the_sim_refuses_is_reported_not_recorded(tmp_path: Path)
     assert late.validation and late.validation.accepted
     assert late.perturbations == [] and of(late, "perturbation") == [] and of(late, "error") == [steps]
     assert [p.before_step for p in early.perturbations] == [0] and of(early, "perturbation") == [0]
+    assert not list((tmp_path / "episodes" / late.episode_id).glob("**/before_move*"))  # a refused move has no frame
+
+
+def test_an_applied_move_names_the_frame_seen_right_before_it_which_is_never_a_step(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1501}
+    still = run_episode(sim, ScriptedPolicy(sim), **common)  # step 0 reaches, so at step 1 the box rests on the table
+    moved = run_episode(sim, ScriptedPolicy(sim), perturb_at=1, **common)
+    (move,) = [json.loads(line)["data"] for line in events.path.read_text().splitlines() if '"perturbation"' in line]
+    before = (tmp_path / move["before_frame"]).read_bytes()
+    episode_dir = tmp_path / "episodes" / moved.episode_id
+
+    # What the robot saw at that pose without the move, and not what it saw after it.
+    assert before == (tmp_path / "episodes" / still.episode_id / still.steps[1].frame).read_bytes()
+    assert before != (episode_dir / moved.steps[1].frame).read_bytes()
+    # Never a step and never trained on (rule 3): the steps and their frames are only the executed decisions.
+    assert moved.validation and moved.validation.accepted
+    assert sorted(p.name for p in (episode_dir / "frames").iterdir()) == [Path(s.frame).name for s in moved.steps]
+    images = {Path(e.image) for e in training_examples(episode_dir, moved)}
+    assert images == {episode_dir / s.frame for s in moved.steps} and tmp_path / move["before_frame"] not in images
+    assert replay(FakeSim(), episode_dir / "manifest.json")
+
+
+def test_a_move_due_when_the_student_stops_is_made_once_not_again_when_the_teacher_takes_over(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug"}
+    manifest = run_episode(sim, GiveUp(), takeover=ScriptedPolicy(sim), seed=1505, perturb_at=1, **common)
+    moves = [line for line in events.path.read_text().splitlines() if '"perturbation"' in line]
+    assert manifest.takeover_step == 1  # the student stopped at step 1, where the move was due
+    assert [p.before_step for p in manifest.perturbations] == [1] and len(moves) == 1
 
 
 def test_scripted_episode_succeeds_and_takeover_is_recorded(tmp_path: Path) -> None:

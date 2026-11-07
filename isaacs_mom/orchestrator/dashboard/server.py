@@ -14,6 +14,8 @@ from isaacs_mom.contracts import Event
 STATIC = Path(__file__).parent / "static"
 POLL_SECONDS = 0.25
 FRAME_SUFFIXES = {".jpg", ".jpeg"}
+# An executed step's frame, and the view right before a box or bin move (SPEC §3.5).
+FRAME_KEYS = {"frame", "before_frame"}
 
 
 class FreshStatic(StaticFiles):
@@ -36,13 +38,13 @@ def frame_url(frame: object, run_dir: Path) -> str | None:
 
 
 def to_sse(line: str, run_dir: Path) -> str | None:
-    """One events.jsonl line as an SSE message with its frame path turned into a URL; None for a malformed line."""
+    """One events.jsonl line as an SSE message with its frame paths turned into URLs; None for a malformed line."""
     try:
         event = Event.model_validate_json(line)
     except ValidationError:
         return None
-    if "frame" in event.data:
-        event.data["frame"] = frame_url(event.data["frame"], run_dir)
+    for key in FRAME_KEYS & event.data.keys():
+        event.data[key] = frame_url(event.data[key], run_dir)
     return f"data: {event.model_dump_json()}\n\n"
 
 

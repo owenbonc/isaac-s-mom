@@ -153,6 +153,19 @@ def test_a_recorded_episode_replays_exactly(blind_sim: MujocoSim, tmp_path: Path
     assert replay(blind_sim, tmp_path / "episodes" / manifest.episode_id / "manifest.json")
 
 
+@needs_gl
+def test_rendering_the_frame_before_a_move_changes_no_physics_so_the_episode_replays(
+    sim: MujocoSim, tmp_path: Path
+) -> None:
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "seed": SEED, "split": "dev", "round_": 0, "instruction": "hug"}
+    manifest = run_episode(sim, OraclePolicy(sim), perturb_at=1, **common)
+    (move,) = [json.loads(line)["data"] for line in events.path.read_text().splitlines() if '"perturbation"' in line]
+    episode_dir = tmp_path / "episodes" / manifest.episode_id
+    assert (tmp_path / move["before_frame"]).read_bytes() != (episode_dir / manifest.steps[1].frame).read_bytes()
+    assert replay(sim, episode_dir / "manifest.json")  # replay never renders, so a render that moved anything diverges
+
+
 def _put_box(sim: MujocoSim, xyz: tuple[float, float, float], yaw: float = 0.0, tilt: float = 0.0) -> None:
     """Test-only: set the box down anywhere, turned by `yaw` and then tipped by `tilt` about its own y axis."""
     qyaw = np.array([np.cos(yaw / 2), 0.0, 0.0, np.sin(yaw / 2)])

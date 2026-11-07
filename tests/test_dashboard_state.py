@@ -771,29 +771,47 @@ def test_the_judged_take_is_marked_on_its_episode() -> None:
     assert [e["demo"] for e in out["state"]["episodes"]] == [True, False]
 
 
-def test_the_move_pairs_the_last_frame_before_it_with_the_first_after_and_finds_the_first_decision_after() -> None:
+def test_the_move_pairs_the_frame_taken_right_before_it_with_the_first_after_it_and_the_first_decision_after() -> None:
+    def moved(**before: str) -> list[dict]:
+        return stream(
+            started("a"),
+            decision(0),
+            executed(0, frame="/f/0.jpg"),
+            ("perturbation", {"kind": "move_bin", "step": 1, **before}),
+            decision(1),
+            executed(1, frame="/f/1.jpg"),
+            decision(2),
+            executed(2, frame="/f/2.jpg"),
+        )
+
+    script = """
+    const s = S.initial();
+    for (const e of events) S.reduce(s, e);
+    const m = S.move(S.current(s));
+    const who = (f) => [f.step, f.url, f.controller, f.checkpoint];
+    return { before: who(m.before), after: who(m.after), decision: m.decision.step, none: S.move(null) };
+    """
+    out = run(script, moved(before_frame="/f/before.jpg"))
+    assert out == {
+        "before": [1, "/f/before.jpg", "student", "ckpt-r0"],
+        "after": [1, "/f/1.jpg", "student", "ckpt-r0"],
+        "decision": 1,
+        "none": None,
+    }
+    # A run recorded before the orchestrator took that frame shows it missing, never the previous step's frame.
+    assert run(script, moved())["before"] == [1, None, "student", "ckpt-r0"]
+
+
+def test_a_move_before_the_first_decision_names_the_controller_of_the_first_frame_after_it() -> None:
     events = stream(
         started("a"),
-        decision(0),
+        ("perturbation", {"kind": "move_box", "step": 0, "before_frame": "/f/before.jpg"}),
+        decision(0, controller="teacher"),
         executed(0, frame="/f/0.jpg"),
-        decision(1),
-        executed(1, frame="/f/1.jpg"),
-        ("perturbation", {"kind": "move_bin", "step": 2}),
-        decision(2),
-        executed(2, frame="/f/2.jpg"),
-        decision(3),
-        executed(3, frame="/f/3.jpg"),
     )
-    out = run(
-        """
-        const s = S.initial();
-        for (const e of events) S.reduce(s, e);
-        const m = S.move(S.current(s));
-        return { before: m.before.url, after: m.after.url, decision: m.decision.step, none: S.move(null) };
-        """,
-        events,
-    )
-    assert out == {"before": "/f/1.jpg", "after": "/f/2.jpg", "decision": 2, "none": None}
+    script = "const s = S.initial(); for (const e of events) S.reduce(s, e); return S.move(S.current(s)).before;"
+    before = run(script, events)
+    assert (before["url"], before["controller"], before["checkpoint"]) == ("/f/before.jpg", "teacher", "ckpt-r0")
 
 
 def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished_it() -> None:

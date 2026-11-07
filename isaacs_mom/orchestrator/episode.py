@@ -97,10 +97,21 @@ def run_episode(
             )
         for _ in range(max_steps):
             if total_steps == perturb_at:
+                perturb_at = None  # once: a takeover at this step must not move it again
                 perturbation = Perturbation(kind="move_box", seed=seed + PERTURB_SEED_OFFSET)
+                # The same pose just before the move, kept outside frames/ so it is never a step (SPEC §3.5).
+                before = sim.observe().head_rgb_jpeg
                 if sim.perturb(perturbation):
                     recorder.add_perturbation(perturbation)
-                    events.emit("perturbation", episode_id=episode_id, kind=perturbation.kind, step=total_steps)
+                    before_frame = recorder.dir / f"before_move_{total_steps:04d}.jpg"
+                    before_frame.write_bytes(before)
+                    events.emit(
+                        "perturbation",
+                        episode_id=episode_id,
+                        kind=perturbation.kind,
+                        step=total_steps,
+                        before_frame=before_frame.relative_to(run_dir).as_posix(),
+                    )
                 else:
                     # Recorded and shown only when it happened, so nothing downstream claims a change that wasn't made.
                     events.emit(

@@ -102,8 +102,17 @@ def test_stream_turns_frame_paths_into_urls_and_hides_outside_paths(tmp_path: Pa
     log.emit("action_executed", frame="../../secret.jpg")
     log.emit("action_executed", frame=str(tmp_path / "secret.jpg"))
     log.emit("action_executed", frame=None)
-    frames = [e["data"]["frame"] for e in collect(run_dir)]
-    assert frames == ["/frames/episodes/ep-1/frames/0000.jpg", None, None, None]
+    log.emit("perturbation", before_frame="episodes/ep-1/before_move_0000.jpg")
+    log.emit("perturbation", before_frame="../../secret.jpg")
+    frames = [e["data"].get("frame", e["data"].get("before_frame")) for e in collect(run_dir)]
+    assert frames == [
+        "/frames/episodes/ep-1/frames/0000.jpg",
+        None,
+        None,
+        None,
+        "/frames/episodes/ep-1/before_move_0000.jpg",
+        None,
+    ]
 
 
 def test_frame_paths_find_the_same_file_whatever_directory_the_dashboard_starts_from(

@@ -75,6 +75,7 @@
           frames: [],
           verdict: null,
           perturbedStep: null,
+          beforeFrame: null,
           controller: null,
           checkpoint: null,
           diagnosis: null,
@@ -126,6 +127,8 @@
       case "perturbation":
         if (!ep) break;
         ep.perturbedStep = num(d.step);
+        // The orchestrator's frame from right before the move, at the same pose; a run recorded before it took one has none.
+        ep.beforeFrame = { step: ep.perturbedStep, url: text(d.before_frame) || null, controller: ep.controller, checkpoint: ep.checkpoint };
         ep.rows.push({ kind: "perturbation", step: num(d.step), what: text(d.kind) });
         break;
       case "validation":
@@ -195,17 +198,15 @@
     return frames.slice(start, start + FILMSTRIP).map((f) => ({ ...f, moved: f === moved, after: after(f), now: f === stage }));
   }
 
-  // The shown episode's box or bin move: the last frame before it, the first frame that shows it, and the first
-  // decision made after it. Null for an episode without one.
+  // The shown episode's box or bin move: the frame taken right before it, the first frame after it, and the first
+  // decision made after it. A move before any decision is under the controller of the first frame after it. Null for an
+  // episode without one.
   function move(ep) {
     if (!ep || ep.perturbedStep === null) return null;
     const at = ep.perturbedStep;
-    return {
-      step: at,
-      before: ep.frames.findLast((f) => f.step < at) || null,
-      after: ep.frames.find((f) => f.step >= at) || null,
-      decision: ep.rows.find((r) => r.kind === "decision" && r.step >= at) || null,
-    };
+    const after = ep.frames.find((f) => f.step >= at) || null;
+    const before = ep.beforeFrame.controller || !after ? ep.beforeFrame : { ...ep.beforeFrame, controller: after.controller, checkpoint: after.checkpoint };
+    return { step: at, before, after, decision: ep.rows.find((r) => r.kind === "decision" && r.step >= at) || null };
   }
 
   // The diagnosis a teacher demonstration acts on (SPEC §3.5): the diagnosed episode's id, its number in the run,

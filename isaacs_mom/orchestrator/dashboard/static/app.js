@@ -169,18 +169,19 @@ function renderCamera() {
   // The caption row is always there, so the peak's caption never shrinks the frame.
   let frame, caption;
   if (view.compare && move) {
-    const step = (f) => (f && f.step !== null ? `<span class="step">step ${esc(f.step)}</span>` : "");
-    frame = cell(ep, move.before, `<span class="tag">Before the move</span>${step(move.before)}`, false) + cell(ep, move.after, `<span class="tag">After</span>${step(move.after)}`, true);
-    // The pair covers the log, so the caption carries its marked row: the first decision after the move, its reason in full.
+    // The orchestrator took the left frame at the same pose right before the move, so no skill was chosen from it.
+    const who = (f) => (f ? tag(f.controller, f.checkpoint) : "");
+    frame = cell(move.before, `<span class="tag">Before the move</span>${who(move.before)}`, null, false) + cell(move.after, `<span class="tag">After</span>${who(move.after)}`, skillRow(ep, move.after), true);
+    // The pair covers the log, so the caption carries its marked row, clamped so it never shrinks the pair.
     const first = move.decision;
     const next = first ? ` First decision after the move: <span class="mono">${skillText(first)}</span>.${first.reason ? ` ${esc(first.reason)}` : ""}` : "";
-    caption = `<p class="caption moved">${what} between ${move.before && move.before.step !== null ? `step ${esc(move.before.step)} and ` : "these frames, before "}step ${esc(move.step)}.${next}</p>`;
+    caption = `<p class="caption moved clamped"${first && first.reason ? ` title="${esc(first.reason)}"` : ""}>${what} between these frames, before step ${esc(move.step)}.${next}</p>`;
   } else {
     // The move stays marked for the rest of its episode, so P still finds it after the moment has passed.
     const mark = last.after ? `<span class="tag ink">${what} at step ${esc(move.step)} · <kbd>P</kbd></span>` : "";
-    frame = cell(ep, last, tag(last.controller, last.checkpoint) + mark, last.moved);
+    frame = cell(last, tag(last.controller, last.checkpoint) + mark, skillRow(ep, last), last.moved);
     caption = last.moved
-      ? `<p class="caption moved">${what} just before this frame, the first to show it.</p>`
+      ? `<p class="caption moved">${what} before step ${esc(move.step)}. This is the first frame after it.</p>`
       : `<p class="caption">${last.step === null ? "Head-camera frame." : `What the ${last.controller || "robot"} saw at step ${esc(last.step)}, before choosing.`}</p>`;
   }
   $("stage").innerHTML = `<div class="frame">${frame}</div>${caption}`;
@@ -200,10 +201,12 @@ function renderCamera() {
   flashedFrame = last.moved ? key : flashedFrame;
 }
 
-// One frame on the stage with its label and the skill it led to; a missing frame keeps its place, hatched.
-function cell(ep, f, label, moved) {
+// The decision that chose a skill from frame `f`, or null.
+const skillRow = (ep, f) => (f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill)) || null;
+
+// One frame on the stage with its label and the skill `row` chose from it; a missing frame keeps its place, hatched.
+function cell(f, label, row, moved) {
   const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : ` at step ${esc(f.step)}`}">` : "";
-  const row = f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill);
   const said = row ? `<span class="said ${row.controller || "unknown"}">${skillText(row)}</span>` : "";
   return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}<div class="over">${label}</div>${said}</div></div>`;
 }
