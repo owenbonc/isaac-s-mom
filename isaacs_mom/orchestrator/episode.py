@@ -53,7 +53,7 @@ def run_episode(
                 takeover=True,
                 step=total_steps,
                 skill=None,
-                reason="student stopped without succeeding; teacher takes over",
+                reason="student did not succeed; teacher takes over",
             )
         for _ in range(max_steps):
             if total_steps == perturb_at:
@@ -70,7 +70,7 @@ def run_episode(
                 controller=active.controller,
                 checkpoint=active.checkpoint,
                 step=obs.step,
-                skill=call.model_dump() if call else None,
+                skill=call.model_dump(exclude={"reason"}) if call else None,
                 reason=call.reason if call else "",
                 latency_ms=round((time.perf_counter() - started) * 1000, 1),
             )

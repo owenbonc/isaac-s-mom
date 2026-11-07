@@ -4,14 +4,14 @@ from pathlib import Path
 import pytest
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCall
+from isaacs_mom.contracts import Controller, Observation, Perturbation, SkillCall, SkillTarget
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.teacher import choose_scenes
-from isaacs_mom.validator.training import build_training_set
+from isaacs_mom.validator.training import build_training_set, training_examples
 
 
 class ScriptedPolicy:
@@ -122,7 +122,7 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
 
     sim = FakeSim()
     events = EventLog(tmp_path, "t")
-    run_episode(
+    manifest = run_episode(
         sim,
         GiveUp(),
         takeover=Explains(sim),
@@ -138,5 +138,7 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
     assert all("latency_ms" in d for d in decisions if not d.get("takeover"))
     assert all("reason" in d for d in decisions)
     assert any(d["reason"] == "block is right of the hand" for d in decisions)
+    examples = training_examples(tmp_path / "episodes" / manifest.episode_id, manifest)
+    assert examples and all(type(e.target) is SkillTarget for e in examples)
     lines = build_training_set(tmp_path, 1).read_text().splitlines()
     assert lines and all("reason" not in json.loads(line)["target"] for line in lines)
