@@ -1,10 +1,20 @@
-"""LoRA fine-tuning of SmolVLM2 on a Modal A10G (SPEC §3.2)."""
+"""LoRA fine-tuning of SmolVLM2 on the local CUDA GPU (SPEC §3.2)."""
 
-from importlib.metadata import version
+import contextlib
+import json
+import random
+import tempfile
+import time
+from pathlib import Path
+from typing import Any
 
-import modal
+import torch
+from peft import LoraConfig, get_peft_model
 
-GPU = "A10G"
+from isaacs_mom.contracts import SkillCall
+from isaacs_mom.student import vlm
+from isaacs_mom.student.prompt import UnparseableReply, build_messages, parse_reply
+
 EPOCHS = 5
 LEARNING_RATE = 1e-4
 GRAD_ACCUM = 4
@@ -15,48 +25,18 @@ LORA_TARGETS = r".*text_model.*\.(q_proj|k_proj|v_proj|o_proj|gate_proj|up_proj|
 ACCURACY_SAMPLE = 64
 SEED = 0
 IGNORE_INDEX = -100
-# uv.lock's Linux versions, so a launch from any laptop trains on the same stack.
-TORCH = "torch==2.15.0"
-TORCHVISION = "torchvision==0.29.2"
 
 
-def _pinned(package: str) -> str:
-    # Training must preprocess frames and prompts exactly as inference does.
-    return f"{package}=={version(package).split('+')[0]}"
-
-
-image = (
-    modal.Image.debian_slim(python_version="3.12")
-    .pip_install(TORCH, TORCHVISION, *(_pinned(p) for p in ("transformers", "peft", "num2words", "pillow", "pydantic")))
-    .add_local_python_source("isaacs_mom")
-)
-app = modal.App("isaacs-mom-student", image=image)
-hf_cache = modal.Volume.from_name("isaacs-mom-hf-cache", create_if_missing=True)
-
-
-@app.function(gpu=GPU, timeout=30 * 60, volumes={"/root/.cache/huggingface": hf_cache})
-def train(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
-    import contextlib
-    import json
-    import random
-    import tempfile
-    import time
-    from pathlib import Path
-    from typing import Any
-
-    import torch
-    from peft import LoraConfig, get_peft_model
-
-    from isaacs_mom.contracts import SkillCall
-    from isaacs_mom.student import vlm
-    from isaacs_mom.student.prompt import UnparseableReply, build_messages, parse_reply
-
+def lora_train(examples: list[dict[str, str]], images: dict[str, bytes], device: str) -> dict[str, bytes]:
+    """Returns the adapter's files plus metrics.json, keyed by file name."""
     started = time.monotonic()
+    if device == "cuda":
+        torch.cuda.reset_peak_memory_stats()
     random.seed(SEED)
     torch.manual_seed(SEED)
     processor = vlm.load_processor()
     lora = LoraConfig(r=LORA_RANK, lora_alpha=LORA_ALPHA, lora_dropout=LORA_DROPOUT, target_modules=LORA_TARGETS)
-    model = get_peft_model(vlm.load_model(None, "cuda"), lora)
+    model = get_peft_model(vlm.load_model(None, device), lora)
     model.train()
     trainable = sum(p.numel() for p in model.parameters() if p.requires_grad)
 
@@ -69,7 +49,7 @@ def train(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str,
             raise ValueError("chat template does not extend the generation prompt")
         frame = [[vlm.image_from_jpeg(images[example["image"]])]]
         prompt_len = processor(text=[prompt], images=frame, return_tensors="pt")["input_ids"].shape[1]
-        inputs = processor(text=[full], images=frame, return_tensors="pt").to("cuda", dtype=torch.bfloat16)
+        inputs = processor(text=[full], images=frame, return_tensors="pt").to(device, dtype=model.dtype)
         labels = inputs["input_ids"].clone()
         labels[:, :prompt_len] = IGNORE_INDEX  # learn only the reply, not the prompt or the image tokens
         inputs["labels"] = labels
@@ -96,7 +76,7 @@ def train(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str,
     correct = 0
     for example in sample:
         text = vlm.reply(
-            model, processor, "cuda", images[example["image"]], example["instruction"], example["feedback"]
+            model, processor, device, images[example["image"]], example["instruction"], example["feedback"]
         )
         with contextlib.suppress(UnparseableReply):
             correct += parse_reply(text).skill == SkillCall.model_validate_json(example["target"]).skill
@@ -105,7 +85,8 @@ def train(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str,
         model.save_pretrained(out)
         files = {path.name: path.read_bytes() for path in Path(out).iterdir() if path.is_file()}
     metrics = {
-        "gpu": GPU,
+        "gpu": torch.cuda.get_device_name(device) if device == "cuda" else device,
+        "dtype": str(model.dtype).removeprefix("torch."),
         "epochs": EPOCHS,
         "learning_rate": LEARNING_RATE,
         "lora_rank": LORA_RANK,
@@ -114,6 +95,7 @@ def train(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str,
         "epoch_losses": epoch_losses,
         "train_skill_accuracy": {"correct": correct, "n": len(sample)},
         "seconds": round(time.monotonic() - started, 1),
+        "peak_gpu_memory_gb": round(torch.cuda.max_memory_allocated() / 2**30, 2) if device == "cuda" else None,
     }
     files["metrics.json"] = json.dumps(metrics, indent=2).encode()
     return files

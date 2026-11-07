@@ -1,4 +1,4 @@
-"""SmolVLM2 loading and greedy replies, shared by the local student and Modal training (SPEC §3.2)."""
+"""SmolVLM2 loading and greedy replies, shared by the student and training (SPEC §3.2)."""
 
 import io
 import logging

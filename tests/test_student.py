@@ -1,14 +1,16 @@
 import json
 import logging
-import tomllib
+import sys
 from collections.abc import Callable
 from pathlib import Path
 
 import pytest
+import torch
 
 from isaacs_mom.contracts import SKILLS, Observation, SkillCall, SkillTarget, TrainingExample
+from isaacs_mom.orchestrator import cli
 from isaacs_mom.orchestrator.loop import INSTRUCTION
-from isaacs_mom.student import finetune_modal
+from isaacs_mom.student import stub_finetune, tuning
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, adapter_dir, resolve_adapter, valid_run_id
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
@@ -341,14 +343,39 @@ def test_nested_trainer_file_name_is_rejected_before_anything_is_written(tmp_pat
     assert not (tmp_path / "run-a" / "checkpoints").exists()
 
 
-def test_the_modal_image_pins_the_torch_that_uv_lock_resolves_for_linux() -> None:
-    lock = tomllib.loads((Path(__file__).parent.parent / "uv.lock").read_text(encoding="utf-8"))
-    linux = {
-        p["name"]: p["version"].split("+")[0]
-        for p in lock["package"]
-        if p["name"] in ("torch", "torchvision") and p["source"].get("registry", "").endswith("/whl/cpu")
-    }
-    assert linux == {
-        "torch": finetune_modal.TORCH.removeprefix("torch=="),
-        "torchvision": finetune_modal.TORCHVISION.removeprefix("torchvision=="),
-    }
+def mom_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *flags: str, cuda: bool) -> dict:
+    """Runs `mom run --sim fake` up to the loop, recording what the loop was given instead of running it."""
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(torch.cuda, "is_available", lambda: cuda)
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--run-id", "t", *flags])
+    given: dict = {}
+
+    def run_loop(*args: object, **kwargs: object) -> list:
+        given.update(kwargs)
+        return []
+
+    monkeypatch.setattr(cli, "run_loop", run_loop)
+    cli.main()
+    return given
+
+
+def test_without_cuda_the_smolvlm_student_stops_the_run_before_any_episode(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    with pytest.raises(SystemExit) as exit_:
+        mom_run(monkeypatch, tmp_path, cuda=False)
+    assert exit_.value.code == 2
+    assert tuning.NO_CUDA in capsys.readouterr().err
+    assert not (tmp_path / "runs").exists()
+
+
+def test_with_cuda_the_smolvlm_student_fine_tunes_locally(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert mom_run(monkeypatch, tmp_path, cuda=True)["train_student"] is finetune
+
+
+def test_evaluating_without_training_needs_no_cuda(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert mom_run(monkeypatch, tmp_path, "--rounds", "0", cuda=False)["train_student"] is finetune
+
+
+def test_the_stub_student_needs_no_cuda(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    assert mom_run(monkeypatch, tmp_path, "--student", "stub", cuda=False)["train_student"] is stub_finetune

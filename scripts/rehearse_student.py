@@ -1,4 +1,4 @@
-"""WS4 rehearsal on FakeSim: oracle demonstrations -> training set -> Modal LoRA -> base vs fine-tuned, held out.
+"""WS4 rehearsal on FakeSim: oracle demonstrations -> training set -> LoRA -> base vs fine-tuned, held out.
 
 The oracle reads FakeSim ground truth, so this tests the fine-tuning pipeline only. Its numbers never go on the
 dashboard or in the pitch (SPEC §2 rules 1 and 6).
@@ -16,7 +16,7 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import INSTRUCTION
 from isaacs_mom.seeds import heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
-from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune
+from isaacs_mom.student import BASE_CHECKPOINT, NO_CUDA, StudentPolicy, finetune, has_cuda
 from isaacs_mom.validator.training import build_training_set
 
 DEMO_SEED_START = 5000
@@ -59,6 +59,8 @@ def main() -> None:
     parser.add_argument("--demos", type=int, default=20)
     parser.add_argument("--eval-seeds", type=int, default=20)
     args = parser.parse_args()
+    if not has_cuda():
+        parser.error(NO_CUDA)
     logging.basicConfig(level=logging.WARNING, format="%(message)s")
 
     run_id = time.strftime("rehearsal-%Y%m%d-%H%M%S")

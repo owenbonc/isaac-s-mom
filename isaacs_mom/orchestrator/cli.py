@@ -5,12 +5,20 @@ from pathlib import Path
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
-from isaacs_mom.student import StubStudent, StudentPolicy, finetune, stub_finetune, valid_run_id
+from isaacs_mom.student import (
+    NO_CUDA,
+    StubStudent,
+    StudentPolicy,
+    finetune,
+    has_cuda,
+    stub_finetune,
+    valid_run_id,
+)
 from isaacs_mom.teacher.argon import Argon, stub_generate
 
 
 def run_id(text: str) -> str:
-    """Checked up front, because a bad id would only fail after a paid fine-tune."""
+    """Checked up front, because a bad id would only fail after a round's fine-tune."""
     if not valid_run_id(text):
         raise argparse.ArgumentTypeError(
             f"{text!r}: use ASCII letters, digits, '.', '_' or '-', not starting or ending with '.'"
@@ -43,6 +51,8 @@ def main() -> None:
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     args = parser.parse_args()
 
+    if args.student == "smolvlm" and args.rounds > 0 and not has_cuda():
+        run.error(NO_CUDA)
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
     run_dir = Path("runs") / args.run_id

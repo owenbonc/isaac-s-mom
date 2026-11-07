@@ -1,4 +1,4 @@
-"""Fine-tuning, local side (SPEC §3.2): package a training set, train on Modal, store the run's ckpt-r<round>."""
+"""Fine-tuning (SPEC §3.2): package a training set, train on the local CUDA GPU, store the run's ckpt-r<round>."""
 
 import json
 import logging
@@ -13,19 +13,24 @@ from isaacs_mom.student.prompt import format_target
 
 Trainer = Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]
 log = logging.getLogger(__name__)
+NO_CUDA = "fine-tuning needs a CUDA GPU (the Windows RTX 5070 or 5060); --student stub or --rounds 0 runs without one"
 
 
-def modal_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
-    import modal
+def has_cuda() -> bool:
+    """Checked at startup, so a run without a GPU stops before any episode instead of at its first fine-tune."""
+    import torch
 
-    from isaacs_mom.student.finetune_modal import app, train
+    return torch.cuda.is_available()
 
-    with modal.enable_output(), app.run():
-        return train.remote(examples, images)
+
+def local_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    from isaacs_mom.student.lora import lora_train
+
+    return lora_train(examples, images, "cuda")
 
 
 def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]:
-    """Frames ship as bytes under short keys, because the training container cannot read local paths."""
+    """Each frame is read once, under a short key, however many examples share it."""
     keys: dict[str, str] = {}
     images: dict[str, bytes] = {}
     examples: list[dict[str, str]] = []
@@ -45,7 +50,7 @@ def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]
     return examples, images
 
 
-def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, trainer: Trainer = modal_trainer) -> str:
+def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, trainer: Trainer = local_trainer) -> str:
     """Retrains from the base model on the cumulative set, so a checkpoint depends only on its training set."""
     run_dir = training_set.parent
     if not valid_run_id(run_dir.name):

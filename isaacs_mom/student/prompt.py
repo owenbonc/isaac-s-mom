@@ -1,4 +1,4 @@
-"""The student's prompt and reply format, shared by local inference and Modal training (SPEC §3.2)."""
+"""The student's prompt and reply format, shared by inference and training (SPEC §3.2)."""
 
 import json
 
