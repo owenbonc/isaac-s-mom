@@ -20,7 +20,7 @@ def make_sim(name: str) -> TruthSim:
 def main() -> None:
     parser = argparse.ArgumentParser(prog="mom")
     commands = parser.add_subparsers(dest="command", required=True)
-    run = commands.add_parser("run", help="the teach -> fine-tune loop (SPEC Â§3.6)")
+    run = commands.add_parser("run", help="the teach -> fine-tune loop (SPEC §3.6)")
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--student", choices=["smolvlm", "stub"], default="smolvlm", help="stub: no model, no training")
     run.add_argument("--rounds", type=int, default=3)
