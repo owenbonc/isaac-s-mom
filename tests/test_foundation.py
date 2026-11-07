@@ -1,4 +1,5 @@
 import json
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -176,3 +177,24 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
     )
     assert built[0] == "ckpt-r0"
     assert "trained-1" in built
+
+
+@pytest.mark.parametrize(
+    ("train_student", "skipped"),
+    [(stub_finetune, True), (lambda training_set, previous, round_: f"t/ckpt-r{round_}", False)],
+)
+def test_finetune_completed_says_whether_training_was_skipped(
+    tmp_path: Path, train_student: Callable[[Path, str, int], str], skipped: bool
+) -> None:
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=1,
+        dev_trials=1,
+        make_student=StubStudent,
+        train_student=train_student,
+    )
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert [e["data"]["skipped"] for e in events if e["type"] == "finetune_completed"] == [skipped]

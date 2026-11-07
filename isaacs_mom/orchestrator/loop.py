@@ -106,6 +106,6 @@ def run_loop(
             )
         training_set = build_training_set(run_dir, round_ + 1)
         events.emit("finetune_started", round=round_ + 1, training_set=str(training_set))
-        checkpoint = train_student(training_set, checkpoint, round_ + 1)
-        events.emit("finetune_completed", round=round_ + 1, checkpoint=checkpoint)
+        previous, checkpoint = checkpoint, train_student(training_set, checkpoint, round_ + 1)
+        events.emit("finetune_completed", round=round_ + 1, checkpoint=checkpoint, skipped=checkpoint == previous)
     return results
