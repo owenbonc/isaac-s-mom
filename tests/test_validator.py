@@ -26,8 +26,6 @@ def _truth(
         robot_fallen=robot_fallen,
         joint_limit_violation=joint_limit_violation,
         penetration=penetration,
-        robot_xy=(-0.45, 0.0),  # where it would stand to place, facing the bin
-        robot_yaw=0.0,
     )
 
 

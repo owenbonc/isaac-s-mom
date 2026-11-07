@@ -518,13 +518,3 @@ def test_moving_the_bin_is_refused_while_the_box_is_in_it(sim: MujocoSim) -> Non
     assert before.box_on_bin_floor
     assert not sim.perturb(Perturbation(kind="move_bin", seed=99))
     assert sim.ground_truth() == before
-
-
-def test_ground_truth_follows_the_robots_floor_pose_and_heading(blind_sim: MujocoSim) -> None:
-    start = blind_sim.ground_truth()
-    assert start.robot_xy == pytest.approx((0.0, 0.0), abs=0.03) and start.robot_yaw == pytest.approx(0.0, abs=0.05)
-    assert blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30})).ok
-    assert blind_sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 90})).ok
-    moved = blind_sim.ground_truth()
-    assert moved.robot_xy == pytest.approx((-0.30, 0.0), abs=0.05)
-    assert math.degrees(moved.robot_yaw) == pytest.approx(90, abs=5)

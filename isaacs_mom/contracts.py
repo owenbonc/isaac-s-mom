@@ -90,8 +90,7 @@ class Perturbation(BaseModel):
 class GroundTruth(BaseModel):
     """Simulator facts for the validator and orchestrator only (SPEC §2 rule 1). The bin is square, `bin_inner_half`
     wide either side of its centre and turned by `bin_yaw`; `box_on_bin_floor` means touching the floor inside its
-    walls. `robot_xy` is the pelvis's floor position and `robot_yaw` the torso's heading (the walking heading plus any
-    waist twist), which is the way the head camera faces, so a miss can be named as the camera sees it."""
+    walls."""
 
     box_xyz: tuple[float, float, float]
     bin_xy: tuple[float, float]
@@ -102,8 +101,6 @@ class GroundTruth(BaseModel):
     robot_fallen: bool
     joint_limit_violation: bool
     penetration: bool
-    robot_xy: tuple[float, float]
-    robot_yaw: float
 
 
 class Validation(BaseModel):
