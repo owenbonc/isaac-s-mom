@@ -15,7 +15,7 @@ from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import INSTRUCTION
 from isaacs_mom.seeds import heldout_seeds
-from isaacs_mom.sim.fake import FakeSim
+from isaacs_mom.sim.fake import PLACE_X, TABLE_CENTER, TABLE_HALF, FakeSim
 from isaacs_mom.student import BASE_CHECKPOINT, NO_CUDA, StudentPolicy, finetune, has_cuda
 from isaacs_mom.validator.training import build_training_set
 
@@ -32,21 +32,28 @@ class Oracle:
 
     def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
         truth = self.sim.ground_truth()
-        work_y, waist, closed, lifted = obs.joint_state
+        work_y, closed, lifted = obs.joint_state
+        x, y, heading = self.sim.pose()
         if truth.box_on_bin_floor:
             # Ends the way the teacher does (SPEC §3.3): one reobserve on the finished scene, then stop.
             return None if feedback.startswith("reobserve") else SkillCall(skill="reobserve")
         if not closed:
-            dy = truth.box_xyz[1] - work_y
+            dy = -math.sin(heading) * (truth.box_xyz[0] - x) + math.cos(heading) * (truth.box_xyz[1] - y) - work_y
             if abs(dy) > 0.01:
                 skill = "reach_left" if dy > 0 else "reach_right"
                 return SkillCall(skill=skill, params={"distance_cm": abs(dy) * 100})
             return SkillCall(skill="hug")
         if not lifted:
             return SkillCall(skill="lift")
-        turn = math.degrees(math.atan2(truth.bin_xy[1], truth.bin_xy[0]) - waist)
+        over_table = all(abs(truth.box_xyz[i] - TABLE_CENTER[i]) < TABLE_HALF[i] for i in (0, 1))
+        if over_table:
+            return SkillCall(skill="walk_back", params={"distance_cm": 30})
+        dist = math.hypot(truth.bin_xy[0] - x, truth.bin_xy[1] - y)
+        turn = math.degrees(math.remainder(math.atan2(truth.bin_xy[1] - y, truth.bin_xy[0] - x) - heading, math.tau))
         if abs(turn) > 2:
             return SkillCall(skill="turn_left" if turn > 0 else "turn_right", params={"angle_deg": abs(turn)})
+        if dist > PLACE_X + 0.05:
+            return SkillCall(skill="walk_forward", params={"distance_cm": (dist - PLACE_X - 0.02) * 100})
         return SkillCall(skill="place")
 
 
