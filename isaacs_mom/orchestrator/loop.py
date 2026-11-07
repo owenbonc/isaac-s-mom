@@ -16,8 +16,6 @@ from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator.training import build_training_set
 
-ArgonFactory = Callable[[EventLog], Argon]
-
 INSTRUCTION = "Hug the orange box, lift it, and put it in the green bin."
 TARGET_RATE = 0.8
 MAX_ROUNDS = 3
@@ -63,14 +61,13 @@ def run_loop(
     max_rounds: int = MAX_ROUNDS,
     demos: int = DEMOS_PER_ROUND,
     dev_trials: int = DEV_TRIALS,
+    argon: Argon,
     make_student: StudentFactory | None = None,
     train_student: StudentTrainer = finetune,
-    make_argon: ArgonFactory = Argon,
 ) -> list[EvaluationResult]:
     # finetune writes checkpoints beside the run dir, so the default student looks there too.
     make_student = make_student or partial(StudentPolicy, runs_dir=run_dir.parent)
     events = EventLog(run_dir, run_id)
-    argon = make_argon(events)  # one budget for the whole run (SPEC §2 rule 5)
     checkpoint = BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):

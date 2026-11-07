@@ -1,14 +1,26 @@
 from pathlib import Path
 
+import mujoco
 import numpy as np
 
 from isaacs_mom.contracts import EpisodeManifest, ReplayFailure, ReplayReport
 from isaacs_mom.sim.base import TruthSim
-from isaacs_mom.validator.recorder import write_manifest
+from isaacs_mom.validator.recorder import write_atomically, write_manifest
 from isaacs_mom.validator.rules import validate
 
 # The recorder saves actions as float32, so a faithful re-run matches only to float32 precision.
 TOLERANCE = 1e-5
+# MuJoCo's FatalError subclasses none of the built-in errors.
+REPLAY_ERRORS = (
+    OSError,
+    ValueError,
+    RuntimeError,
+    ArithmeticError,
+    LookupError,
+    TypeError,
+    AttributeError,
+    mujoco.FatalError,  # pyright: ignore[reportAttributeAccessIssue]  (mujoco ships no types)
+)
 
 
 def replay(sim: TruthSim, manifest_path: Path) -> bool:
@@ -28,8 +40,8 @@ def replay(sim: TruthSim, manifest_path: Path) -> bool:
 def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
     """Replay every accepted episode in a run (the ones that can become lessons); writes `replay_report.json`.
 
-    It runs at the end of every `mom run`, so one episode that can't be replayed is recorded as a failure with a
-    reason instead of raising and losing the finished run.
+    An episode that can't be read, re-run (any of `REPLAY_ERRORS`) or saved is recorded as a failed replay with a
+    reason instead of raising, so one bad episode can't lose the report for the whole run.
     """
     replayed = 0
     failures: list[ReplayFailure] = []
@@ -45,14 +57,18 @@ def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
         replayed += 1
         try:
             reason = _divergence(sim, manifest, manifest_path.parent)
-        except Exception as error:  # any simulator or file failure is that episode's result, not the run's
+        except REPLAY_ERRORS as error:
             reason = f"replay raised {type(error).__name__}: {error}"
+        manifest.replay_valid = reason is None
+        try:
+            write_manifest(manifest_path, manifest)
+        except OSError as error:
+            saving = f"could not save the replay result: {error}"
+            reason = f"{reason}; {saving}" if reason else saving
         if reason is not None:
             failures.append(ReplayFailure(episode_id=manifest.episode_id, reason=reason))
-        manifest.replay_valid = reason is None
-        write_manifest(manifest_path, manifest)
     report = ReplayReport(replayed=replayed, reproduced=replayed - len(failures), failures=failures)
-    (run_dir / "replay_report.json").write_text(report.model_dump_json(indent=2))
+    write_atomically(run_dir / "replay_report.json", report.model_dump_json(indent=2))
     return report
 
 

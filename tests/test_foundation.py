@@ -17,7 +17,7 @@ from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, FakeSim
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
-from isaacs_mom.teacher.argon import Argon, stub_generate
+from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 from isaacs_mom.validator import validate
 from isaacs_mom.validator.training import build_training_set, training_examples
 
@@ -248,9 +248,11 @@ def test_training_set_takes_only_accepted_teacher_steps_from_dev(tmp_path: Path)
 def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
     calls: list[object] = []
 
-    def fake_argon(events: EventLog) -> Argon:
-        return Argon(events, generate=lambda purpose, parts: calls.append(parts) or '{"done": true}')
+    def fake(purpose: Purpose, parts: list[Part]) -> str:
+        calls.append(parts)
+        return stub_generate(purpose, parts)
 
+    argon = Argon(EventLog(tmp_path, "t"), generate=fake, sleep=lambda s: pytest.fail(f"waited {s} s"))
     results = run_loop(
         FakeSim(),
         tmp_path,
@@ -258,9 +260,9 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
         max_rounds=1,
         demos=2,
         dev_trials=2,
+        argon=argon,
         make_student=StubStudent,
         train_student=stub_finetune,
-        make_argon=fake_argon,
     )
     assert calls  # the teacher ran, on the fake: no live Gemini call even with a key in .env
     assert [r.round for r in results] == [0, 1]
@@ -299,9 +301,19 @@ def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason
     assert lines and all("reason" not in json.loads(line)["target"] for line in lines)
 
 
-def silent_argon(events: EventLog) -> Argon:
+def test_fake_sim_reports_the_robot_turned_by_its_waist() -> None:
+    sim = FakeSim()
+    sim.reset(1700)
+    assert sim.ground_truth().robot_yaw == 0.0
+    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
+    gt = sim.ground_truth()
+    assert gt.robot_xy == (0.0, 0.0)
+    assert gt.robot_yaw == pytest.approx(math.radians(30))
+
+
+def silent_argon(run_dir: Path, run_id: str) -> Argon:
     """No live Gemini call: these tests are about the student seams."""
-    return Argon(events, generate=stub_generate)
+    return Argon(EventLog(run_dir, run_id), generate=stub_generate)
 
 
 def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
@@ -321,9 +333,9 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
         max_rounds=1,
         demos=1,
         dev_trials=1,
+        argon=silent_argon(tmp_path, "t"),
         make_student=make_student,
         train_student=train_student,
-        make_argon=silent_argon,
     )
     assert built[0] == "ckpt-r0"
     assert "trained-1" in built
@@ -350,9 +362,9 @@ def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int], st
         max_rounds=1,
         demos=1,
         dev_trials=1,
+        argon=silent_argon(run_dir, "some-run"),
         make_student=StubStudent,
         train_student=train_student,
-        make_argon=silent_argon,
     )
     events = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
     [started] = [e["data"] for e in events if e["type"] == "finetune_started"]

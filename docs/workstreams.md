@@ -6,9 +6,9 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 
 ## 1. Simulation and robot — `isaacs_mom/sim/mujoco/`
 - `MujocoSim` (`sim.py`) implements `TruthSim` (`isaacs_mom/sim/base.py`, SPEC §3.1, §4.1) over `scene.py`, with arm IK and motion in `control.py`.
-- Free-standing Unitree G1 from MuJoCo Menagerie (vendored in `assets/`); table, orange box, green bin beside the robot; head camera 320×240; a third-person camera for the video.
-- Skills: `reach_left`, `reach_right`, `turn_left`, `turn_right`, `hug`, `lift`, `place`, `reobserve` (`distance_cm` 0–20, `angle_deg` 0–45, clamped by `SkillCall`). Out-of-reach or past-the-limit skills are refused with a reason and nothing moves (rule 7).
-- Layout is a pure function of the seed; `perturb` moves the box or the bin from `Perturbation.seed` and returns whether it applied (SPEC §3.1).
+- Two tasks (SPEC §3.1), named presets in `task.py` chosen with `--task`: walking (`across_room`, the default, and its variants), where the G1's legs run Unitree's pretrained walking policy (`walk.py`, weights in `assets/unitree_g1_walk/`), and `fixed_feet`, where it twists at the waist. Unitree G1 from MuJoCo Menagerie (vendored in `assets/`); table, orange box, green bin; head camera 320×240; a third-person camera for the video.
+- Skills: `reach_left`, `reach_right`, `walk_forward`, `walk_back` (walking tasks), `turn_left`, `turn_right`, `hug`, `lift`, `place`, `reobserve` (`distance_cm` 0–150, `angle_deg` 0–180, clamped by `SkillCall`; each task refuses values past its own limits). Out-of-reach, past-the-limit or not-in-this-task skills are refused with a reason and nothing moves (rule 7).
+- Layout is a pure function of the seed and the task; `perturb` moves the box or the bin from `Perturbation.seed` and returns whether it applied (SPEC §3.1).
 - `ground_truth()` fills every `GroundTruth` field, including `box_at_rest` over the last 1 s of sim time.
 - See it: `uv run python -m isaacs_mom.sim.mujoco.preview --seed 3 --gif runs/seed3.gif` films a scripted episode; `--viewer` opens MuJoCo's viewer.
 - Done: SPEC §6 criterion 1 (Gate A), covered by `tests/test_mujoco_sim.py`. Tests run headless (`MUJOCO_GL=osmesa` in CI).
@@ -26,7 +26,7 @@ Start: `git switch -c <ws>/<topic> origin/phase-1`, `uv sync`, `uv run mom run -
 
 ## 4. Student VLM and fine-tuning — `isaacs_mom/student/`
 - Replace `StudentPolicy.act` with SmolVLM2-500M-Video-Instruct (local: MPS on Macs, CUDA on the Windows RTX 5070/5060 machines). Prompt for one JSON `SkillCall`; parse with the pydantic model; anything unparseable becomes `reobserve` and is logged. Two `reobserve`s in a row end the episode (SPEC §3.2).
-- Replace `finetune` with LoRA on a Modal A10G over the `training_r<round>.jsonl` file (SPEC §4.3); return `ckpt-r<round>` and make `StudentPolicy(checkpoint)` load it. Weights stay out of git.
+- Replace `finetune` with LoRA on the Windows RTX 5070 over the `training_r<round>.jsonl` file (SPEC §4.3); return `<run_id>/ckpt-r<round>` and make `StudentPolicy(checkpoint)` load it. Checkpoints stay out of git.
 - Done: SPEC §6 criterion 2 (Gate B), then the fine-tune half of criterion 5.
 
 ## 5. Orchestrator, dashboard and demo — `isaacs_mom/orchestrator/`, `docs/`

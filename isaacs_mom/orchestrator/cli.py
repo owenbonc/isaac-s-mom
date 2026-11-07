@@ -45,23 +45,21 @@ def main() -> None:
 
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
-    argons: list[Argon] = []
-
-    def make_argon(events: EventLog) -> Argon:
-        argons.append(Argon(events, generate=stub_generate if teacher == "stub" else None))
-        return argons[-1]
-
     run_dir = Path("runs") / args.run_id
+    # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
+    argon = Argon(EventLog(run_dir, args.run_id), generate=stub_generate if teacher == "stub" else None)
+    if teacher == "argon":
+        argon.check()  # the stub has no key or model to check, so it spends nothing
     results = run_loop(
         make_sim(args.sim),
         run_dir,
         args.run_id,
         max_rounds=args.rounds,
+        argon=argon,
         make_student=make_student,
         train_student=train_student,
-        make_argon=make_argon,
     )
     for r in results:
         print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")
-    print(argons[0].summary() + (" (stub teacher)" if teacher == "stub" else ""))
+    print(argon.summary() + (" (stub teacher)" if teacher == "stub" else ""))
     print(f"run saved to {run_dir}")
