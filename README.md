@@ -2,11 +2,11 @@
 
 # Scaffld
 
-### A robot teacher that finds the gaps in a robot's skills and builds its own lessons.
+### A robot teacher that disagnoses gaps in a robot's skills and builds its own lessons.
 
-## One typed sentence → a new, tested robot skill in 39.7 minutes.
+## One sentence description of a task → a new, tested robot skill in 39.7 minutes.
 
-**No human demonstrations. No labels. The trained student then runs alone on a laptop.**
+**No human demonstrations. No labels. The trained robot student runs alone on a laptop.**
 
 <sub>39.7 min is the wall-clock time of the measured stages (spec, demos, fine-tune, exam); it excludes a 70-minute wait for a busy GPU.</sub>
 
@@ -15,13 +15,13 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 <img src="docs/media/scaffld-video-excerpt.gif" width="100%" alt="The student alone: the simulator moves the bin after the lift, the student still puts the box in, and the validator accepts">
 
-<sub>From our simulation video (<a href="docs/media/scaffld-simulation-video.mp4">full take, 54 s</a>). The student works alone on a scene it has never seen. After the lift, the simulator moves the bin without warning; the student, which sees only its head camera (right), still puts the box in. Shown at 0.5× speed.</sub>
+<sub>From our simulation video (<a href="docs/media/scaffld-simulation-video.mp4">full take, 54 s</a>). The student works alone on a scene it has never seen. After lifting the box, the simulator moves the bin without warning; the student, which sees only from its RGB head camera (right), still puts the box in. Shown at 0.5× speed.</sub>
 
 <br>
 
 | **39.7 min** | **0/20 → 18/20** | **19/20 vs 0/20** | **0** |
 |:---:|:---:|:---:|:---:|
-| to teach the robot **one new skill** from one sentence | unseen scenes the student then solves **alone** (17/20 with the bin moved) | the same student **with its camera vs a grey image** (on a Mac) | **teleoperated steps** or **human labels** |
+| to teach the robot **one new skill** from a one sentence description | unseen scenes the student then solves **alone** (17/20 with the bin moved) | the same student **with its camera vs a grey image** (on a Mac) | **teleoperated steps** or **human labels** |
 
 [Technical summary (PDF)](docs/technical-summary.pdf) · [Pitch deck (PDF)](docs/deck/deck.pdf) · [How it works](#how-it-works) · [Results](#results) · [Impact](#impact) · [Videos](#videos) · [Live demo](#live-demo) · [Quickstart](#quickstart)
 
@@ -33,7 +33,7 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 Robots learn new skills from **human demonstrations**, and those are slow and costly: DROID needed 50 collectors for 12 months to record 76k trajectories, and RT-1 13 robots for 17 months for 130k episodes. Every new failure costs more operator hours.
 
-**Scaffld hands that job to an agent.** In teaching, scaffolding is support given exactly where a learner struggles, then taken away. Here a cloud teacher, **Argon**, turns one sentence into a checked task, demonstrates it by driving the robot itself, keeps only what an independent validator accepts, and trains a small student that then **runs on the robot alone**.
+**Scaffld hands that job to an agent.** During teaching, scaffolding is support given exactly where a learner struggles, then taken away. Here a cloud teacher, **Argon**, turns one sentence into a checked task, demonstrates it by driving the robot itself, keeps only what an independent validator accepts, and trains a small student that then **runs on the robot alone**.
 
 ## How it works
 
