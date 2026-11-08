@@ -84,6 +84,8 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 
 Demonstrations may also be collected in a parallel batch: several Argon teachers at once, each within its own `ARGON_CALL_BUDGET` (rule 5), on development seeds, then one fine-tune on everything the validator accepted (rules 2 and 3). A batch skips step 3's diagnosis and scene choice, so its results are reported as batch-taught, apart from the loop's rounds.
 
+A run may start from an earlier run on the same task (`mom run --from-run runs/<run>`; one on another task is refused): that run's accepted development episodes count as earlier demonstrations (rules 2 and 3 unchanged), its checkpoint is evaluated afresh as round 0 on the held-out seeds, and the run records which run and checkpoint round 0 came from. Each fine-tune still trains from the base model on every accepted demonstration so far (step 4).
+
 ### 3.7 Task generator (workstream 1, extension)
 The vision: a person types what the robot should learn, and an agent generates the success rule and the scene assets the student trains on, so the teacher can demonstrate it and the validator can judge it. For the hackathon the loop teaches one task; this is a prototype off the critical path.
 - `generate_task(instruction) -> TaskSpec | Refusal` in `isaacs_mom/tasks/`. `TaskSpec{name, instruction, scene, success, perturbations}` covers a narrow, physically checked set of objects and placements: boxes the hug can hold, and a bin, shelf or platform the existing `place` can reach. Each spec is checked against what the G1 can reach and lift with the existing skills, as `TaskConfig` does.
