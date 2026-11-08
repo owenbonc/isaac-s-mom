@@ -380,6 +380,8 @@ def test_each_frame_keeps_the_controller_that_saw_it_after_a_takeover() -> None:
 
 VIEW = """
 const v = S.view();
+// The presenter tests below drive Teaching unless they choose another tab.
+S.visit(v, { tab: "teaching" });
 let now = 0;
 // Each event arrives a second after it was written, as from a live run.
 const feed = (n) => { for (const e of events.splice(0, n)) { now = e.t + 1; S.receive(v, e, now); } };
@@ -529,7 +531,7 @@ def test_move_does_nothing_in_a_run_without_a_move() -> None:
         "feed(3); const target = S.target(v, now, 'm'); press('m'); return [target, look()];",
         stream(started("a"), decision(0), executed(0)),
     )
-    assert out == [-1, {"shown": 3, "held": 0, "episode": "a", "focus": None}]
+    assert out == [None, {"shown": 3, "held": 0, "episode": "a", "focus": None}]
 
 
 def test_no_shortcut_acts_while_the_focus_is_in_a_text_field() -> None:
@@ -764,27 +766,28 @@ def test_d_from_between_two_diagnoses_goes_forward_on_a_tie() -> None:
     assert out == ["t2", "t3"]
 
 
-def test_end_follows_a_live_run_and_lands_on_a_finished_runs_latest_episode() -> None:
+def test_end_opens_now_on_the_episode_in_progress_while_the_run_is_live_and_now_stays_there_once_it_stops() -> None:
     out = presenter(
         """
         const tail = events.splice(events.length - 3);
         feed(events.length);
         press("ArrowLeft"); press("End");
-        const live = look().episode;
+        const live = [v.tab, look().episode];
         events.push(...tail); feed(3);
         const followed = look().episode;
         now += 60;
+        const stopped = [look().episode, S.target(v, now, "End")];
+        S.visit(v, { tab: "teaching" });
         press("ArrowLeft");
-        const back = look().episode;
-        press("End");
-        return [live, followed, back, look().episode];
+        return [live, followed, stopped, look().episode, S.target(v, now, "End")];
         """,
         stream(*BEATS),
     )
-    assert out == ["t5", "t6", "t5", "t6"]
+    # Teaching kept the d4 that ← pinned before End, so ← from there reaches t3
+    assert out == [["now", "t5"], "t6", ["t6", None], "t3", None]
 
 
-def test_navigation_targets_say_where_each_key_leads_and_minus_one_for_nowhere_new() -> None:
+def test_navigation_targets_say_where_each_key_leads_and_null_for_nowhere_new() -> None:
     out = presenter(
         """
         feed(events.length);
@@ -796,8 +799,24 @@ def test_navigation_targets_say_where_each_key_leads_and_minus_one_for_nowhere_n
         """,
         stream(*BEATS),
     )
-    assert out[0] == {"ArrowLeft": 5, "ArrowRight": -1, "d": 3, "t": 4, "m": 5, "End": -1}
-    assert out[1] == {"ArrowLeft": 0, "ArrowRight": 2, "d": 3, "t": 4, "m": 5, "End": 6}
+    teaching = lambda id_: {"tab": "teaching", "selected": id_}  # noqa: E731
+    # following the latest: ← pins t5, nothing lies to the right, End opens Now; landing on t6 again would follow
+    assert out[0] == {
+        "ArrowLeft": teaching("t5"),
+        "ArrowRight": None,
+        "d": teaching("t3"),
+        "t": teaching("d4"),
+        "m": teaching("t5"),
+        "End": {"tab": "now"},
+    }
+    assert out[1] == {
+        "ArrowLeft": teaching("t0"),
+        "ArrowRight": teaching("t2"),
+        "d": teaching("t3"),
+        "t": teaching("d4"),
+        "m": teaching("t5"),
+        "End": {"tab": "now"},
+    }
 
 
 def test_move_from_an_episode_without_one_opens_the_nearest_moves_before_and_after_and_again_returns() -> None:
@@ -1267,6 +1286,99 @@ def test_hostile_seed_and_checkpoint_values_never_make_a_row_or_break_the_model(
     assert out["rows"] == [[1, "pending", ["failed"]]]
     assert out["checkpoints"] == [{"round": 0, "checkpoint": "", "name": "before fine-tuning", "done": True}]
     assert results()["rows"] == [] and results()["checkpoints"] == []
+
+
+TWO_EVALUATIONS = [
+    *evaluated(0, (1, "failed"), (2, "succeeded"), (3, "failed")),
+    *trial("t0", diagnosed=True),
+    *evaluated(1, (1, "succeeded"), (2, "failed"), (3, "failed")),
+]
+
+
+def test_a_run_opens_on_results_where_the_arrows_step_through_the_seeds_and_escape_returns_to_the_one_left() -> None:
+    out = presenter(
+        """
+        S.visit(v, { tab: "results" });
+        open();
+        const seen = [];
+        const at = () => [S.where(v), v.focus, v.seed, look().episode];
+        for (const key of ["ArrowDown", "ArrowDown", "ArrowRight", "ArrowDown", "ArrowUp"]) {
+          press(key);
+          seen.push(at());
+        }
+        S.visit(v, { seed: v.focus, focus: v.focus });  // Enter on the focused row
+        seen.push(at());
+        press("ArrowRight"); seen.push(at());
+        press("Escape"); seen.push(at());
+        const claims = [press("Escape"), S.target(v, now, "ArrowLeft")];
+        return { first: S.view().tab, seen, claims };
+        """,
+        stream(*TWO_EVALUATIONS),
+    )
+    assert out["first"] == "results"
+    # sorted ↓ 2, ↑ 1, ✗ 3; the list stops at its ends
+    assert out["seen"] == [
+        ["list", 2, None, None],
+        ["list", 1, None, None],
+        ["list", 3, None, None],
+        ["list", 3, None, None],
+        ["list", 1, None, None],
+        ["seed", 1, 1, None],
+        ["seed", 3, 3, None],
+        ["list", 3, None, None],
+    ]
+    # Escape in the list is not Results' to take; ← goes back up the list
+    assert out["claims"] == [False, {"focus": 1}]
+
+
+def test_a_filter_keeps_the_arrows_to_its_seeds_and_a_seeds_episodes_step_through_its_checkpoints() -> None:
+    out = presenter(
+        """
+        S.visit(v, { tab: "results" });
+        open();
+        S.visit(v, { only: "fail" });
+        press("ArrowDown");
+        const filtered = [v.focus, S.target(v, now, "ArrowDown")];
+        S.visit(v, { only: null, seed: 1, focus: 1, opened: "h0-1" });
+        const seen = [look().episode];
+        for (const key of ["ArrowRight", "ArrowRight", "ArrowLeft"]) { press(key); seen.push(look().episode); }
+        const up = press("ArrowUp");
+        press("Escape");
+        return { filtered, seen, up, back: [S.where(v), v.seed] };
+        """,
+        stream(*TWO_EVALUATIONS),
+    )
+    assert out["filtered"] == [3, None]
+    assert out["seen"] == ["h0-1", "h1-1", "h1-1", "h0-1"]
+    # ↑ scrolls an episode's view as usual; Escape returns to the seed
+    assert out["up"] is False
+    assert out["back"] == ["seed", 1]
+
+
+def test_teaching_holds_every_episode_but_the_held_out_tests_and_move_may_open_one_under_results() -> None:
+    moved = [*held_out(1, 1, "failed")]
+    moved.insert(2, ("perturbation", {"kind": "move_box", "step": 0}))
+    events = stream(*evaluated(0, (1, "failed")), *trial("t0", diagnosed=True), *trial("t1"), *moved)
+    out = presenter(
+        """
+        open();
+        const seen = [look().episode];
+        press("ArrowRight"); seen.push(look().episode);
+        press("ArrowLeft"); seen.push(look().episode);
+        press("d"); seen.push(look().episode);
+        press("m");
+        const moved = [S.where(v), v.seed, look().episode, S.stageStep(v)];
+        press("m");
+        const ups = [press("ArrowUp"), press("ArrowDown")];
+        return { seen, moved, back: [S.where(v), look().episode], ups };
+        """,
+        events,
+    )
+    # a finished run's Teaching lands on its latest teaching episode; → finds no other, the held-out test is not one
+    assert out["seen"] == ["t1", "t1", "t0", "t0"]
+    assert out["moved"] == ["episode", 1, "h1-1", 0]
+    assert out["back"] == ["teaching", "t0"]
+    assert out["ups"] == [False, False]
 
 
 def test_an_episode_is_finished_once_judged_moved_past_or_its_run_has_stopped() -> None:

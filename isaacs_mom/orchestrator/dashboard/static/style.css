@@ -5,6 +5,8 @@
 /* Measured: ink 10.3:1 on a panel, muted 5.9:1 (5.0:1 on a raised row), dim 5.1:1 on the surround, its only ground. */
 --ink:#d8d8da;--muted:#a3a3a8;--dim:#8e8e93;
 --student:#8eb2eb;--student-mark:#78a1e2;--teacher:#66ccbe;--ok:#84d98a;--bad:#df9099;
+/* Results marks: a change at full strength, the unchanged a step quieter (5.6:1 and 4.8:1 on a panel), errored yellow. */
+--ok-quiet:#71ad76;--bad-quiet:#bd848b;--warn:#e6c46e;
 --accent:#fff;--on-accent:#1e1e20;--focus:#fff;--selection:rgb(92 139 214 / .5);
 --shadow-pop:0 20px 48px -16px rgb(0 0 0 / .7);
 --ease-out:cubic-bezier(.23,1,.32,1);
@@ -88,6 +90,15 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .run-id{grid-area:id;font-size:var(--t-label);color:var(--muted);overflow-wrap:anywhere}
 .run-why{grid-area:why;font-size:var(--t-label);overflow-wrap:anywhere}
 
+/* The views: Results, Teaching and, while the run is live, Now. The one shown is marked as a held key is. */
+.tabs{display:flex;gap:.1rem;flex:none}
+.tabs button{position:relative;display:inline-flex;align-items:center;gap:.4rem;height:2.3rem;padding:0 .7rem;border:0;border-radius:7px;background:none;color:var(--muted);font:600 1rem/1 var(--sans);cursor:pointer;transition:background-color .15s,color .15s}
+.tabs button[hidden]{display:none}
+.tabs button[aria-current]{color:var(--ink)}
+.tabs button[aria-current]::before{content:"";position:absolute;left:.7rem;right:.7rem;bottom:0;height:2px;border-radius:1px;background:var(--accent)}
+@media (hover:hover){.tabs button:hover{background:var(--raised);color:var(--ink)}}
+.tabs button:focus-visible{background:var(--raised);color:var(--ink)}
+
 /* Presenter keys, grouped as the presenter tells the story: where in the run, the story's beats, the view. Each key is
    a bare icon at least 32 px square, filled only under the pointer or the focus; its name, what it does and its
    shortcut are in its tooltip and in Labels. */
@@ -106,11 +117,11 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 /* While paused, the events waiting: a plain number beside the play icon. */
 #b-pause.on{padding:0 .55rem 0 .45rem}
 /* A tooltip names the key, what it does and its shortcut: after a beat on hover, at once on keyboard focus. */
-:is(.presenter,.teach) button::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
+:is(.presenter,.teach,.filters) button::after,.tabs button[data-tip]::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
 /* Keys past the first group sit near the window's right edge, so their tooltips open leftwards and stay on screen. */
 :is(.presenter .group:not(:first-child),.teach) button::after{left:auto;right:0;--tx:0%}
-@media (hover:hover){:is(.presenter,.teach) button:hover::after{opacity:1;translate:var(--tx) 0;transition-delay:.3s}}
-:is(.presenter,.teach) button:focus-visible::after{opacity:1;translate:var(--tx) 0}
+@media (hover:hover){:is(.presenter,.teach,.filters,.tabs) button:hover::after{opacity:1;translate:var(--tx) 0;transition-delay:.3s}}
+:is(.presenter,.teach,.filters,.tabs) button:focus-visible::after{opacity:1;translate:var(--tx) 0}
 
 /* A label is a mark and a word, never a capsule: a filled dot while live, a ring once recorded, the word alone for a
    placeholder or a configured value. */
@@ -175,6 +186,41 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .answer ul{margin:0 0 .3rem;padding-left:1.1rem;overflow-wrap:anywhere}
 .taught{margin:0;color:var(--muted)}
 .taught q{color:var(--ink)}
+
+/* Results is the run's home (SPEC §3.5): in its list and a seed's checkpoints it is the page; an episode takes the stage. */
+main:is([data-view="list"],[data-view="seed"])>:not(#results),main:not([data-view="list"],[data-view="seed"])>#results{display:none}
+main:is([data-view="list"],[data-view="seed"]){display:flex;flex-direction:column}
+.results{flex:1;min-height:0;overflow-y:auto}
+.results .summary>header{display:flex;align-items:center;gap:.25rem .5rem;padding:.4rem .75rem .1rem}
+.results .summary>header>:last-child{margin-left:auto}
+.results .summary>.body{padding-bottom:.35rem}
+.results .empty{margin:0;padding:.6rem .75rem 1rem}
+.results .empty p{margin:0}
+.results .empty .what{font-weight:600}
+/* One count per mark, each a filter: its icon and its number, bare until pointed at; the one filtered by is marked. */
+.filters{display:flex;flex-wrap:wrap;gap:.15rem;padding:0 .45rem .4rem;border-bottom:1px solid var(--edge)}
+.filters button{position:relative;display:inline-flex;align-items:center;gap:.35rem;min-width:2.3rem;height:2.3rem;padding:0 .55rem;border:0;border-radius:7px;background:none;color:var(--ink);font:600 1rem/1 var(--sans);cursor:pointer;transition:background-color .15s}
+.filters button:first-child::after{left:0;--tx:0%}
+@media (hover:hover){.filters button:hover:not(:disabled){background:var(--raised)}}
+.filters button:focus-visible{background:var(--raised)}
+.filters button[aria-pressed="true"]::before{content:"";position:absolute;left:.45rem;right:.45rem;bottom:0;height:2px;border-radius:1px;background:var(--accent)}
+.filters button:disabled{color:var(--dim);cursor:default}
+.filters button:disabled .mark{opacity:.55}
+/* The seeds, sorted changes first, read down each column. */
+.seeds{list-style:none;margin:0;padding:.45rem .45rem .6rem;columns:4 16rem;column-gap:.5rem}
+.seeds li{break-inside:avoid}
+.seed{display:flex;align-items:center;gap:.6rem;width:100%;min-height:2.3rem;padding:.3rem .55rem;border:0;border-radius:7px;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:background-color .15s}
+@media (hover:hover){.seed:hover{background:var(--row)}}
+.seed:focus-visible{background:var(--raised);outline-offset:-2px}
+.seed .n{flex:none;font-weight:600;min-width:4.6em}
+.seed .was{min-width:0;color:var(--muted);overflow-wrap:anywhere}
+.mark{width:1.25rem;height:1.25rem}
+.mark.up{color:var(--ok);stroke-width:2.6}
+.mark.down{color:var(--bad);stroke-width:2.6}
+.mark.pass{color:var(--ok-quiet)}
+.mark.fail{color:var(--bad-quiet)}
+.mark.error{color:var(--warn)}
+.mark.pending{color:var(--muted)}
 
 main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.95fr);gap:.6rem;padding:.45rem .75rem .4rem}
 .col{display:flex;flex-direction:column;min-height:0;overflow:hidden}

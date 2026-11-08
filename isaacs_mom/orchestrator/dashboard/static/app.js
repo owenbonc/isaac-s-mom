@@ -136,6 +136,12 @@ function renderControl() {
       : `<span class="what">Fine-tuning the student</span><span class="note">No robot is moving. The held-out test of the new checkpoint starts when it is ready.</span>`;
     return view.lost ? "" : "Fine-tuning the student.";
   }
+  const place = MomState.where(view);
+  if (place === "list" || place === "seed") {
+    el.className = "control";
+    el.innerHTML = `<span class="what">Held-out seeds</span><span class="note">${place === "list" ? "Choose a seed to see its test at each checkpoint." : "Choose a checkpoint to see that episode in full."}</span>`;
+    return "";
+  }
   if (!ep) {
     const s = MomState.shown(view);
     el.className = "control";
@@ -310,7 +316,9 @@ function verdictRow(ep) {
   return `<li class="event ${good ? "good" : "bad"}"><span class="n">${good ? CHECK : X}</span><span>${esc(MomState.verdictWords(ep))}. <span class="d">${reason}Task ${v.task ? "succeeded" : "not met"}, physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
 }
 
-const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m", "b-end": "End" };
+const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m" };
+// What ← and → step through where the view is.
+const STEPS = { list: "seed", seed: "seed", episode: "checkpoint", teaching: "episode", now: "episode" };
 const PAUSE = $("b-pause");
 
 function renderEpisode() {
@@ -320,7 +328,10 @@ function renderEpisode() {
   // The connection note sits beside the rail, which gives way, so the keys above never wrap.
   const lost = view.lost ? ' <span class="lost">· connection lost, retrying</span>' : "";
   $("episode-line").innerHTML = (ep ? `Episode ${at + 1} of ${s.episodes.length}` : "") + lost;
-  for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) < 0;
+  for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) === null;
+  const steps = STEPS[MomState.where(view)];
+  $("b-prev").dataset.tip = `Previous ${steps} · ←`;
+  $("b-next").dataset.tip = `Next ${steps} · →`;
   $("b-m").setAttribute("aria-pressed", String(view.compare !== null));
   // The key's label is its name; while paused it shows its play icon and the count of events waiting beside it.
   PAUSE.classList.toggle("on", view.frozen !== null);
@@ -376,7 +387,8 @@ function renderLog() {
   renderedEpisode = ep.id;
 }
 
-function renderRounds() {
+// The held-out result (SPEC §3.5), in the episode view's panel and atop Results.
+function heldOut() {
   const s = MomState.shown(view);
   const c = MomState.claim(s);
   const test = MomState.testing(s);
@@ -394,7 +406,62 @@ function renderRounds() {
   // A run is taught and tested on its own instruction, so its rates carry it (SPEC §3.5).
   const said = s.instruction && s.instruction.text;
   const taught = said ? `<p class="taught clamped" title="${esc(said)}">${c ? "Tested on" : "Instruction"} <q dir="auto">${esc(said)}</q></p>` : "";
-  $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}${taught}</div>`;
+  return `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}${taught}</div>`;
+}
+
+function renderRounds() {
+  $("p-rounds").innerHTML = heldOut();
+}
+
+// Results marks (SPEC §3.5): each its own icon, coloured by how the seed ends.
+const MARK = { down: "Regressed", up: "Improved", fail: "Still fails", pass: "Always passed", error: "Errored", pending: "Pending" };
+const markIcon = (m) => `<svg class="i mark ${m}" aria-hidden="true"><use href="#m-${m}"/></svg>`;
+const OUTCOME = { succeeded: "Succeeded", failed: "Failed", errored: "Errored", pending: "not run yet" };
+// The first and the latest checkpoint's verdicts, as the mark compares them.
+const outcomes = (row) => {
+  const [first, latest] = [row.episodes[0], row.episodes[row.episodes.length - 1]];
+  return row.episodes.length < 2 ? OUTCOME[first.outcome] : `${OUTCOME[first.outcome]} → ${OUTCOME[latest.outcome]}`;
+};
+
+// Results' list (SPEC §3.5): the held-out figure, one count per mark, each a filter, and a row per seed; a run that
+// did not start says why, and one with no evaluation yet says so.
+function resultsList() {
+  const s = MomState.shown(view);
+  const r = MomState.results(s, view.only);
+  const head = `<div class="summary">${heldOut()}</div>`;
+  if (s.refused !== null) return `${head}<div class="empty"><p class="what">Not started</p><p class="note">${esc(s.refused)}</p></div>`;
+  if (!r.checkpoints.length) {
+    const why = !runId ? "No runs yet. Tell the robot what to learn in the Teach box to start one." : s.eventCount ? "Each held-out seed shows here once the student has been tested on it." : "Waiting for the run's events.";
+    return `${head}<div class="empty"><p class="note">${why}</p></div>`;
+  }
+  const filters = MomState.MARKS.map((m) => {
+    const n = r.counts[m];
+    const on = view.only === m;
+    const tip = on ? "Show every seed" : `Show only the seeds marked ${MARK[m].toLowerCase()}`;
+    return `<button type="button" class="count" data-only="${m}" data-f="only:${m}" aria-pressed="${on}" aria-label="${MARK[m]}: ${n}" data-tip="${tip}"${n || on ? "" : " disabled"}>${markIcon(m)}<span>${n}</span></button>`;
+  });
+  const focus = r.seeds.some((x) => x.seed === view.focus) ? view.focus : r.seeds.length ? r.seeds[0].seed : null;
+  const rows = r.seeds.map((x) => {
+    const seed = esc(x.seed);
+    return `<li><button type="button" class="seed ${x.mark}" data-seed="${seed}" data-f="seed:${seed}" tabindex="${x.seed === focus ? 0 : -1}">${markIcon(x.mark)}<span class="n">Seed ${seed}</span><span class="sr">, ${MARK[x.mark].toLowerCase()}:</span><span class="was">${outcomes(x)}</span></button></li>`;
+  });
+  const none = view.only === null ? "" : `<p class="empty note">No seed is marked ${MARK[view.only].toLowerCase()} now.</p>`;
+  return `${head}<div class="filters" role="group" aria-label="Show only the seeds marked">${filters.join("")}</div>${rows.length ? `<ol class="seeds" aria-label="Held-out seeds">${rows.join("")}</ol>` : none}`;
+}
+
+function renderResults() {
+  const place = MomState.where(view);
+  $("main").dataset.view = place;
+  if (place === "list") $("results").innerHTML = resultsList();
+}
+
+// The tabs: Results, Teaching, and Now while the run is live or Now is shown.
+function renderTabs() {
+  for (const b of $("tabs").querySelectorAll("button")) {
+    if (b.dataset.tab === view.tab) b.setAttribute("aria-current", "page");
+    else b.removeAttribute("aria-current");
+  }
+  $("tabs").querySelector('[data-tab="now"]').hidden = !(view.tab === "now" || (MomState.following(view, now()) && !view.lost));
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -499,6 +566,8 @@ function render() {
   renderQueued = false;
   const focused = document.activeElement;
   renderHeader();
+  renderTabs();
+  renderResults();
   const said = renderControl();
   renderEpisode();
   renderCamera();
@@ -515,12 +584,30 @@ function render() {
   renderedSide = ep && ep.id;
   fadeSide();
   keepFocus(focused);
+  placeFocus();
+}
+
+// A key that moved Results' focus, or a move to another place, takes the keyboard there: the focused seed in the list.
+let renderedPlace = null;
+let seedMoved = false;
+function placeFocus() {
+  const place = MomState.where(view);
+  const moved = seedMoved || (renderedPlace !== null && place !== renderedPlace);
+  renderedPlace = place;
+  seedMoved = false;
+  if (!moved || place !== "list") return;
+  const rows = $("results").querySelector(".seeds");
+  const row = rows && (rows.querySelector(`[data-seed="${CSS.escape(String(view.focus))}"]`) || rows.querySelector(".seed"));
+  if (row) row.focus();
 }
 
 // A key that disabled itself, or Move hiding a focused panel, would drop focus to <body>: the nearest enabled
 // presenter key takes it instead, or Move's own key.
 function keepFocus(was) {
-  if (!was || was === document.body || (!was.disabled && was.checkVisibility())) return;
+  if (!was || was === document.body || (was.isConnected && !was.disabled && was.checkVisibility())) return;
+  // A control the render rewrote takes the focus back in its new copy.
+  const again = was.dataset.f && document.querySelector(`[data-f="${CSS.escape(was.dataset.f)}"]`);
+  if (again && !again.disabled) return again.focus();
   const keys = [...document.querySelectorAll(".presenter button")];
   const at = keys.indexOf(was);
   if (at < 0) return $("b-m").focus();
@@ -619,14 +706,14 @@ const dismissTeach = () => {
   teaching = { state: "idle" };
   renderTeach();
 };
-document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape") return;
-  dismissTeach();
+// Escape closes an open popover before it goes back a step (MomState.keydown).
+const closePopover = () => {
   const open = POPOVERS.find((d) => d.open);
-  if (!open) return;
+  if (!open) return false;
   open.open = false;
   open.querySelector("summary").focus();
-});
+  return true;
+};
 document.addEventListener("click", (e) => {
   for (const d of POPOVERS) if (d.open && !d.contains(e.target)) d.open = false;
   if (!TEACH.contains(e.target)) dismissTeach();
@@ -649,12 +736,32 @@ document.addEventListener(
 
 // Presenter controls (SPEC §3.5): the same actions from the keyboard, whatever has focus, and from the buttons that label them.
 document.addEventListener("keydown", (e) => {
+  if (e.key === "Escape") {
+    dismissTeach();
+    if (closePopover()) return;
+  }
+  const place = MomState.where(view);
   if (!MomState.keydown(view, e, now())) return;
   e.preventDefault(); // also keeps a focused button from taking Space as a click
+  seedMoved = place === "list" && e.key.startsWith("Arrow");
   schedule();
 });
 // Some browsers click a focused button on Space's keyup; the keydown above already acted.
 document.addEventListener("keyup", (e) => e.key === " " && e.preventDefault());
+$("tabs").addEventListener("click", (e) => {
+  const tab = e.target.closest("button[data-tab]");
+  if (!tab) return;
+  MomState.visit(view, { tab: tab.dataset.tab });
+  schedule();
+});
+$("results").addEventListener("click", (e) => {
+  const only = e.target.closest("button[data-only]");
+  const seed = e.target.closest("button[data-seed]");
+  if (only) MomState.visit(view, { only: view.only === only.dataset.only ? null : only.dataset.only });
+  else if (seed) MomState.visit(view, { seed: Number(seed.dataset.seed), focus: Number(seed.dataset.seed) });
+  else return;
+  schedule();
+});
 document.querySelector(".presenter").addEventListener("click", (e) => {
   const button = e.target.closest("button[data-key]");
   if (!button) return;

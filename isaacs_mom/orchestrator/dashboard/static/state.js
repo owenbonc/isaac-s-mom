@@ -27,11 +27,13 @@
   }
 
   // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing and when
-  // it was paused; `selected` pins an episode (null follows the run: its latest episode while live, its story once
-  // finished); `compare` is the box or bin move that Move shows, with the selection to return to when it is pressed again;
+  // it was paused; `selected` pins Teaching's episode (null follows the run: its latest teaching episode while live, its
+  // story once finished); `compare` is the box or bin move that Move shows, with the view to return to when pressed again;
   // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down; `settling`
   // while a connection's replay of the events already written streams in, which the page neither shows nor announces.
-  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true });
+  // `tab` is Results, where a run opens, Teaching or Now; in Results, `seed` is the seed open, `opened` its episode
+  // open, `focus` the seed focused in the list and `only` the mark it is filtered to.
+  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true, tab: "results", seed: null, opened: null, focus: null, only: null });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
@@ -448,66 +450,112 @@
     };
   }
 
+  // Teaching holds every episode but the held-out tests (SPEC §3.5).
+  const teaches = (e) => e.split !== "heldout";
   // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
-  const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || current(s);
+  const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || s.episodes.findLast(teaches) || null;
 
-  // A view that followed the run live stays on its last episode once it stops; a page opened on a finished run
-  // lands on the story.
+  // Where the view is (SPEC §3.5): in Results, the seed list, a seed's checkpoints or one of its episodes; Teaching;
+  // or Now, the episode in progress.
+  const where = (v) => (v.tab !== "results" ? v.tab : v.opened !== null ? "episode" : v.seed !== null ? "seed" : "list");
+
+  // The episode the view shows, or null. Teaching follows its latest episode while the view follows the run, and stays
+  // there once the run stops; a page opened on a finished run lands on the story.
   function episode(v, now) {
     const s = shown(v);
-    const pinned = v.selected !== null && s.episodes.find((e) => e.id === v.selected);
-    return pinned || (following(v, now) || v.followed ? current(s) : story(s));
+    if (v.tab === "now") return current(s);
+    const find = (id) => (id !== null && s.episodes.find((e) => e.id === id)) || null;
+    if (v.tab === "results") return find(v.opened);
+    return find(v.selected) || (following(v, now) || v.followed ? s.episodes.findLast(teaches) || null : story(s));
   }
 
-  // The fine-tune a following view shows on the stage (SPEC §3.5): the seconds since it started, or null.
+  // The fine-tune a view following the run shows on the stage (SPEC §3.5): the seconds since it started, or null.
   function finetuning(v, now) {
     const pending = shown(v).finetune.pending;
-    if (!pending || v.selected !== null || !following(v, now)) return null;
+    const follows = v.tab === "now" || (v.tab === "teaching" && v.selected === null);
+    if (!pending || !follows || !following(v, now)) return null;
     return (v.frozen ? v.frozen.at : now) - pending.t;
   }
 
   const teacherDrove = (ep) => ep.rows.some((r) => r.kind === "takeover" || r.controller === "teacher");
-  // The story beats D, T and Move jump to (SPEC §3.5).
-  const BEATS = { d: (e) => e.diagnosis !== null, t: teacherDrove, m: (e) => e.perturbedStep !== null };
+  // The story beats D, T and Move jump to (SPEC §3.5): D and T within Teaching, Move to any episode.
+  const BEATS = { d: (e) => e.diagnosis !== null && teaches(e), t: (e) => teacherDrove(e) && teaches(e), m: (e) => e.perturbedStep !== null };
 
-  // Where a navigation key leads from the shown episode: an index into the shown episodes, or -1 for nowhere new.
-  // A story beat goes to the nearest other episode that has it, forward on a tie; Move stays on a shown episode
-  // that has a move.
-  function target(v, now, key) {
-    const episodes = shown(v).episodes;
-    const at = episodes.indexOf(episode(v, now));
-    const last = episodes.length - 1;
-    if (at < 0) return -1;
-    if (key === "ArrowLeft") return at > 0 ? at - 1 : -1;
-    if (key === "ArrowRight") return at < last ? at + 1 : -1;
-    if (key === "End") return at < last || v.compare ? last : -1;
-    if (key === "m" && BEATS.m(episodes[at])) return at;
-    for (let d = 1; d <= last; d++) for (const i of [at + d, at - d]) if (episodes[i] && BEATS[key](episodes[i])) return i;
-    return -1;
+  // Where an episode lives: a held-out test in its seed under Results, any other in Teaching.
+  const home = (ep) => (ep.split === "heldout" ? { tab: "results", seed: ep.seed, focus: ep.seed, opened: ep.id } : { tab: "teaching", selected: ep.id });
+  // Landing on a live run's latest teaching episode follows the run again.
+  function land(v, now, ep) {
+    const to = home(ep);
+    if (to.tab === "teaching" && ep === shown(v).episodes.findLast(teaches) && following(v, now)) to.selected = null;
+    return to;
+  }
+  // The seed `step` places along Results' list under its filter from the open or focused seed (the first from
+  // none), or null past either end.
+  function seedFrom(v, step) {
+    const seeds = results(shown(v), v.only).seeds.map((r) => r.seed);
+    const at = seeds.indexOf(v.seed ?? v.focus);
+    const to = at < 0 ? 0 : at + step;
+    return to >= 0 && to < seeds.length ? seeds[to] : null;
   }
 
-  // Landing on a live run's last episode follows the run again.
-  function go(v, now, key) {
-    const i = target(v, now, key);
-    if (i < 0) return;
-    const episodes = shown(v).episodes;
-    v.selected = i === episodes.length - 1 && following(v, now) ? null : episodes[i].id;
+  // Where a key leads from the view, as the view fields it sets, or null for nowhere new (SPEC §3.5): ← and → step
+  // through the seeds in Results (↑ and ↓ too in the list), through a seed's episodes, and through Teaching; Escape
+  // goes back up from a seed; End opens Now while the run is live; a story beat goes to the nearest other episode
+  // with it, forward on a tie, and Move stays on a shown episode that has one.
+  function target(v, now, key) {
+    const s = shown(v);
+    const place = where(v);
+    const shownEp = episode(v, now);
+    const step = key === "ArrowLeft" || key === "ArrowUp" ? -1 : 1;
+    if (key === "Escape") return place === "episode" ? { opened: null } : place === "seed" ? { seed: null, focus: v.seed } : null;
+    if (key === "End") return following(v, now) && place !== "now" ? { tab: "now" } : null;
+    if (key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight") {
+      const across = key === "ArrowLeft" || key === "ArrowRight";
+      if (place === "list" || (place === "seed" && across)) {
+        const seed = seedFrom(v, step);
+        return seed === null ? null : place === "list" ? { focus: seed } : { seed, focus: seed };
+      }
+      if (!across) return null;
+      if (place === "episode") {
+        const row = results(s).seeds.find((r) => r.seed === v.seed);
+        const ids = row ? row.episodes.map((e) => e.id) : [];
+        for (let i = ids.indexOf(v.opened) + step; i >= 0 && i < ids.length; i += step) if (ids[i] !== null) return { opened: ids[i] };
+        return null;
+      }
+      if (place !== "teaching" || !shownEp) return null;
+      for (let i = s.episodes.indexOf(shownEp) + step; i >= 0 && i < s.episodes.length; i += step) if (teaches(s.episodes[i])) return land(v, now, s.episodes[i]);
+      return null;
+    }
+    if (key === "m" && shownEp && BEATS.m(shownEp)) return home(shownEp);
+    // With no episode shown, the nearest is the latest.
+    const at = shownEp ? s.episodes.indexOf(shownEp) : s.episodes.length;
+    for (let d = 1; d <= s.episodes.length; d++)
+      for (const i of [at + d, at - d]) if (s.episodes[i] && BEATS[key](s.episodes[i])) return key === "m" ? home(s.episodes[i]) : land(v, now, s.episodes[i]);
+    return null;
+  }
+
+  // Sets the view's fields: a key's target, a tab, a seed or an episode chosen, a filter. A Move shown is let go.
+  function visit(v, fields) {
+    Object.assign(v, fields);
     v.compare = null;
   }
+  function go(v, now, key) {
+    const to = target(v, now, key);
+    if (to) visit(v, to);
+  }
 
-  // Move (SPEC §3.5): the before and after of the shown episode's move, or of the nearest episode with one; pressing
-  // it again returns to the selection from before.
+  // Move (SPEC §3.5): the before and after of the shown episode's move, or of the nearest episode with one, in that
+  // episode's tab; pressing it again returns to where the view was.
   function showMove(v, now) {
     if (v.compare) {
-      v.selected = v.compare.back;
-      v.compare = null;
+      visit(v, v.compare.back);
       return;
     }
-    const i = target(v, now, "m");
-    if (i < 0) return;
-    const ep = shown(v).episodes[i];
-    v.compare = { step: ep.perturbedStep, back: v.selected };
-    v.selected = ep.id;
+    const to = target(v, now, "m");
+    if (!to) return;
+    const back = { tab: v.tab, selected: v.selected, seed: v.seed, opened: v.opened, focus: v.focus };
+    visit(v, to);
+    v.compare = { step: episode(v, now).perturbedStep, back };
   }
 
   // The step the stage holds the shown episode at: its move while Move shows it, null for its latest frame.
@@ -526,14 +574,17 @@
   const finished = (v, now, ep) => ep.verdict !== null || ep !== current(shown(v)) || !following(v, now);
 
   const KEYS = { " ": togglePause, m: showMove };
-  for (const key of ["ArrowLeft", "ArrowRight", "End", "d", "t"]) KEYS[key] = (v, now) => go(v, now, key);
+  for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Escape", "End", "d", "t"]) KEYS[key] = (v, now) => go(v, now, key);
+  // ↑ and ↓ are Results' only in its list and Escape only inside a seed; elsewhere they keep their usual jobs.
+  const OWNED = { ArrowUp: (v) => where(v) === "list", ArrowDown: (v) => where(v) === "list", Escape: (v) => where(v) === "seed" || where(v) === "episode" };
   // Typing in a field is text, never a presenter key (SPEC §3.5).
   const typing = (t) => Boolean(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable));
   // Presenter keys (SPEC §3.5), whatever else has focus. True when the key is the dashboard's, so the page claims it
   // (a focused button must not also take Space as a click); a held key acts once.
   function keydown(v, e, now) {
-    const action = KEYS[e.key.length === 1 ? e.key.toLowerCase() : e.key];
-    if (!action || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return false;
+    const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+    const action = KEYS[key];
+    if (!action || e.metaKey || e.ctrlKey || e.altKey || typing(e.target) || (OWNED[key] && !OWNED[key](v))) return false;
     if (!e.repeat) action(v, now);
     return true;
   }
@@ -577,7 +628,7 @@
     return { state: "failed", message };
   }
 
-  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
