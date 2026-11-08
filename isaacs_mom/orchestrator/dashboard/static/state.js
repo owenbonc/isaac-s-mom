@@ -245,9 +245,8 @@
     return { student: stat(s.latency.student), teacher: stat(s.latency.teacher), finetune: stat(s.finetune.durations) };
   }
 
-  // The head-camera frames up to the stage frame (`now`), the latest or the first at or after `focus`: it comes last,
-  // so a strip too narrow for all six drops the earliest and keeps it. The first frame after the box or bin moved is
-  // flagged `moved`, it and every later one `after`.
+  // Up to six head-camera frames ending on the stage's (`now`: the latest, or the first at or after `focus`), so a narrow
+  // strip drops the earliest first. The first frame after the box or bin moved is `moved`, it and every later one `after`.
   function filmstrip(ep, focus = null) {
     if (!ep || !ep.frames.length) return [];
     const frames = ep.frames;

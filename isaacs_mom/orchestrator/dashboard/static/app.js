@@ -42,8 +42,7 @@ const BANG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v5M6 9.6v
 const CHECK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l2.6 2.6L10 3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const MOVE = '<svg class="i" aria-hidden="true"><use href="#i-move"/></svg>';
 
-// Events carry the serving machine's time, so the page reads the clock as the server's: its own plus the skew the
-// /runs answer's Date header shows (1 s resolution against a 20 s window).
+// Events carry the server's time, so the page's clock is its own plus the skew the /runs answer's Date header shows.
 let skew = 0;
 const now = () => Date.now() / 1000 + skew;
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
