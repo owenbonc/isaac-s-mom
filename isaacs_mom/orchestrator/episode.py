@@ -85,6 +85,7 @@ def run_episode(
         robot_config=sim.robot_config,
         acting_on=acting_on,
         demo=demo,
+        move_bin_after_lift=move_bin_after_lift,
     )
     feedback = "start"
     total_steps = 0

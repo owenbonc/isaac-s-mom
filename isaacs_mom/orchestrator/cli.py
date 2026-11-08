@@ -4,7 +4,7 @@ from pathlib import Path
 
 from isaacs_mom.orchestrator import evaluation
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, MOVE_BIN_SHARE, run_loop
+from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, MOVE_BIN_SHARE, bin_moves, run_loop
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -149,7 +149,7 @@ def main() -> None:
         train_student=train_student,
         move_bin_share=args.move_bin_share,
     )
-    print(f"the bin moved right after the lift in {args.move_bin_share:.0%} of teacher demonstrations, where lifted")
+    print(bin_moves(run_dir / "events.jsonl"))
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"
         print(f"round {r.round} {r.checkpoint}: {scored}")

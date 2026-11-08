@@ -546,7 +546,10 @@ def test_the_cli_sizes_a_round_with_demos_and_dev_trials(tmp_path: Path, monkeyp
     assert sizes == {"demos": loop.DEMOS_PER_ROUND, "dev_trials": loop.DEV_TRIALS, "share": loop.MOVE_BIN_SHARE}
 
 
-@pytest.mark.parametrize(("flag", "value"), [("--demos", "0"), ("--dev-trials", "0"), ("--move-bin-share", "1.5")])
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [("--demos", "0"), ("--dev-trials", "0"), ("--move-bin-share", "1.5"), ("--move-bin-share", "-0.1")],
+)
 def test_the_cli_refuses_a_round_size_below_one_or_a_share_above_all(
     flag: str, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
@@ -615,6 +618,9 @@ def test_a_stated_share_of_teacher_demonstrations_gets_the_bin_move(
     )
     assert [moved for controller, moved in asked if controller == "teacher"] == [False, False, False, True] * 2
     assert not any(moved for controller, moved in asked if controller == "student")  # trials and held-out: unmoved
+    logged = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    scheduled = [e["data"]["move_bin_after_lift"] for e in logged if e["type"] == "episode_started"]
+    assert sum(scheduled) == 2 and len(scheduled) == len(asked)  # every episode states whether its move was due
 
 
 @pytest.mark.parametrize(
@@ -624,6 +630,29 @@ def test_the_share_is_spread_evenly(demos: int, share: float, moved: set[int]) -
     assert loop.moves_bin(demos, share) == moved
 
 
-def test_a_share_outside_zero_to_one_is_refused(tmp_path: Path) -> None:
+@pytest.mark.parametrize("share", [1.5, -0.1])
+def test_a_share_outside_zero_to_one_is_refused(share: float, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="share of the demonstrations"):
-        run_loop(FakeSim(), tmp_path, "t", argon=silent_argon(tmp_path, "t"), move_bin_share=1.5)
+        run_loop(
+            FakeSim(),
+            tmp_path,
+            "t",
+            argon=silent_argon(tmp_path, "t"),
+            make_student=StubStudent,
+            train_student=stub_finetune,
+            max_rounds=0,
+            move_bin_share=share,
+        )
+
+
+def test_the_run_reports_the_bin_moves_that_happened_not_the_share_asked_for(tmp_path: Path) -> None:
+    events = EventLog(tmp_path, "t")
+    for episode, scheduled in [("a", True), ("b", True), ("c", False)]:
+        events.emit("episode_started", episode_id=episode, move_bin_after_lift=scheduled)
+        events.emit("decision", episode_id=episode, controller="teacher")
+    events.emit("perturbation", episode_id="a", kind="move_bin")  # b was scheduled but never lifted
+    events.emit("episode_started", episode_id="s", move_bin_after_lift=False)
+    events.emit("decision", episode_id="s", controller="student")
+    expected = "the bin moved right after the lift in 1 of 3 teacher demonstrations (2 scheduled)"
+    assert loop.bin_moves(tmp_path / "events.jsonl") == expected
+    assert loop.bin_moves(tmp_path / "missing.jsonl").startswith("the bin moved right after the lift in 0 of 0")

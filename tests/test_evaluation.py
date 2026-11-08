@@ -130,6 +130,10 @@ def test_every_checkpoint_runs_the_same_tasks_and_seeds(tmp_path: Path) -> None:
     assert {r["sim_version"] for r in records} == {f"fake-rigged task={t}" for t in asked}
 
 
+def saved_conditions(run_dir: Path) -> list[dict[str, Any]]:
+    return json.loads((run_dir / "evaluation_report.json").read_text())["conditions"]
+
+
 class LinesUpAndLifts:
     """Test-only: lines up on the box from ground truth, hugs and lifts, then stops, so the lift trigger fires."""
 
@@ -181,8 +185,9 @@ def _move_run(tmp_path: Path, lifts: bool, refuse: bool = False) -> list[dict[st
         conditions=MOVE,
     )
     records = [json.loads(line) for line in (tmp_path / "evaluation.jsonl").read_text().splitlines()]
-    counts = (report.adaptation_tests, report.not_applied, report.trigger_not_reached)
-    assert sum(counts) == report.scored == len(SEEDS)  # every scored episode lands in exactly one bucket
+    tests, refused, unlifted = report.adaptation_tests, report.not_applied, report.trigger_not_reached
+    assert tests is not None and refused is not None and unlifted is not None
+    assert tests + refused + unlifted == report.scored == len(SEEDS)  # every scored episode lands in one bucket
     return records
 
 
@@ -296,9 +301,13 @@ def test_the_summary_states_the_sample_size_device_and_budget(tmp_path: Path) ->
     assert "peak GPU memory 1.81 GiB." in markdown(reports, 2000.0, "cuda", SEEDS, 1.81)
     assert "| ckpt-r0 | training_distribution | 2/3 | 1 |" in table
     moved = next(r for r in reports if r.checkpoint == "ckpt-r0" and r.condition == "move_bin_after_lift")
-    adapted = f"{moved.adapted}/{moved.adaptation_tests} (not applied {moved.not_applied}, no lift "
+    s = moved.scored
+    adapted = f"{moved.adapted}/{moved.adaptation_tests} (not applied {moved.not_applied}/{s}, no lift "
     assert f"| ckpt-r0 | move_bin_after_lift | {moved.score()} | 1 | {adapted}" in table
+    assert f"no lift {moved.trigger_not_reached}/{s}) |" in table
     assert "| ckpt-r0 | training_distribution | 2/3 | 1 | - |" in table
+    unmoved = [c for c in saved_conditions(tmp_path) if c["condition"] != "move_bin_after_lift"]
+    assert unmoved and all(c["adaptation_tests"] is None and c["not_applied"] is None for c in unmoved)
     assert "held-out seeds 1, 3, 20 (n=3 per task)" in markdown(reports, 1000.0, "d", [1, 3, 20])
     saved = json.loads((tmp_path / "evaluation_report.json").read_text())
     assert saved["budget_ms"] == 1000.0 and saved["device"] == "test-device" and saved["seeds"] == SEEDS

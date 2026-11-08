@@ -53,7 +53,6 @@ NEW_LAYOUTS = {True: ("near_bin", "far_bin"), False: ("fixed_feet_ahead", "fixed
 
 
 def conditions_for(task: str, walking: bool) -> tuple[Condition, ...]:
-    """The three conditions on `task`, a walking or a fixed-feet one."""
     return (
         Condition("training_distribution", (task,)),
         Condition("new_layout", NEW_LAYOUTS[walking]),
@@ -88,11 +87,11 @@ class ConditionReport(BaseModel):
     latency_median_ms: float | None
     latency_p95_ms: float | None
     over_budget: int  # decisions slower than the budget
-    # The move condition splits its scored episodes three ways; only an applied move tests adaptation.
-    adaptation_tests: int = 0
-    adapted: int = 0  # of the adaptation tests, accepted
-    not_applied: int = 0  # the sim refused the move
-    trigger_not_reached: int = 0  # the box was never lifted
+    # None outside the move condition, so nothing there reads as measured.
+    adaptation_tests: int | None = None
+    adapted: int | None = None  # of the adaptation tests, accepted
+    not_applied: int | None = None
+    trigger_not_reached: int | None = None  # the box was never lifted
 
     @property
     def scored(self) -> int:
@@ -206,7 +205,6 @@ def _run_one(
 
 
 def adaptation_of(events_path: Path, start: int) -> Adaptation:
-    """Whether this episode's lift-triggered bin move was made, refused, or never due."""
     since = _events_since(events_path, start)
     if any(e["type"] == "perturbation" and e["data"].get("kind") == "move_bin" for e in since):
         return "applied"
@@ -239,6 +237,7 @@ def summarise(
 ) -> ConditionReport:
     latencies = sorted(ms for r in records for ms in r.latencies_ms)
     scored = [r for r in records if r.outcome != "errored"]
+    moved = condition == "move_bin_after_lift"
     return ConditionReport(
         checkpoint=checkpoint,
         condition=condition,
@@ -249,10 +248,10 @@ def summarise(
         latency_median_ms=statistics.median(latencies) if latencies else None,
         latency_p95_ms=latencies[math.ceil(0.95 * len(latencies)) - 1] if latencies else None,  # nearest rank
         over_budget=sum(ms > budget_ms for ms in latencies),
-        adaptation_tests=sum(r.adaptation == "applied" for r in scored),
-        adapted=sum(r.adaptation == "applied" and r.outcome == "accepted" for r in scored),
-        not_applied=sum(r.adaptation == "not applied" for r in scored),
-        trigger_not_reached=sum(r.adaptation == "trigger not reached" for r in scored),
+        adaptation_tests=sum(r.adaptation == "applied" for r in scored) if moved else None,
+        adapted=sum(r.adaptation == "applied" and r.outcome == "accepted" for r in scored) if moved else None,
+        not_applied=sum(r.adaptation == "not applied" for r in scored) if moved else None,
+        trigger_not_reached=sum(r.adaptation == "trigger not reached" for r in scored) if moved else None,
     )
 
 
@@ -277,10 +276,10 @@ def markdown(
         median = f"{r.latency_median_ms:.0f}" if r.latency_median_ms is not None else "-"
         p95 = f"{r.latency_p95_ms:.0f}" if r.latency_p95_ms is not None else "-"
         over = f"{r.over_budget}/{r.decisions}" if r.decisions else "-"
-        moved = r.condition == "move_bin_after_lift"
         adapted = (
-            f"{r.adapted}/{r.adaptation_tests} (not applied {r.not_applied}, no lift {r.trigger_not_reached})"
-            if moved
+            f"{r.adapted}/{r.adaptation_tests} (not applied {r.not_applied}/{r.scored}, "
+            f"no lift {r.trigger_not_reached}/{r.scored})"
+            if r.adaptation_tests is not None
             else "-"
         )
         lines.append(
@@ -304,7 +303,6 @@ def add_arguments(parser: argparse.ArgumentParser) -> None:
 
 
 def run_from_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
-    """`mom eval` and `python -m isaacs_mom.orchestrator.evaluation` both land here."""
     if args.seeds is not None and args.seeds < 1:
         parser.error("--seeds must be at least 1")
     from isaacs_mom.sim.mujoco import MujocoSim
