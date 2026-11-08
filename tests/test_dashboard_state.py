@@ -1514,6 +1514,25 @@ def test_the_switch_keeps_its_side_while_a_seed_is_open_when_another_checkpoint_
     assert out == {"idle": ["both", "run"], "open": ["both", "seed"], "later": ["both", "seed"]}
 
 
+def test_the_step_keys_tooltips_name_what_they_step_through() -> None:
+    script = """
+    const tip = (fields) => {
+      vm.runInContext(`MomState.visit(view, ${JSON.stringify(fields)}); render();`, context);
+      return [doc.getElementById("b-prev").dataset.tip, doc.getElementById("b-next").dataset.tip];
+    };
+    const seed = tip({ seed: 1, opened: "h1-1" });
+    vm.runInContext(`chosen = true; MomState.choose(view, "both");`, context);
+    return { seed, checkpoint: tip({ seed: 1, opened: "h0-1" }), episode: tip({ seed: null, opened: null }) };
+    """
+    out = app(REPLAY + script, stream(*TWO_EVALUATIONS))
+    # the harness's narrow stage defaults the switch to After, so the arrows step from seed to seed
+    assert out == {
+        "seed": ["Previous seed · ←", "Next seed · →"],
+        "checkpoint": ["Previous checkpoint · ←", "Next checkpoint · →"],
+        "episode": ["Previous episode · ←", "Next episode · →"],
+    }
+
+
 def conditioned(round_: int, condition: str, *outcomes: tuple[object, str | None]) -> list[tuple[str, dict]]:
     *episodes, (kind, result) = evaluated(round_, *outcomes)
     return [*episodes, (kind, {**result, "condition": condition})]

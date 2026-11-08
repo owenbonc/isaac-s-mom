@@ -348,7 +348,9 @@ const PAUSE = $("b-pause");
 
 function renderEpisode() {
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) === null;
-  const steps = STEPS[MomState.where(view)];
+  const place = MomState.where(view);
+  // An episode the switch shows in full steps from seed to seed, as a seed does.
+  const steps = place === "episode" && view.side !== "both" ? "seed" : STEPS[place];
   $("b-prev").dataset.tip = `Previous ${steps} · ←`;
   $("b-next").dataset.tip = `Next ${steps} · →`;
   $("b-m").setAttribute("aria-pressed", String(view.compare !== null));
