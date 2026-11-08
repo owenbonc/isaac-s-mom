@@ -5,6 +5,7 @@ held-out seeds. No network and no GPU: scripted teachers, a fake fine-tune and a
 import itertools
 import json
 import os
+import re
 import sys
 from concurrent.futures.process import BrokenProcessPool
 from functools import partial
@@ -26,7 +27,7 @@ from isaacs_mom.contracts import (
     Validation,
 )
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.seeds import heldout_seeds
+from isaacs_mom.seeds import SealedSeedError, heldout_seeds
 from isaacs_mom.sim.mujoco import MujocoSim
 from isaacs_mom.sim.mujoco.preview import OraclePolicy
 from isaacs_mom.sim.mujoco.scene import BIN_WALL
@@ -34,7 +35,7 @@ from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF
 from isaacs_mom.student import BASE_CHECKPOINT
 from isaacs_mom.tasks import Refusal, TaskSpec, judge
 from isaacs_mom.tasks.example import OFFLINE_PROPOSAL, DropShortPolicy
-from isaacs_mom.tasks.generate import Propose
+from isaacs_mom.tasks.generate import Propose, argon_proposer
 from isaacs_mom.tasks.learn import (
     DEMO_SEED_START,
     Collected,
@@ -42,6 +43,7 @@ from isaacs_mom.tasks.learn import (
     LearnReport,
     argon_calls,
     collect,
+    demonstrate,
     exam,
     finish,
     learn,
@@ -175,16 +177,20 @@ def test_a_generated_task_trains_on_its_accepted_demonstrations_and_is_examined_
     run_dir = tmp_path / report.run_id
     spec = TaskSpec.model_validate_json((run_dir / "spec.json").read_text())
     assert report.spec == spec and report.fingerprint == spec.fingerprint() and report.taught == "batch"
+    assert re.fullmatch(rf"learn-box_on_shelf-{spec.fingerprint()}-\d{{8}}-\d{{6}}", report.run_id)
     assert LearnReport.model_validate_json((run_dir / "report.json").read_text()) == report
 
     demos = _manifests(run_dir / "episodes")
     assert [m.seed for m in demos] == [DEMO_SEED_START, DEMO_SEED_START + 1, DEMO_SEED_START + 2]
     assert all(m.split == "dev" and m.seed not in heldout_seeds() for m in demos)  # rule 2
     assert [m.validation for m in demos] == [ON_THE_SHELF, OFF_THE_SHELF, ON_THE_SHELF]  # the spec's verdicts
-    logged = map(Event.model_validate_json, (run_dir / "workers" / "w0" / "events.jsonl").read_text().splitlines())
+    logged = [
+        Event.model_validate_json(e) for e in (run_dir / "workers" / "w0" / "events.jsonl").read_text().splitlines()
+    ]
     assert [e.data["reason"] for e in logged if e.type == "validation"] == [
         m.validation.reason for m in demos if m.validation
     ]
+    assert {m.run_id for m in demos} == {e.run_id for e in logged} == {report.run_id}  # §4.2: they name the run
 
     accepted = [demos[0], demos[2]]
     lines = (run_dir / "training_r1.jsonl").read_text().splitlines()
@@ -206,10 +212,11 @@ def test_a_generated_task_trains_on_its_accepted_demonstrations_and_is_examined_
         successes=0, errored=0, n=2, adaptation_tests=0, adapted=0, not_applied=0, trigger_not_reached=2
     )
     assert report.move_bin_share == 0.5 and report.exam_bin_moved == {c: stopped for c in report.exam}  # never lifted
-    assert (report.replayed, report.replay_failures, report.demos_errored) == (2, [], 0)  # by the shelf's rule
+    assert (report.reproduced, report.replay_failures, report.demos_errored) == (2, [], 0)  # by the shelf's rule
     for checkpoint in report.exam:
         examined = _manifests(run_dir / "exam" / checkpoint.replace("/", "_") / "episodes")
         assert [(m.seed, m.split, m.driver) for m in examined] == [(seed, "heldout", "student") for seed in held_out]
+        assert {m.run_id for m in examined} == {report.run_id}
 
 
 def test_a_demonstration_the_specs_rule_rejects_gives_no_training_examples(tmp_path: Path) -> None:
@@ -223,6 +230,7 @@ def test_a_demonstration_the_specs_rule_rejects_gives_no_training_examples(tmp_p
         exam_seeds=1,
         train=train,
         make_student=Stops,
+        base=BASE_CHECKPOINT,
         make_teacher=DropShortPolicy,
     )
     assert isinstance(report, LearnReport)
@@ -234,6 +242,9 @@ def test_a_demonstration_the_specs_rule_rejects_gives_no_training_examples(tmp_p
     assert (run_dir / "training_r1.jsonl").read_text() == ""
     assert (report.demos, report.accepted, report.examples) == (2, 0, 0)
     assert report.checkpoint == BASE_CHECKPOINT and report.finetune_metrics == {}  # nothing was trained
+    assert list(report.exam) == list(report.exam_bin_moved) == [BASE_CHECKPOINT]  # so the base is examined once
+    examined = [_manifests(run_dir / kind / BASE_CHECKPOINT / "episodes") for kind in ("exam", "exam-bin-moved")]
+    assert [len(episodes) for episodes in examined] == [1, 1]
 
 
 def test_the_specs_physics_check_is_the_validators() -> None:
@@ -260,6 +271,7 @@ def test_a_batch_over_two_teacher_processes_gathers_every_demonstration_into_the
     collect(_spec(), tmp_path, demos=3, workers=2, make_teacher=blind_oracle)
     demos = _manifests(tmp_path / "episodes")
     assert [m.seed for m in demos] == [DEMO_SEED_START, DEMO_SEED_START + 1, DEMO_SEED_START + 2]
+    assert not {m.seed for m in demos} & heldout_seeds()  # rule 2
     assert [m.validation for m in demos] == [ON_THE_SHELF] * 3
     started = {
         worker.name: [e.data["seed"] for e in map(Event.model_validate_json, lines) if e.type == "episode_started"]
@@ -268,6 +280,30 @@ def test_a_batch_over_two_teacher_processes_gathers_every_demonstration_into_the
     }
     assert started == {"w0": [DEMO_SEED_START, DEMO_SEED_START + 2], "w1": [DEMO_SEED_START + 1]}
     assert not list((tmp_path / "workers").glob("*/episodes/*"))  # moved into the run, not copied
+
+
+def test_a_teacher_process_refuses_a_held_out_seed_before_recording_it(tmp_path: Path) -> None:
+    out = tmp_path / "workers" / "w0"
+    with pytest.raises(SealedSeedError):
+        demonstrate(_spec().model_dump_json(), [min(heldout_seeds())], str(out), tmp_path.name, OraclePolicy)
+    assert not (out / "episodes").exists()  # rule 2
+
+
+def test_a_teacher_process_spends_no_more_than_its_own_argon_budget(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def done(purpose: Purpose, parts: list[Part]) -> str:
+        return '{"done": true, "reason": "the box looks placed"}'
+
+    monkeypatch.setattr("isaacs_mom.teacher.argon.gemini_generate", lambda model="": done)
+    monkeypatch.setenv("ARGON_CALL_BUDGET", "2")
+    out = tmp_path / "workers" / "w0"
+    seeds = [DEMO_SEED_START, DEMO_SEED_START + 1, DEMO_SEED_START + 2]  # one call each, were there budget for three
+    demonstrate(_spec().model_dump_json(), seeds, str(out), tmp_path.name)
+    logged = [Event.model_validate_json(line) for line in (out / "events.jsonl").read_text().splitlines()]
+    assert sum(e.type == "argon_call" for e in logged) == 2  # rule 5
+    closing = [e.data["reason"] for e in logged if e.type == "decision" and e.data["skill"]]
+    assert closing == ["Argon: the task looks complete"] * 2 + ["ended: Argon call budget used up"]
 
 
 def test_the_batch_counts_every_argon_call_of_every_teacher_process(tmp_path: Path) -> None:
@@ -327,6 +363,8 @@ def test_a_held_out_episode_that_crashes_counts_as_errored_not_as_a_failure(tmp_
         ([], True, "give an instruction, or --resume with a run dir, not both"),
         ([INSTRUCTION, "--resume", "runs/x"], True, "give an instruction, or --resume with a run dir, not both"),
         (["--resume", "runs/x"], True, "has no finished batch"),
+        (["--resume", "runs/x", "--collect-only"], False, "--collect-only stops after the batch and --resume starts"),
+        (["--resume", "elsewhere/x"], True, "--resume takes a dir in ./runs, where the exam finds its adapter"),
     ],
 )
 def test_the_cli_refuses_before_asking_argon_anything(
@@ -371,10 +409,9 @@ def test_a_spec_that_lets_the_bin_move_moves_it_in_the_stated_share_and_replays_
 ) -> None:
     spec = _spec(BIN_PROPOSAL)
     collected = collect(spec, tmp_path, demos=2, workers=1, make_teacher=OraclePolicy, move_bin_share=0.5)
-    assert collected == Collected(
-        demos=2, workers=1, move_bin_share=0.5, moved_seeds=[DEMO_SEED_START + 1], generator_calls=0
-    )
+    assert collected == Collected(demos=2, workers=1, move_bin_share=0.5, moved_seeds=[DEMO_SEED_START + 1])
     demos = _manifests(tmp_path / "episodes")
+    assert not {m.seed for m in demos} & heldout_seeds()  # rule 2
     assert [[p.perturbation.kind for p in m.perturbations] for m in demos] == [[], ["move_bin"]]
     assert all(m.validation and m.validation.accepted for m in demos)  # found the bin again
     assert all(m.replay_valid for m in demos)  # by the bin spec's own rule, the move included
@@ -396,7 +433,7 @@ class CrashesOnTheSecond(OraclePolicy):
 
 
 def test_a_demonstration_that_crashes_is_counted_and_the_batch_goes_on(tmp_path: Path) -> None:
-    spec, run_dir, _ = _started(tmp_path)
+    spec, run_dir = _started(tmp_path)
     collect(spec, run_dir, demos=3, workers=1, make_teacher=CrashesOnTheSecond)
     report = finish(run_dir, exam_seeds=1, train=FakeFinetune(), make_student=Stops)
     assert (report.demos_errored, report.accepted) == (1, 2)
@@ -443,7 +480,7 @@ class StopsTheRunOnTheSecond(OraclePolicy):
 def test_a_fatal_argon_error_stops_the_batch_and_leaves_what_it_recorded_to_resume(
     tmp_path: Path, fatal: Exception
 ) -> None:
-    spec, run_dir, _ = _started(tmp_path)
+    spec, run_dir = _started(tmp_path)
     with pytest.raises(type(fatal)):
         collect(spec, run_dir, demos=3, workers=1, make_teacher=lambda sim: StopsTheRunOnTheSecond(sim, fatal))
     assert [(m.seed, m.validation) for m in _manifests(run_dir / "episodes")] == [
@@ -470,7 +507,7 @@ class DiesOnTheSecond(OraclePolicy):
 
 
 def test_a_teacher_process_that_dies_leaves_a_run_that_resumes(tmp_path: Path) -> None:
-    spec, run_dir, _ = _started(tmp_path)
+    spec, run_dir = _started(tmp_path)
     with pytest.raises(BrokenProcessPool):
         collect(spec, run_dir, demos=3, workers=2, make_teacher=DiesOnTheSecond)
     collected = Collected.model_validate_json((run_dir / "collected.json").read_text())
@@ -480,8 +517,14 @@ def test_a_teacher_process_that_dies_leaves_a_run_that_resumes(tmp_path: Path) -
     assert report.demos_errored >= 1 and report.accepted + report.demos_errored == 3
 
 
-def _started(tmp_path: Path, proposal: dict[str, Any] = OFFLINE_PROPOSAL) -> tuple[TaskSpec, Path, int]:
-    started = start(INSTRUCTION, _fixed(proposal), tmp_path, lambda: 1)
+def _started(tmp_path: Path, proposal: dict[str, Any] = OFFLINE_PROPOSAL) -> tuple[TaskSpec, Path]:
+    """As the CLI starts: the generator's startup check and proposal, logged where another start logs its calls."""
+    shared = tmp_path / "learn-generator"
+    Argon(EventLog(shared, "learn-generator-before"), budget=1, generate=lambda _p, _parts: "{}").ask("task", ["?"])
+    generator = EventLog(shared, "learn-generator-this")
+    argon = Argon(generator, budget=2, generate=lambda _purpose, _parts: json.dumps(proposal))
+    argon.check()
+    started = start(INSTRUCTION, argon_proposer(argon), tmp_path, generator)
     assert not isinstance(started, Refusal)
     return started
 
@@ -489,8 +532,13 @@ def _started(tmp_path: Path, proposal: dict[str, Any] = OFFLINE_PROPOSAL) -> tup
 def test_a_batch_collected_alone_is_finished_later_from_its_run_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    spec, run_dir, generator_calls = _started(tmp_path, BIN_PROPOSAL)
-    collect(spec, run_dir, demos=1, workers=1, make_teacher=OraclePolicy, generator_calls=generator_calls)
+    spec, run_dir = _started(tmp_path, BIN_PROPOSAL)
+    copied = [Event.model_validate_json(e) for e in (run_dir / "generator" / "events.jsonl").read_text().splitlines()]
+    assert [(e.run_id, e.type, e.data["purpose"]) for e in copied] == [
+        ("learn-generator-this", "argon_call", "startup"),
+        ("learn-generator-this", "argon_call", "task"),
+    ]
+    collect(spec, run_dir, demos=1, workers=1, make_teacher=OraclePolicy)
     sims: list[MujocoSim] = []
     built = MujocoSim.__init__
 
@@ -500,7 +548,7 @@ def test_a_batch_collected_alone_is_finished_later_from_its_run_dir(
 
     monkeypatch.setattr(MujocoSim, "__init__", tracked)
     report = finish(run_dir, exam_seeds=2, train=FakeFinetune(), make_student=lambda c: LiftsThenStops(c, sims))
-    assert report.run_id == run_dir.name and report.generator_calls == 1 and report.accepted == 1
+    assert report.run_id == run_dir.name and report.generator_calls == 2 and report.accepted == 1
     moved = report.exam_bin_moved[report.checkpoint]
     assert (moved.n, moved.adaptation_tests, moved.not_applied, moved.trigger_not_reached) == (2, 2, 0, 0)
     assert moved.adapted == moved.successes == 0  # it stops once lifted, so the move is applied but never met
@@ -509,4 +557,15 @@ def test_a_batch_collected_alone_is_finished_later_from_its_run_dir(
     assert lines[1].startswith("demonstrations: 1/1 accepted (0 errored)") and "1/1 accepted replay" in lines[1]
     assert lines[-1] == (
         f"  {report.checkpoint}: 0/2; bin moved after the lift 0/2, adapted 0/2 (not applied 0, no lift 0)"
+    )
+    one_errored = {
+        "exam": {report.checkpoint: ExamResult(successes=0, errored=1, n=2)},
+        "exam_bin_moved": {
+            report.checkpoint: ExamResult(
+                successes=0, errored=1, n=2, adaptation_tests=1, adapted=0, not_applied=0, trigger_not_reached=0
+            )
+        },
+    }
+    assert summary(report.model_copy(update=one_errored)).splitlines()[-1] == (
+        f"  {report.checkpoint}: 0/1; bin moved after the lift 0/1, adapted 0/1 (not applied 0, no lift 0)"
     )

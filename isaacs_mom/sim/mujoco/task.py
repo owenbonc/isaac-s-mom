@@ -16,7 +16,7 @@ MAX_BOX_OFFSET_M = 0.12  # the arms' sideways reach
 MIN_BIN_DISTANCE_M = 0.5  # a walking robot stops ~0.45 m short of the bin's centre to place
 MAX_BIN_DISTANCE_M = 2.2  # the longest walk measured, far_bin's
 TWIST_BIN_DISTANCE_M = (0.40, 0.50)  # a fixed-feet bin must sit where the twisted, outstretched arms put the box
-# and at a bearing the scripted policy places at on 20 of 20 seeds; at 112-124 degrees it lands on the rim (15 of 20).
+# and at a bearing the scripted policy places at on 20 of 20 seeds; at 112-124 degrees, 15 of 20 placed (3 on the rim).
 TWIST_BIN_BEARING_DEG = (85.0, 112.0)
 # Where `place` lands the box on a wall-less top every time: higher, it lands still between the open hands.
 PLATFORM_TOP_RANGE_M = (0.40, 0.45)

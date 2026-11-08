@@ -1,25 +1,11 @@
-"""Learn a task from one sentence, end to end (SPEC §3.7): instruction -> checked TaskSpec -> Argon demonstrations
-in a parallel batch (§3.6) -> one fine-tune on the accepted ones -> the fine-tuned student alone on the held-out seeds.
-
-    uv run python -m isaacs_mom.tasks.learn "deliver the box, even if someone moves the bin" --demos 40 --workers 8
-
-The batch can also run on its own and be finished later, so the teachers can work while the GPU is busy:
-
-    uv run python -m isaacs_mom.tasks.learn "<instruction>" --demos 40 --workers 8 --collect-only
-    uv run python -m isaacs_mom.tasks.learn --resume runs/<run_id>
-
-For a generated task `tasks.judge` is the validator of rule 3: each demonstration's manifest carries the spec's
-verdict, so the project's training set keeps only the demonstrations the spec's rule accepts, every accepted one is
-replayed against that same rule, and the held-out exam is judged by it. When the spec lets the bin move, the
-lift-triggered `move_bin` runs in a stated share of the demonstrations (§3.5) and in a second held-out exam (§6.10).
-Every demonstration runs on a development seed (rule 2); each teacher process spends its own `ARGON_CALL_BUDGET`
-(rule 5).
-"""
+"""Teach a generated task end to end (SPEC §3.7): `uv run python -m isaacs_mom.tasks.learn "<instruction>" --demos N
+--workers K`, or the batch alone with `--collect-only`, then `--resume runs/<run_id>` on the GPU."""
 
 import argparse
 import json
 import shutil
 import time
+import uuid
 from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import ProcessPoolExecutor
 from functools import partial
@@ -38,6 +24,7 @@ from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.mujoco import MujocoSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune, has_cuda
+from isaacs_mom.student.checkpoints import RUNS_DIR
 from isaacs_mom.tasks.generate import Propose, argon_proposer, generate_task
 from isaacs_mom.tasks.rules import judge
 from isaacs_mom.tasks.spec import Refusal, TaskSpec
@@ -48,10 +35,12 @@ from isaacs_mom.validator.replay import REPLAY_ERRORS, replay
 from isaacs_mom.validator.training import build_training_set
 
 DEMO_SEED_START = DEV_SEED_START + 5000  # clear of the loop's trials and choices and of the readiness trial's seeds
-ROUND = 1  # a batch fine-tunes once
-MOVE_BIN_SHARE = 0.5  # of the demonstrations, when the spec lets the bin move: half show it found again
+ROUND = 1
+MOVE_BIN_SHARE = 0.5
 # One lost demonstration raises one of these; a fatal Argon error (any other 4xx) is none, so it stops the batch (§3.3).
 EPISODE_ERRORS = (ArgonUnavailable, *REPLAY_ERRORS)
+# The generator runs before its spec names the run, so its log is shared by every start; each run keeps its own calls.
+GENERATOR_CALLS = Path("generator") / "events.jsonl"
 MakePolicy = Callable[[MujocoSim], Policy]
 Train = Callable[[Path, str, int], str]  # (training set, previous checkpoint, round) -> new checkpoint
 
@@ -63,7 +52,6 @@ class Collected(BaseModel):
     workers: int
     move_bin_share: float  # 0 when the spec doesn't let the bin move
     moved_seeds: list[int]  # where the move was due; it applies only once the box is lifted
-    generator_calls: int
     stopped_early: dict[str, str] = {}  # teacher process -> the error that stopped it; what it didn't record errored
 
 
@@ -92,7 +80,7 @@ class LearnReport(BaseModel):
     move_bin_share: float
     demos_bin_moved: int  # demonstrations where the move applied
     accepted_bin_moved: int
-    replayed: int  # accepted demonstrations that reproduce, by the spec's rule
+    reproduced: int
     replay_failures: list[str]  # accepted demonstrations that don't
     argon_calls: int  # every teacher process's, failed calls included
     generator_calls: int
@@ -107,17 +95,17 @@ def demonstrate(
     spec_json: str,
     seeds: Sequence[int],
     out: str,
+    run_id: str,
     make_teacher: MakePolicy | None = None,
     moved: Collection[int] = (),
 ) -> None:
-    """One teacher process: a demonstration on each seed, judged by the spec's rule, and each accepted one replayed
-    by it; Argon by default. A lost demonstration or replay is logged and the rest go on; a missing key or a fatal
-    Argon error raises."""
+    """One teacher process (Argon by default): a demonstration on each seed and a replay of each accepted one, both
+    by the spec's rule. One lost is logged and the rest go on; a missing key or a fatal Argon error raises."""
     spec = TaskSpec.model_validate_json(spec_json)
     rule = partial(judge, spec)
     out_dir = Path(out)
     sim = MujocoSim(spec.task_config())
-    events = EventLog(out_dir, out_dir.name)
+    events = EventLog(out_dir, run_id)
     if make_teacher is None:
         argon = Argon(events)
         make_teacher = lambda _sim: ArgonPolicy(None, argon)  # noqa: E731
@@ -159,12 +147,10 @@ def collect(
     workers: int,
     make_teacher: MakePolicy | None = None,
     move_bin_share: float = MOVE_BIN_SHARE,
-    generator_calls: int = 0,
 ) -> Collected:
-    """`demos` demonstrations over `workers` teacher processes (this one when 1), gathered into run_dir/episodes.
-    Across processes `make_teacher` must be picklable: a top-level function or class. When a teacher process stops
-    early, what every process recorded is still gathered and `collected.json` written, so `--resume` can finish the
-    run; then its error is raised."""
+    """`demos` demonstrations over `workers` teacher processes (this one when 1), gathered into run_dir/episodes;
+    across processes `make_teacher` must be picklable. If one stops early, what every process recorded is still
+    gathered and `collected.json` written, so `--resume` can finish the run, and then its error raises."""
     seeds = list(range(DEMO_SEED_START, DEMO_SEED_START + demos))
     share = move_bin_share if "move_bin" in spec.perturbation_kinds() else 0.0
     moved = sorted(seeds[i] for i in moves_bin(demos, share))
@@ -174,13 +160,13 @@ def collect(
     errors: dict[str, BaseException] = {}
     if len(shares) == 1:
         try:
-            demonstrate(spec_json, shares[0], outs[0], make_teacher, moved)
+            demonstrate(spec_json, shares[0], outs[0], run_dir.name, make_teacher, moved)
         except Exception as error:
             errors[Path(outs[0]).name] = error
     else:
         with ProcessPoolExecutor(len(shares), mp_context=get_context("spawn")) as pool:
             futures = {
-                Path(out).name: pool.submit(demonstrate, spec_json, share_seeds, out, make_teacher, moved)
+                Path(out).name: pool.submit(demonstrate, spec_json, share_seeds, out, run_dir.name, make_teacher, moved)
                 for share_seeds, out in zip(shares, outs, strict=True)
             }
         errors = {name: error for name, future in futures.items() if (error := future.exception()) is not None}
@@ -194,7 +180,6 @@ def collect(
         workers=len(shares),
         move_bin_share=share,
         moved_seeds=moved,
-        generator_calls=generator_calls,
         stopped_early={name: f"{type(error).__name__}: {error}" for name, error in errors.items()},
     )
     write_atomically(run_dir / "collected.json", collected.model_dump_json(indent=2))
@@ -231,7 +216,7 @@ def exam(
     are split as §6.10 says."""
     sim = MujocoSim(spec.task_config())
     out = run_dir / ("exam-bin-moved" if move_bin else "exam") / checkpoint.replace("/", "_")
-    events = EventLog(out, out.name)
+    events = EventLog(out, run_dir.name)
     successes = errored = 0
     buckets = {"applied": 0, "adapted": 0, "not applied": 0, "trigger not reached": 0}
     for seed in seeds:
@@ -273,16 +258,23 @@ def exam(
 
 
 def start(
-    instruction: str, propose: Propose, runs_dir: Path, generator_calls: Callable[[], int] = lambda: 0
-) -> tuple[TaskSpec, Path, int] | Refusal:
-    """The spec and a run dir of its own, or Argon's refusal with nothing recorded."""
+    instruction: str, propose: Propose, runs_dir: Path, generator: EventLog | None = None
+) -> tuple[TaskSpec, Path] | Refusal:
+    """The spec and a run dir of its own, holding the spec and the `argon_call` events `generator` logged (none
+    without it), or Argon's refusal with nothing recorded."""
     spec = generate_task(instruction, propose)
     if isinstance(spec, Refusal):
         return spec
-    run_dir = runs_dir / f"learn-{spec.name}-{spec.fingerprint()}-{time.strftime('%H%M%S')}"
+    run_dir = runs_dir / f"learn-{spec.name}-{spec.fingerprint()}-{time.strftime('%Y%m%d-%H%M%S')}"
     run_dir.mkdir(parents=True)
     write_atomically(run_dir / "spec.json", spec.model_dump_json(indent=2))
-    return spec, run_dir, generator_calls()
+    calls: list[Event] = []
+    if generator is not None and generator.path.exists():
+        events = map(Event.model_validate_json, generator.path.read_text().splitlines())
+        calls = [e for e in events if e.type == "argon_call" and e.run_id == generator.run_id]
+    (run_dir / GENERATOR_CALLS).parent.mkdir()
+    write_atomically(run_dir / GENERATOR_CALLS, "".join(e.model_dump_json() + "\n" for e in calls))
+    return spec, run_dir
 
 
 def finish(
@@ -296,6 +288,8 @@ def finish(
     """Train on a collected batch and examine the result: the second half of `learn`, and all of `--resume`."""
     spec = TaskSpec.model_validate_json((run_dir / "spec.json").read_text())
     collected = Collected.model_validate_json((run_dir / "collected.json").read_text())
+    generator_calls = len((run_dir / GENERATOR_CALLS).read_text().splitlines())
+    teacher_calls = argon_calls(run_dir)
     training_set = build_training_set(run_dir, ROUND)
     summary = TrainingSetSummary.model_validate_json(training_set.with_suffix(".summary.json").read_text())
     demos = [EpisodeManifest.model_validate_json(p.read_text()) for p in (run_dir / "episodes").glob("*/manifest.json")]
@@ -303,7 +297,7 @@ def finish(
     bin_moved = {m.episode_id for m in demos if any(p.perturbation.kind == "move_bin" for p in m.perturbations)}
     checkpoint = train(training_set, base or BASE_CHECKPOINT, ROUND)
     seeds = sorted(heldout_seeds())[:exam_seeds]
-    checkpoints = [c for c in (base, checkpoint) if c is not None]
+    checkpoints = [checkpoint] if base in (None, checkpoint) else [base, checkpoint]
     moves = "move_bin" in spec.perturbation_kinds()
     report = LearnReport(
         run_id=run_dir.name,
@@ -316,10 +310,10 @@ def finish(
         move_bin_share=collected.move_bin_share,
         demos_bin_moved=len(bin_moved),
         accepted_bin_moved=sum(m.episode_id in bin_moved for m in accepted),
-        replayed=sum(m.replay_valid is True for m in accepted),
+        reproduced=sum(m.replay_valid is True for m in accepted),
         replay_failures=sorted(m.episode_id for m in accepted if m.replay_valid is not True),
-        argon_calls=argon_calls(run_dir),
-        generator_calls=collected.generator_calls,
+        argon_calls=teacher_calls,
+        generator_calls=generator_calls,
         checkpoint=checkpoint,
         finetune_metrics=finetune_metrics(run_dir),
         exam_seeds=seeds,
@@ -347,8 +341,8 @@ def learn(
     started = start(instruction, propose, runs_dir)
     if isinstance(started, Refusal):
         return started
-    spec, run_dir, generator_calls = started
-    collect(spec, run_dir, demos, workers, make_teacher, move_bin_share, generator_calls)
+    spec, run_dir = started
+    collect(spec, run_dir, demos, workers, make_teacher, move_bin_share)
     return finish(run_dir, exam_seeds=exam_seeds, train=train, make_student=make_student, base=base)
 
 
@@ -361,7 +355,7 @@ def summary(report: LearnReport) -> str:
         f'"{spec.instruction}" -> {spec.name} ({report.fingerprint}), {spec.stance.replace("_", " ")}, {moves}',
         f"demonstrations: {report.accepted}/{report.demos} accepted ({report.demos_errored} errored), "
         f"{report.accepted_bin_moved} of them with the bin moved; {report.examples} training examples; "
-        f"{report.replayed}/{report.accepted} accepted replay by the spec's rule",
+        f"{report.reproduced}/{report.accepted} accepted replay by the spec's rule",
         f"Argon: {report.argon_calls} teacher calls and {report.generator_calls} for the spec",
         f"fine-tune: {metrics.get('seconds', '-')} s, peak {metrics.get('peak_gpu_memory_gb', '-')} GiB"
         if metrics
@@ -412,22 +406,27 @@ def main() -> None:
     args = parser.parse_args()
     if (args.instruction is None) == (args.resume is None):
         parser.error("give an instruction, or --resume with a run dir, not both")
-    if args.resume is not None and not (args.resume / "collected.json").exists():
-        parser.error(f"{args.resume} has no finished batch (collected.json); start the instruction again")
+    if args.resume is not None:
+        if args.collect_only:
+            parser.error("--collect-only stops after the batch and --resume starts after it: give one")
+        if args.resume.resolve().parent != RUNS_DIR.resolve():
+            parser.error(f"--resume takes a dir in ./{RUNS_DIR}, where the exam finds its adapter, not {args.resume}")
+        if not (args.resume / "collected.json").exists():
+            parser.error(f"{args.resume} has no finished batch (collected.json); start the instruction again")
     if not args.collect_only and not has_cuda():
-        parser.error("fine-tuning needs CUDA: run this on the RTX 5070 Ti, or pass --collect-only")
-    runs = Path("runs")
+        parser.error("fine-tuning needs CUDA: run this on the Windows RTX 5070, or pass --collect-only")
     base = BASE_CHECKPOINT if args.with_base else None
     if args.resume is None:
-        argon = Argon(EventLog(runs / "learn-generator", "learn-generator"))
+        generator = EventLog(RUNS_DIR / "learn-generator", f"learn-generator-{uuid.uuid4().hex[:8]}")
+        argon = Argon(generator)
         argon.check()
-        started = start(args.instruction, argon_proposer(argon), runs, lambda: argon.calls)
+        started = start(args.instruction, argon_proposer(argon), RUNS_DIR, generator)
         if isinstance(started, Refusal):
             print("refused:\n  " + "\n  ".join(started.reasons))
             raise SystemExit(1)
-        spec, run_dir, generator_calls = started
+        spec, run_dir = started
         print(f"spec {spec.name} ({spec.fingerprint()}) in {run_dir}", flush=True)
-        collected = collect(spec, run_dir, args.demos, args.workers, None, args.move_bin_share, generator_calls)
+        collected = collect(spec, run_dir, args.demos, args.workers, None, args.move_bin_share)
         print(f"batch done: {collected.model_dump_json()}", flush=True)
         if args.collect_only:
             print(f"resume with: uv run python -m isaacs_mom.tasks.learn --resume {run_dir}")
