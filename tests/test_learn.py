@@ -26,13 +26,16 @@ from isaacs_mom.contracts import (
     TrainingSetSummary,
     Validation,
 )
+from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
+from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.sim.mujoco import MujocoSim
 from isaacs_mom.sim.mujoco.preview import OraclePolicy
 from isaacs_mom.sim.mujoco.scene import BIN_WALL
 from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF
 from isaacs_mom.student import BASE_CHECKPOINT
+from isaacs_mom.student.checkpoints import ADAPTER_FILES
 from isaacs_mom.tasks import Refusal, TaskSpec, judge
 from isaacs_mom.tasks.example import OFFLINE_PROPOSAL, DropShortPolicy
 from isaacs_mom.tasks.generate import Propose, argon_proposer
@@ -50,8 +53,9 @@ from isaacs_mom.tasks.learn import (
     main,
     start,
     summary,
+    then_loop,
 )
-from isaacs_mom.teacher.argon import Argon, ArgonUnavailable, MissingKey, Part, Purpose
+from isaacs_mom.teacher.argon import Argon, ArgonUnavailable, MissingKey, Part, Purpose, stub_generate
 from isaacs_mom.validator import replay, validate
 from isaacs_mom.validator.rules import JOINT_LIMIT, PENETRATION, ROBOT_FELL, SEPARATOR
 
@@ -366,6 +370,8 @@ def test_a_held_out_episode_that_crashes_counts_as_errored_not_as_a_failure(tmp_
         (["--resume", "runs/x"], True, "has no finished batch"),
         (["--resume", "runs/x", "--collect-only"], False, "--collect-only stops after the batch and --resume starts"),
         (["--resume", "elsewhere/x"], True, "--resume takes a dir in ./runs, where the exam finds its adapter"),
+        ([INSTRUCTION, "--collect-only", "--then-loop", "1"], False, "before anything the loop could continue"),
+        ([INSTRUCTION, "--then-loop", "0"], True, "must be at least 1, not 0"),
     ],
 )
 def test_the_cli_refuses_before_asking_argon_anything(
@@ -570,3 +576,56 @@ def test_a_batch_collected_alone_is_finished_later_from_its_run_dir(
     assert summary(report.model_copy(update=one_errored)).splitlines()[-1] == (
         f"  {report.checkpoint}: 0/1; bin moved after the lift 0/1, adapted 0/1 (not applied 0, no lift 0)"
     )
+
+
+def _learned(runs: Path, spec: TaskSpec, finished: bool = True) -> Path:
+    """A tasks.learn run: its spec, one judged teacher demonstration and, if finished, its checkpoint."""
+    run_dir = runs / "learn-x"
+    run_dir.mkdir(parents=True)
+    (run_dir / "spec.json").write_text(spec.model_dump_json())
+    teacher = Stops("teacher")
+    teacher.controller = "teacher"
+    run_episode(
+        FakeSim(),
+        teacher,
+        run_dir=run_dir,
+        events=EventLog(run_dir, "w0"),
+        seed=DEMO_SEED_START,
+        split="dev",
+        round_=1,
+        instruction=spec.instruction,
+        verdict=partial(judge, spec),
+    )
+    if finished:
+        (run_dir / "checkpoints" / "ckpt-r1").mkdir(parents=True)
+        for name in ADAPTER_FILES:
+            (run_dir / "checkpoints" / "ckpt-r1" / name).write_text("{}")
+    return run_dir
+
+
+def test_then_loop_continues_the_learned_skill_in_a_loop_run_beside_it_judged_by_the_specs_rule(tmp_path: Path) -> None:
+    spec = _spec()
+    run_dir = _learned(tmp_path / "runs", spec)
+    loop_dir = tmp_path / "runs" / "learn-x-loop"
+    argon = Argon(EventLog(loop_dir, loop_dir.name), generate=stub_generate)
+    out, results = then_loop(
+        run_dir, 1, argon=argon, train=FakeFinetune(), make_student=Stops, make_sim=lambda _spec: FakeSim()
+    )
+    assert out == loop_dir and [r.round for r in results] == [0, 1]
+    assert results[0].checkpoint == "learn-x/ckpt-r1"  # round 0 is the learned skill, examined afresh
+    assert json.loads((loop_dir / "from_run.json").read_text())["from_run"] == "learn-x"
+    assert (loop_dir / "spec.json").is_file()
+    assert TaskSpec.model_validate_json((loop_dir / "spec.json").read_text()) == spec
+    logged = [json.loads(line) for line in (loop_dir / "events.jsonl").read_text().splitlines()]
+    assert [e["data"]["text"] for e in logged if e["type"] == "instruction"] == [spec.instruction]
+    manifests = _manifests(loop_dir / "episodes")
+    assert manifests and {m.instruction for m in manifests} == {spec.instruction}
+    assert all(m.validation and "shelf" in m.validation.reason for m in manifests)  # the spec's rule, not validate
+
+
+def test_then_loop_from_a_run_with_nothing_trained_is_refused_and_writes_nothing(tmp_path: Path) -> None:
+    run_dir = _learned(tmp_path / "runs", _spec(), finished=False)
+    argon = Argon(EventLog(tmp_path / "elsewhere", "x"), generate=stub_generate)
+    with pytest.raises(ValueError, match="no finished checkpoint"):
+        then_loop(run_dir, 1, argon=argon, train=FakeFinetune(), make_student=Stops, make_sim=lambda _spec: FakeSim())
+    assert not (tmp_path / "runs" / "learn-x-loop").exists()

@@ -15,13 +15,14 @@ from typing import Literal
 
 from pydantic import BaseModel
 
-from isaacs_mom.contracts import EpisodeManifest, Event, TrainingSetSummary
+from isaacs_mom.contracts import EpisodeManifest, EvaluationResult, Event, TrainingSetSummary
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.evaluation import adaptation_of
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import moves_bin
+from isaacs_mom.orchestrator.loop import check_carry_over, moves_bin, run_loop
 from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
+from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco import MujocoSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, finetune, has_cuda
 from isaacs_mom.student.checkpoints import RUNS_DIR
@@ -346,6 +347,39 @@ def learn(
     return finish(run_dir, exam_seeds=exam_seeds, train=train, make_student=make_student, base=base)
 
 
+def then_loop(
+    run_dir: Path,
+    rounds: int,
+    *,
+    argon: Argon,
+    train: Train,
+    make_student: Callable[[str], Policy],
+    make_sim: Callable[[TaskSpec], TruthSim] = lambda spec: MujocoSim(spec.task_config()),
+) -> tuple[Path, list[EvaluationResult]]:
+    """Continue a learned skill in the diagnose -> re-teach loop, as `mom run --spec <run>/spec.json --from-run <run>`
+    would: a run of its own beside this one, judged by the spec's rule. Its round 0 re-examines the learned
+    checkpoint, so a skill already at the loop's target stops there."""
+    spec = TaskSpec.model_validate_json((run_dir / "spec.json").read_text())
+    loop_dir = run_dir.parent / f"{run_dir.name}-loop"
+    sim = make_sim(spec)
+    check_carry_over(run_dir, loop_dir, sim.sim_version)  # a source the loop can't start from writes nothing
+    argon.events.emit("instruction", text=spec.instruction, source="tasks.learn")
+    write_atomically(loop_dir / "spec.json", spec.model_dump_json(indent=2))
+    results = run_loop(
+        sim,
+        loop_dir,
+        loop_dir.name,
+        max_rounds=rounds,
+        argon=argon,
+        make_student=make_student,
+        train_student=train,
+        instruction=spec.instruction,
+        from_run=run_dir,
+        verdict=partial(judge, spec),
+    )
+    return loop_dir, results
+
+
 def summary(report: LearnReport) -> str:
     """The report in a few lines, each count with its n (rule 6)."""
     spec, metrics = report.spec, report.finetune_metrics
@@ -403,9 +437,17 @@ def main() -> None:
     parser.add_argument("--with-base", action="store_true", help="also examine the base model on the same seeds")
     parser.add_argument("--collect-only", action="store_true", help="stop after the batch; no GPU needed")
     parser.add_argument("--resume", type=Path, help="train on and examine a run dir whose batch finished")
+    parser.add_argument(
+        "--then-loop",
+        type=_positive,
+        metavar="ROUNDS",
+        help="then continue in up to ROUNDS diagnose -> re-teach rounds, in a run beside this one",
+    )
     args = parser.parse_args()
     if (args.instruction is None) == (args.resume is None):
         parser.error("give an instruction, or --resume with a run dir, not both")
+    if args.collect_only and args.then_loop:
+        parser.error("--collect-only stops after the batch, before anything the loop could continue")
     if args.resume is not None:
         if args.collect_only:
             parser.error("--collect-only stops after the batch and --resume starts after it: give one")
@@ -436,6 +478,16 @@ def main() -> None:
     report = finish(run_dir, exam_seeds=args.exam_seeds, train=finetune, make_student=StudentPolicy, base=base)
     print(summary(report))
     print(f"full report: {run_dir / 'report.json'}")
+    if args.then_loop and report.checkpoint == (base or BASE_CHECKPOINT):
+        print("nothing was trained, so there is no learned skill for the loop to continue")
+    elif args.then_loop:
+        loop_id = f"{run_dir.name}-loop"
+        argon = Argon(EventLog(run_dir.parent / loop_id, loop_id))
+        argon.check()
+        loop_dir, results = then_loop(run_dir, args.then_loop, argon=argon, train=finetune, make_student=StudentPolicy)
+        for r in results:
+            print(f"loop round {r.round} {r.checkpoint}: {r.successes}/{r.n - r.errored} held-out, {r.errored} errored")
+        print(f"{argon.summary()}\nloop run saved to {loop_dir}")
 
 
 if __name__ == "__main__":
