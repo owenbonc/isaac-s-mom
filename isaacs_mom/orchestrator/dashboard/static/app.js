@@ -10,7 +10,7 @@ let logFollowing = true;
 // Where following last parked the log: its foot, or the stage frame's row while a later decision runs.
 let logAnchor = 0;
 let flashedFrame = null;
-let lastHeard = { text: "", episode: null, only: null, paused: false, lost: false };
+let lastHeard = { text: "", episode: null, paused: false, lost: false };
 // A one-off line for the announcer: the box or bin move, heard once when it arrives live.
 let news = "";
 // Run files by name, null once asked for and absent; a written file never changes, so each is read until found.
@@ -110,28 +110,24 @@ function renderHeader() {
     : "";
 }
 
-// A seed's episode is placed by its seed and checkpoint instead, so in Results it has no position.
+// An episode opened from a seed is placed by its seed and checkpoint instead, so it has no position.
 function position(ep) {
   const s = MomState.shown(view);
-  const among = view.tab === "teaching" ? s.episodes.filter(MomState.teaches) : s.episodes;
-  return view.tab === "results" || !ep ? "" : `Episode ${among.indexOf(ep) + 1} of ${among.length}`;
+  return MomState.where(view) === "episode" || !ep ? "" : `Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}`;
 }
 
-// Screen readers hear what changed (episode, control, verdict, Results place, pause, connection), never every step.
+// Screen readers hear what changed (episode, control, verdict, the seed open, pause, connection), never every step.
 function announce(text) {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
   const place = MomState.where(view);
-  const heard = { text, place, seed: view.seed, episode: ep && ep.id, only: view.only, paused: view.frozen !== null, lost: view.lost };
+  const heard = { text, place, seed: view.seed, episode: ep && ep.id, paused: view.frozen !== null, lost: view.lost };
   const parts = [];
   if (heard.paused !== lastHeard.paused) parts.push(heard.paused ? "Paused." : "Resumed.");
   if (heard.lost !== lastHeard.lost) parts.push(heard.lost ? "Connection to the run lost, retrying." : "Connection restored.");
   const row = place === "seed" && MomState.results(s).seeds.find((x) => x.seed === view.seed);
-  if (ep && heard.episode !== lastHeard.episode) parts.push(`${position(ep) || `Seed ${view.seed}`}, ${kindOf(ep)[0].toLowerCase()}.`, text);
-  else if (place === "list" && (heard.place !== lastHeard.place || heard.only !== lastHeard.only)) {
-    const { seeds, counts } = MomState.results(s);
-    parts.push(view.only === null ? `Results: ${seeds.length} held-out seeds.` : `Results: ${counts[view.only]} of ${seeds.length} held-out seeds, marked ${MARK[view.only].toLowerCase()}.`);
-  } else if (row && (heard.place !== lastHeard.place || heard.seed !== lastHeard.seed)) parts.push(`Seed ${row.seed}, ${MARK[row.mark].toLowerCase()}: ${outcomes(row)}.`);
+  if (row && (heard.place !== lastHeard.place || heard.seed !== lastHeard.seed)) parts.push(`Seed ${row.seed}, ${MARK[row.mark].toLowerCase()}: ${outcomes(row)}.`);
+  else if (place !== "seed" && ep && (heard.episode !== lastHeard.episode || heard.place !== lastHeard.place)) parts.push(`${position(ep) || `Seed ${view.seed}`}, ${kindOf(ep)[0].toLowerCase()}.`, text);
   else if (text !== lastHeard.text) parts.push(text);
   parts.push(news);
   news = "";
@@ -153,15 +149,9 @@ function renderControl() {
     return view.lost ? "" : "Fine-tuning the student.";
   }
   const place = MomState.where(view);
-  if (place === "list" || place === "seed") {
-    const s = MomState.shown(view);
-    const tested = MomState.results(s).seeds.length;
+  if (place === "seed") {
     el.className = "control";
-    // A run that did not start says why where its results would be, so the bar names only that.
-    el.innerHTML =
-      s.refused !== null
-        ? '<span class="what">Not started</span>'
-        : `<span class="what">Held-out seeds</span>${!tested ? "" : `<span class="note">${place === "list" ? "Choose a seed to see its test at each checkpoint." : "Choose a checkpoint to see that episode in full."}</span>`}`;
+    el.innerHTML = `<span class="what">Held-out seed ${esc(view.seed)}</span><span class="note">Choose a checkpoint to see that episode in full.</span>`;
     return "";
   }
   if (!ep) {
@@ -172,9 +162,7 @@ function renderControl() {
       ? '<span class="what">No run yet</span>'
       : s.refused !== null
         ? '<span class="what">Not started</span>'
-        : s.episodes.length
-          ? `<span class="what">No teaching episode yet</span><span class="note">${TEACHING_STARTS}</span>`
-          : '<span class="what">Waiting for the run to start</span>';
+        : '<span class="what">Waiting for the run to start</span>';
     return "";
   }
   const [kind, where] = kindOf(ep);
@@ -183,7 +171,7 @@ function renderControl() {
   const k = row ? row.episodes.findIndex((x) => x.id === ep.id) : -1;
   const at = k < 0 ? "" : `, ${esc(r.checkpoints[k].name)}`;
   const among = position(ep);
-  const back = place === "episode" ? `<button type="button" class="back" data-back data-f="control-back" aria-label="Back to seed ${esc(view.seed)}" data-tip="Back to seed ${esc(view.seed)} · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
+  const back = place === "episode" ? `<button type="button" class="back" data-back data-f="control-back" aria-label="Back" data-tip="Back · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
   const head = `${back}<span class="kind"><span class="what">${kind}</span><span class="note">${where}${at}${among ? ` · ${among.toLowerCase()}` : ""}</span></span>`;
   if (!ep.controller) {
     el.className = "control";
@@ -214,8 +202,7 @@ function renderControl() {
   return `${said}${words ? ` Verdict: ${words}.` : ""}`;
 }
 
-const TEACHING_STARTS = "The student's trials start once the first held-out test ends.";
-const noEpisode = () => (MomState.shown(view).episodes.length ? slate("No teaching episode yet", TEACHING_STARTS) : slate("No episode yet", "The head camera's frames appear here once the run starts."));
+const noEpisode = () => slate("No episode yet", "The head camera's frames appear here once the run starts.");
 
 // A frame-sized card on the stage where no head-camera frame can be shown yet.
 const slate = (title, note) => `<div class="frame"><div class="cell"><div class="shot slate"><p class="what">${title}</p><p class="note">${note}</p></div></div></div>`;
@@ -355,8 +342,8 @@ function verdictRow(ep) {
   return `<li class="event ${look}"><span class="n">${icon}</span><span>${esc(MomState.verdictWords(ep))}. <span class="d">${reason}Task ${v.task ? "succeeded" : "not met"}, physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
 }
 
-const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m" };
-const STEPS = { list: "seed", seed: "seed", episode: "checkpoint", teaching: "episode", now: "episode" };
+const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-end": "End", "b-d": "d", "b-t": "t", "b-m": "m" };
+const STEPS = { seed: "seed", episode: "checkpoint", run: "episode" };
 const PAUSE = $("b-pause");
 
 function renderEpisode() {
@@ -442,34 +429,42 @@ const outcomes = (row) => {
   return row.episodes.length < 2 ? OUTCOME[first.outcome] : `${OUTCOME[first.outcome]} → ${OUTCOME[latest.outcome]}`;
 };
 
-function resultsList() {
-  const s = MomState.shown(view);
-  const r = MomState.results(s, view.only);
-  const head = `<div class="summary">${heldOut()}</div>`;
-  if (s.refused !== null) return `${head}<div class="empty"><p class="what">Not started</p><p class="note">${esc(s.refused)}</p></div>`;
-  if (!r.checkpoints.length) {
-    const why = !runId ? "No runs yet. Tell the robot what to learn in the Teach box to start one." : s.eventCount ? "Each held-out seed shows here once the student has been tested on it." : "Waiting for the run's events.";
-    return `${head}<div class="empty"><p class="note">${why}</p></div>`;
+// Before and After are uncoloured, so only the Status row's marks carry colour.
+const VERDICT = { succeeded: ["pass", "succeeded"], failed: ["fail", "failed"], errored: ["error", "errored"], pending: ["pending", "not run"] };
+const verdictIcon = (o) => `<svg class="i plain" aria-hidden="true"><use href="#m-${VERDICT[o][0]}"/></svg>`;
+const columnName = (c) => `Seed ${c.seed}: ${MARK[c.mark].toLowerCase()}, ${VERDICT[c.before][1]} before, ${VERDICT[c.after][1]} after`;
+// The column that takes the strip's one Tab stop: the seed open, else the one last focused, else the first.
+let stripFocus = null;
+function renderStrip() {
+  const cols = MomState.columns(MomState.shown(view));
+  const at = [view.seed, stripFocus].find((seed) => cols.some((c) => c.seed === seed)) ?? (cols.length ? cols[0].seed : null);
+  $("columns").innerHTML = cols.length
+    ? cols
+        .map((c) => {
+          const name = esc(columnName(c));
+          const open = c.seed === view.seed ? ' aria-current="true"' : "";
+          return `<li><button type="button" class="column" data-column="${esc(c.seed)}" data-f="column:${esc(c.seed)}" tabindex="${c.seed === at ? 0 : -1}" aria-label="${name}" title="${name}"${open}>${markIcon(c.mark)}${verdictIcon(c.before)}${verdictIcon(c.after)}</button></li>`;
+        })
+        .join("")
+    : `<li class="none note">${MomState.shown(view).refused !== null ? "Not started." : "Each held-out seed shows here once the student has been tested on it."}</li>`;
+  // With no seed open the switch has nothing to compare, so it stays in view, dimmed, and says why.
+  const idle = view.seed === null;
+  for (const b of $("sides").querySelectorAll("button")) {
+    b.setAttribute("aria-pressed", String(b.dataset.side === view.side));
+    b.setAttribute("aria-disabled", String(idle));
+    b.dataset.tip = idle ? "Choose a seed to compare" : SIDES[b.dataset.side];
   }
-  const filters = MomState.MARKS.map((m) => {
-    const n = r.counts[m];
-    const on = view.only === m;
-    const tip = on ? "Show every seed" : `Show only the seeds marked ${MARK[m].toLowerCase()}`;
-    return `<button type="button" class="count" data-only="${m}" data-f="only:${m}" aria-pressed="${on}" aria-label="${MARK[m]}: ${n}" data-tip="${tip}"${n || on ? "" : " disabled"}>${markIcon(m)}<span>${n}</span></button>`;
-  });
-  const focus = r.seeds.some((x) => x.seed === view.focus) ? view.focus : r.seeds.length ? r.seeds[0].seed : null;
-  const rows = r.seeds.map((x) => {
-    const seed = esc(x.seed);
-    return `<li><button type="button" class="seed ${x.mark}" data-seed="${seed}" data-f="seed:${seed}" tabindex="${x.seed === focus ? 0 : -1}">${markIcon(x.mark)}<span class="n">Seed ${seed}</span><span class="sr">, ${MARK[x.mark].toLowerCase()}:</span><span class="was">${outcomes(x)}</span></button></li>`;
-  });
-  const none = view.only === null ? "" : `<p class="empty note">No seed is marked ${MARK[view.only].toLowerCase()} now.</p>`;
-  return `${head}<div class="filters" role="group" aria-label="Show only the seeds marked">${filters.join("")}</div>${rows.length ? `<ol class="seeds" aria-label="Held-out seeds">${rows.join("")}</ol>` : none}`;
 }
+const SIDES = { before: "Before: the seed's first checkpoint", both: "Both: every checkpoint side by side", after: "After: the seed's latest checkpoint" };
 
-const SIDES = { before: ["Before", "The first checkpoint's episode"], both: ["Both", "Every checkpoint's episode, side by side"], after: ["After", "The latest checkpoint's episode"] };
-const FRAME_MIN = 360;
-let side = null;
-const sideFor = (count) => side || (innerWidth / count >= FRAME_MIN ? "both" : "after");
+const FRAME_MIN = 280;
+// Until the presenter chooses, the switch shows Both where each card keeps a readable frame in the stage, else After.
+let chosen = false;
+const stageWidth = () => $("results").clientWidth || document.querySelector(".camera").clientWidth;
+function defaultSide() {
+  const count = MomState.results(MomState.shown(view)).checkpoints.length || 1;
+  if (!chosen) view.side = stageWidth() / count >= FRAME_MIN ? "both" : "after";
+}
 function cardVerdict(e, ep) {
   if (e.outcome === "pending") return `<span class="note">${ep ? "Running" : "Not run yet"}</span>`;
   if (e.outcome === "errored") {
@@ -493,37 +488,19 @@ function seedDetail() {
   const s = MomState.shown(view);
   const r = MomState.results(s);
   const row = r.seeds.find((x) => x.seed === view.seed);
-  const back = `<button type="button" class="back" data-back data-f="back" aria-label="Back to the seeds" data-tip="Back to the seeds · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>`;
+  const back = `<button type="button" class="back" data-back data-f="back" aria-label="Back" data-tip="Back · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>`;
   const title = `<h2>Seed ${esc(view.seed)}${row ? `${markIcon(row.mark)}<span class="sr">, ${MARK[row.mark].toLowerCase()}</span>` : ""}</h2>`;
   if (!row) return `<header class="seed-head">${back}${title}</header><p class="empty note">This run's events hold no held-out episode on seed ${esc(view.seed)}.</p>`;
   const count = r.checkpoints.length;
-  const shown = sideFor(count);
-  const switcher =
-    count < 2
-      ? ""
-      : `<div class="switch" role="group" aria-label="Checkpoints shown">${Object.entries(SIDES)
-          .map(([k, [name, tip]]) => `<button type="button" data-side="${k}" data-f="side:${k}" aria-pressed="${k === shown}" aria-label="${name}" data-tip="${name}: ${tip.toLowerCase()}"><svg class="i" aria-hidden="true"><use href="#i-${k}"/></svg></button>`)
-          .join("")}</div>`;
-  const picks = shown === "before" ? [0] : shown === "after" ? [count - 1] : r.checkpoints.map((_, k) => k);
+  const picks = view.side === "before" ? [0] : view.side === "after" ? [count - 1] : r.checkpoints.map((_, k) => k);
   const cards = picks.map((k) => seedCard(r.checkpoints[k], row.episodes[k], row.episodes[k].id === null ? null : s.episodes.find((x) => x.id === row.episodes[k].id)));
-  return `<header class="seed-head">${back}${title}<span class="note">${outcomes(row)}</span>${switcher}</header><div class="cards" style="--n:${picks.length}">${cards.join("")}</div>`;
+  return `<header class="seed-head">${back}${title}<span class="note">${outcomes(row)}</span></header><div class="cards" style="--n:${picks.length}">${cards.join("")}</div>`;
 }
 
-function renderResults() {
+function renderSeed() {
   const place = MomState.where(view);
   $("main").dataset.view = place;
-  if (place === "list") $("results").innerHTML = resultsList();
   if (place === "seed") $("results").innerHTML = seedDetail();
-}
-
-function renderTabs() {
-  for (const b of $("tabs").querySelectorAll("button")) {
-    if (b.dataset.tab === view.tab) b.setAttribute("aria-current", "page");
-    else b.removeAttribute("aria-current");
-  }
-  $("tabs").querySelector('[data-tab="now"]').hidden = !(view.tab === "now" || (MomState.following(view, now()) && !view.lost));
-  // Now's dot is the live dot (SPEC §3.5), so a recorded, paused or disconnected run shows none.
-  $("now-dot").hidden = MomState.provenance(view, now()) !== "live";
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -623,8 +600,9 @@ function render() {
   renderQueued = false;
   const focused = document.activeElement;
   renderHeader();
-  renderTabs();
-  renderResults();
+  defaultSide();
+  renderStrip();
+  renderSeed();
   const said = renderControl();
   renderEpisode();
   renderCamera();
@@ -647,24 +625,27 @@ function render() {
 }
 
 let renderedPlace = null;
+let renderedSeed = null;
 let seedMoved = false;
 let leftEpisode = null;
+// Opening a seed, an episode or going back moves the focus with the view; back on the run, to the seed's column.
 function placeFocus() {
   const place = MomState.where(view);
   const moved = seedMoved || (renderedPlace !== null && place !== renderedPlace);
+  const left = renderedSeed;
   renderedPlace = place;
+  renderedSeed = view.seed;
   seedMoved = false;
   if (view.opened !== null) leftEpisode = view.opened;
-  if (!moved) return;
+  // A seed chosen from the strip keeps the focus there, so ← and → go on through its columns.
+  if (!moved || (document.activeElement && document.activeElement.closest && document.activeElement.closest("#columns"))) return;
   const at = (selector) => $("results").querySelector(selector);
   const to =
-    place === "list"
-      ? at(`.seeds [data-seed="${CSS.escape(String(view.focus))}"]`) || at(".seeds .seed")
-      : place === "seed"
-        ? (leftEpisode !== null && at(`.card[data-open="${CSS.escape(leftEpisode)}"]`)) || [...$("results").querySelectorAll(".card")].pop() || at(".back")
-        : place === "episode"
-          ? $("control").querySelector(".back")
-          : null;
+    place === "seed"
+      ? (leftEpisode !== null && at(`.card[data-open="${CSS.escape(leftEpisode)}"]`)) || [...$("results").querySelectorAll(".card")].pop() || at(".back")
+      : place === "episode"
+        ? $("control").querySelector(".back")
+        : left !== null && $("columns").querySelector(`[data-column="${CSS.escape(String(left))}"]`);
   if (to) to.focus();
 }
 
@@ -807,8 +788,20 @@ document.addEventListener(
 function press(e) {
   const place = MomState.where(view);
   if (!MomState.keydown(view, e, now())) return false;
-  seedMoved = (place === "list" || place === "seed") && e.key.startsWith("Arrow");
+  seedMoved = place === "seed" && e.key.startsWith("Arrow");
   schedule();
+  return true;
+}
+// ← and → move between the strip's columns while the focus is in it; Enter on one is its button's click.
+function stripKey(e) {
+  const column = e.target && e.target.closest && e.target.closest("[data-column]");
+  if (!column || (e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.metaKey || e.ctrlKey || e.altKey) return false;
+  const to = MomState.neighbour(MomState.shown(view), Number(column.dataset.column), e.key === "ArrowLeft" ? -1 : 1);
+  if (to !== null) {
+    stripFocus = to;
+    renderStrip();
+    $("columns").querySelector(`[data-column="${CSS.escape(String(to))}"]`).focus();
+  }
   return true;
 }
 document.addEventListener("keydown", (e) => {
@@ -816,24 +809,28 @@ document.addEventListener("keydown", (e) => {
     dismissTeach();
     if (closePopover()) return;
   }
-  if (press(e)) e.preventDefault(); // also keeps a focused button from taking Space as a click
+  if (stripKey(e) || press(e)) e.preventDefault(); // also keeps a focused button from taking Space as a click
 });
 // Some browsers click a focused button on Space's keyup; the keydown above already acted.
 document.addEventListener("keyup", (e) => e.key === " " && e.preventDefault());
-$("tabs").addEventListener("click", (e) => {
-  const tab = e.target.closest("button[data-tab]");
-  if (!tab) return;
-  MomState.visit(view, { tab: tab.dataset.tab });
+$("columns").addEventListener("click", (e) => {
+  const column = e.target.closest("button[data-column]");
+  if (!column) return;
+  stripFocus = Number(column.dataset.column);
+  MomState.visit(view, MomState.showSeed(view, stripFocus));
+  schedule();
+});
+$("sides").addEventListener("click", (e) => {
+  const button = e.target.closest("button[data-side]");
+  if (!button || view.seed === null) return;
+  chosen = true;
+  MomState.choose(view, button.dataset.side);
   schedule();
 });
 $("results").addEventListener("click", (e) => {
   const button = e.target.closest("button");
   if (!button) return;
-  const { only, seed, side: chosen, open } = button.dataset;
-  if (only) MomState.visit(view, { only: view.only === only ? null : only });
-  else if (seed) MomState.visit(view, { seed: Number(seed), focus: Number(seed) });
-  else if (open) MomState.visit(view, { opened: open });
-  else if (chosen) side = chosen;
+  if (button.dataset.open) MomState.visit(view, { opened: button.dataset.open });
   else if ("back" in button.dataset) MomState.keydown(view, { key: "Escape" }, now());
   else return;
   schedule();
