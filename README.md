@@ -23,7 +23,7 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 |:---:|:---:|:---:|:---:|:---:|
 | to teach the robot **one new skill** from one sentence | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic teaching round** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image** (on a Mac); a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
 
-[Technical summary (PDF)](docs/technical-summary.pdf) · [Pitch deck (PDF)](docs/deck/deck.pdf) · [How it works](#how-it-works) · [Results](#results) · [Impact](#impact) · [Videos](#videos) · [Live demo](#live-demo) · [Quickstart](#quickstart)
+[Technical summary (PDF)](docs/technical-summary.pdf) · [Pitch deck (PDF)](docs/deck/deck.pdf) · [How it works](#how-it-works) · [Repair loop](#the-repair-loop-test-diagnose-re-teach-until-its-good-enough) · [Results](#results) · [Impact](#impact) · [Videos](#videos) · [Live demo](#live-demo) · [Quickstart](#quickstart)
 
 </div>
 
@@ -47,7 +47,19 @@ Robots learn new skills from **human demonstrations**, and those are slow and co
 4. **The student learns.** SmolVLM2-500M is fine-tuned with LoRA r16 on a laptop GPU to pick the next skill from the head-camera image.
 5. **The student is examined alone** on 20 **sealed** scenes that no demonstration may use: no teacher, no cloud.
 
-**Repair loop** (`mom run`): when the student fails, the validator says why in words, Argon diagnoses the failure from the saved frames, and it demonstrates the fix on those scenes. One automatic round took the fixed-feet student v2 from **10/20 to 18/20** on the sealed scenes ([Results](#results)).
+### The repair loop: test, diagnose, re-teach, until it's good enough
+
+`mom run` keeps teaching a student until it is good enough, with no person in the loop. Typing into the dashboard's Teach box starts it.
+
+1. **Type the task in words.** The dashboard's Teach box, or `mom run --instruction`.
+2. **Test: see where the student is now.** The student alone on the 20 sealed scenes (round 0).
+3. **Diagnose the mistakes.** The student tries 10 practice scenes. For each failure, Argon reads the saved frames, the skill calls and the validator's verdict, and says why it failed. One more call compares all ten trials, failed and successful, and groups the failures into up to 3 causes.
+4. **Argon demonstrates on the weaknesses.** 20 demos: the failed scenes first, then fresh ones, each taught with the lesson for its cause. In 1 of 4 the bin moves right after the lift. The validator keeps only what works.
+5. **Fine-tune** the student on every accepted demo so far.
+6. **Test again** on the same 20 sealed scenes.
+7. **Loop or stop.** Below 80% (16/20), it diagnoses the new student's mistakes and repeats steps 3 to 6, for up to 3 rounds. At 80% it stops by itself.
+
+**Measured:** one round took the fixed-feet student v2 from **10/20 to 18/20**, past the target, so the loop stopped itself. An untargeted control matched it ([Results](#results)). The Teach box runs this loop for the task it serves; a brand-new task starts with the one-sentence path above.
 
 ### Architecture
 
@@ -341,7 +353,7 @@ docs/
 - **Human involvement.** Every executed demo step has `controller = teacher` (584 steps) and every exam decision `controller = student` (326); all 60 demo and 40 exam verdicts come from the spec's rule in code.
 - **Bin moved to 125° (1/20) and the 30-scene scan (25/30; in one miss the bin never moved).** Mac float32 runs of the showcase student: [`docs/pitch/data/sources/`](docs/pitch/data/sources/).
 - **One teaching round.** On the RTX 5070 Ti, code at phase-1 `03321aa`, both runs started by `mom run --task fixed_feet --from-run runs/fixed-v2 --rounds 1`:
-  - `runs/gate-e-1008`: `evaluation_result` round 0 (10/20) and round 1 (18/20); 20 teacher demos, 17 accepted, 1,212 training examples.
+  - `runs/gate-e-1008`: `evaluation_result` round 0 (10/20) and round 1 (18/20); 20 teacher demos, 17 accepted, 1,212 training examples. This round ran before the round-level comparison in step 3 of the repair loop merged (#37), so it diagnosed each failure on its own; the comparison was checked once on real Argon on this round's 10 trials ([PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721243829)).
   - `runs/gate-e-control-1130`: the same command run through [`control_untargeted.py`](docs/pitch/data/evidence/control_untargeted.py), which removes the diagnosis and the targeting (fresh dev seeds 1520–1539, no lesson); round 0 10/20, round 1 18/20, 17/20 demos accepted.
   - The grey-image control on `gate-e-1008/ckpt-r1`, run by [`blind_vs_sighted.py`](docs/pitch/data/evidence/blind_vs_sighted.py) (the script behind the Mac controls too): 18/20 vs 0/20 over held-out seeds 1–20, per seed in [`docs/pitch/data/sources/vision-control-gate-e-5070.log`](docs/pitch/data/sources/vision-control-gate-e-5070.log).
   - Per-seed outcomes: [PR #22 6721136914](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721136914), [6721243829](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721243829) and [6721840949](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721840949).
