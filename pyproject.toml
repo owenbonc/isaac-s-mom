@@ -1,0 +1,71 @@
+[project]
+name = "isaacs-mom"
+version = "0.1.0"
+description = "An Argon teacher that finds the gaps in a robot's skills and creates its own lessons."
+requires-python = ">=3.12,<3.13"
+dependencies = [
+    "fastapi>=0.162.2",
+    "google-genai>=3.0.0",
+    "httpx2>=2.16.0",
+    "imageio>=2.38.1",
+    "imageio-ffmpeg>=0.8.1",
+    "mujoco>=3.3",
+    "num2words>=0.5",
+    "numpy>=2.0",
+    "peft>=0.17",
+    "pillow>=11.0",
+    "pydantic>=2.9",
+    "torch>=2.8",
+    "torchvision>=0.23",
+    "transformers>=4.57",
+    "uvicorn>=0.54.0",
+]
+
+[project.scripts]
+mom = "isaacs_mom.orchestrator.cli:main"
+
+[dependency-groups]
+dev = [
+    "httpx>=0.28.1",
+    "pyright>=1.1.390",
+    "pytest>=8.3",
+    "ruff>=0.8",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP", "B", "SIM"]
+
+[tool.pyright]
+include = ["isaacs_mom", "tests"]
+pythonVersion = "3.12"
+typeCheckingMode = "standard"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[tool.uv.sources]
+torch = [
+  { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+  { index = "pytorch-cu128", marker = "sys_platform == 'win32'" },
+]
+torchvision = [
+  { index = "pytorch-cpu", marker = "sys_platform == 'linux'" },
+  { index = "pytorch-cu128", marker = "sys_platform == 'win32'" },
+]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[[tool.uv.index]]
+name = "pytorch-cu128"
+url = "https://download.pytorch.org/whl/cu128"
+explicit = true

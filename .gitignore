@@ -1,0 +1,15 @@
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+.ruff_cache/
+runs/
+checkpoints/
+rehearsal/
+*.safetensors
+.claude/worktrees/
+.DS_Store
+.impeccable/
+docs/live-demo/videos/
+docs/live-demo/logs/
+docs/technical-summary/build/

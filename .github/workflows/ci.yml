@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+    branches: [main, phase-1]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      MUJOCO_GL: osmesa
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # verify.sh scans every commit
+      - run: sudo apt-get update -q && sudo apt-get install -yq libosmesa6
+      - uses: astral-sh/setup-uv@v5
+      - run: uv sync --frozen
+      - run: scripts/verify.sh

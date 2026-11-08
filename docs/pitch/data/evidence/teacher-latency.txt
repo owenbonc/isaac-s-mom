@@ -1,0 +1,5 @@
+readiness+prompt trials (Mac): files=19 act_calls=1038 ok=1030 failed=8 median=7275ms p95=16581ms span=84.3min purposes={'startup': 19, 'act': 1038}
+walking batch 02:03 (Mac, 10 teachers): files=10 act_calls=1403 ok=1389 failed=14 median=8565ms p95=20542ms span=46.4min purposes={'startup': 10, 'act': 1403}
+generated fixed (8 teachers): files=8 act_calls=587 ok=584 failed=3 median=8266ms p95=20994ms span=15.9min purposes={'act': 587}
+generated walking: files=6 act_calls=551 ok=548 failed=3 median=8179ms p95=18253ms span=18.0min purposes={'act': 551}
+ALL act: n=3579 ok=3551 failed=28 median=8066 p95=19473 p05=4721 max=56911

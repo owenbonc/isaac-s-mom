@@ -1,0 +1,18 @@
+machine: Apple M5  date: 2026-11-08T11:44:02Z
+observe (320x240 render + JPEG), ms median/max/n: (12.567124969791621, 190.71016600355506, 50)
+walking policy act (LSTM+MLP, numpy), ms: (0.02679100725799799, 0.0992919085547328, 2000)
+mj_step (G1 29-DoF + scene), ms: (0.03970798570662737, 0.1539998920634389, 2000)
+timestep 0.002
+fixed seed 1000 hug: ok=True wall=22 ms, 40 executed targets, sim 0.78 s
+fixed seed 1000 lift: ok=True wall=38 ms, 50 executed targets, sim 0.98 s
+fixed seed 1000 turn_left: ok=True wall=29 ms, 38 executed targets, sim 0.74 s
+fixed seed 1001 hug: ok=True wall=22 ms, 40 executed targets, sim 0.78 s
+fixed seed 1001 lift: ok=True wall=30 ms, 50 executed targets, sim 0.98 s
+fixed seed 1001 turn_left: ok=True wall=22 ms, 38 executed targets, sim 0.74 s
+fixed seed 1002 hug: ok=True wall=22 ms, 40 executed targets, sim 0.78 s
+fixed seed 1002 lift: ok=True wall=41 ms, 50 executed targets, sim 0.98 s
+fixed seed 1002 turn_left: ok=True wall=30 ms, 38 executed targets, sim 0.74 s
+walk hug: ok=True err=None wall=22 ms, sim 0.78 s
+walk lift: ok=True err=None wall=42 ms, sim 0.98 s
+walk walk_back: ok=True err=None wall=125 ms, sim 3.68 s
+walk turn_left: ok=True err=None wall=135 ms, sim 4.08 s

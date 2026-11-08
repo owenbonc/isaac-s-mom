@@ -1,0 +1,2 @@
+#!/bin/sh
+exec scripts/verify.sh secrets

@@ -1,0 +1,403 @@
+/* Devin's contrast (SPEC §3.5): hue only marks on grey, and each hue means one thing: student, teacher, success, failure. */
+:root{--ground:#1e1e20;--panel:#28282b;--row:#2c2c2f;--raised:#333336;--well:#161618;
+--edge:#37373b;--edge-strong:#4a4a4f;
+/* Measured: ink 10.3:1 on a panel, muted 5.9:1 (5.0:1 raised), dim 5.1:1 on the surround and 4.5:1 on a panel. */
+--ink:#d8d8da;--muted:#a3a3a8;--dim:#8e8e93;
+--student:#8eb2eb;--teacher:#66ccbe;--ok:#84d98a;--bad:#df9099;
+/* The unchanged marks are a step quieter than a change: 5.6:1 and 4.8:1 on a panel. */
+--ok-quiet:#71ad76;--bad-quiet:#bd848b;--warn:#e6c46e;
+--accent:#fff;--on-accent:#1e1e20;--focus:#fff;--selection:rgb(92 139 214 / .5);
+--shadow-pop:0 20px 48px -16px rgb(0 0 0 / .7);
+--ease-out:cubic-bezier(.23,1,.32,1);
+--sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+--r:10px;--r-sm:6px;
+/* Two sizes and one large number, the held-out change; emphasis is weight and colour, never another size. */
+--t-label:calc(12rem / 14);--t-fig:2.8rem}
+*{box-sizing:border-box}
+html{scrollbar-color:rgb(255 255 255 / .22) transparent;color-scheme:dark}
+/* 14px at 1280x720, growing with the smaller viewport side to 16px, so the layout keeps its proportions. */
+html{font-size:clamp(.875rem,min(1.09375vw,1.945vh),1rem)}
+/* Light text on dark reads thinner: a touch more weight and air. */
+body{margin:0;background:var(--ground);color:var(--ink);font:450 1rem/1.45 var(--sans);letter-spacing:.005em;font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased;height:100vh;overflow:hidden;display:flex;flex-direction:column}
+::selection{background:var(--selection);color:#fff}
+:focus-visible{outline:2px solid var(--focus);outline-offset:2px}
+/* Scroll regions sit inside clipped panels, so their ring goes inside. */
+ol.log:focus-visible,.side:focus-visible{outline-offset:-2px}
+h1,h2{margin:0;font-weight:600;line-height:1.25;text-wrap:balance}
+/* A panel's heading is a label: the content under it leads. */
+h2{font-size:var(--t-label);color:var(--muted);letter-spacing:.01em}
+.note,.ph-text{color:var(--muted)}
+.mono{font-family:var(--mono)}
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+.i{width:1.1rem;height:1.1rem;flex:none;fill:none;stroke:currentColor;stroke-width:2;stroke-linecap:round;stroke-linejoin:round}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+
+header.bar{flex:none;position:relative;z-index:3}
+.bar .top{display:flex;align-items:center;gap:.4rem .6rem;padding:.4rem .75rem .2rem;flex-wrap:wrap}
+header.bar h1{font-size:1rem;flex:none}
+.legend{position:relative;flex:none}
+.legend summary{position:relative;list-style:none;cursor:pointer;display:grid;place-items:center;width:2.3rem;height:2.3rem;border-radius:7px;color:var(--ink)}
+.legend summary::-webkit-details-marker{display:none}
+.legend[open] summary,.legend summary:focus-visible{background:var(--raised)}
+@media (hover:hover){.legend summary:hover{background:var(--raised)}}
+.legend summary::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);right:0;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out)}
+@media (hover:hover){.legend:not([open]) summary:hover::after{opacity:1;transition-delay:.3s}}
+.legend:not([open]) summary:focus-visible::after{opacity:1}
+/* Solid, so a popover's text holds its contrast over any frame. */
+.pop{position:absolute;top:calc(100% + .4rem);z-index:5;background:var(--panel);border:1px solid var(--edge-strong);border-radius:var(--r);box-shadow:var(--shadow-pop);padding:.75rem .9rem}
+.legend .pop{right:0;width:min(78rem,calc(100vw - 1.5rem));max-height:calc(100vh - 4rem);overflow-y:auto;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) minmax(0,1.15fr);gap:.2rem 1.4rem;transform-origin:top right}
+.legend section>h2{margin:0 0 .4rem}
+.legend section>.note{margin:.45rem 0 0;font-size:var(--t-label)}
+.legend dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.4rem .7rem;margin:0;align-items:baseline}
+.legend dt{display:flex;flex-wrap:wrap;gap:.3rem;font-size:var(--t-label);font-weight:600}
+.legend dd{margin:0;text-wrap:pretty}
+.legend .keys dt{align-items:center;color:var(--muted)}
+.legend .note.run{grid-column:1 / -1;margin:.45rem 0 0;font-size:var(--t-label)}
+.legend dt .mark{width:1.1rem;height:1.1rem}
+kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;min-width:1.5em;text-align:center;border:1px solid var(--edge-strong);border-radius:4px;background:var(--raised)}
+@media (prefers-reduced-motion:no-preference){
+  .pop{transition:opacity .16s var(--ease-out),transform .16s var(--ease-out)}
+  @starting-style{details[open] .pop,.answer{opacity:0;transform:scale(.97) translateY(-4px)}}
+}
+
+.runs{position:relative;min-width:0;flex:0 1 auto}
+/* As tall as the keys beside it, so the presenter's run switch is as easy a target. */
+.runs summary{max-width:17rem;min-height:2.3rem;list-style:none;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:0 .5rem;border-radius:var(--r-sm);font:450 var(--t-label)/1.35 var(--mono)}
+.runs summary::-webkit-details-marker{display:none}
+.runs[open] summary{background:var(--raised)}
+@media (hover:hover){.runs summary:hover{background:var(--raised)}}
+.run-name{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.runs summary .i{width:.9rem;height:.9rem;color:var(--muted)}
+.runs .pop{left:0;width:min(30rem,calc(100vw - 1.5rem));max-height:min(30rem,75vh);overflow-y:auto;padding:.35rem;transform-origin:top left}
+.runs .pop h2{padding:.25rem .55rem .35rem}
+.run-list{list-style:none;margin:0;padding:0}
+.run-list>li.ph-text{padding:.4rem .55rem}
+.run-list a{display:grid;grid-template-columns:6.6rem minmax(0,1fr);grid-template-areas:"chip what" ". id" ". why";gap:.1rem .6rem;align-items:baseline;padding:.45rem .55rem;border-radius:8px;color:inherit;text-decoration:none}
+@media (hover:hover){.run-list a:hover{background:var(--row)}}
+.run-list a[aria-current]{background:var(--raised)}
+.run-list .chip{grid-area:chip;justify-self:start}
+.run-what{grid-area:what;font-weight:600;overflow-wrap:anywhere}
+.run-id{grid-area:id;font-size:var(--t-label);color:var(--muted);overflow-wrap:anywhere}
+.run-why{grid-area:why;font-size:var(--t-label);overflow-wrap:anywhere}
+
+.presenter{display:flex;align-items:center;gap:.9rem;margin-left:auto;flex:none}
+.presenter .group{display:inline-flex;gap:.15rem}
+.presenter button{position:relative;font:600 1rem/1 var(--sans);color:var(--ink);background:none;border:0;border-radius:7px;min-width:2.3rem;height:2.3rem;padding:0;display:inline-flex;align-items:center;justify-content:center;gap:.3rem;cursor:pointer;transition:background-color .15s,transform .12s var(--ease-out)}
+@media (hover:hover){.presenter button:hover:not(:disabled){background:var(--raised)}}
+.presenter button:focus-visible{background:var(--raised)}
+.presenter button:active:not(:disabled){transform:scale(.96)}
+.presenter button:disabled{color:var(--dim);cursor:default}
+/* A held key is marked as Devin marks its open tab: a short bar in the accent, never a fill. */
+.presenter button[aria-pressed="true"]::before,#b-pause.on::before{content:"";position:absolute;left:.45rem;right:.45rem;bottom:0;height:2px;border-radius:1px;background:var(--accent)}
+#b-pause .on,#b-pause.on .off{display:none}
+#b-pause.on .on{display:block}
+#b-pause.on{padding:0 .55rem 0 .45rem}
+:is(.presenter,.teach,.switch) button::after,button.back::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
+/* Keys near the window's right edge open their tooltips leftwards, a back key rightwards, so they stay on screen. */
+:is(.presenter .group:not(:first-child),.teach,.switch) button::after{left:auto;right:0;--tx:0%}
+button.back::after{left:0;--tx:0%}
+@media (hover:hover){:is(.presenter,.teach,.switch) button:hover::after,button.back:hover::after{opacity:1;translate:var(--tx) 0;transition-delay:.3s}}
+:is(.presenter,.teach,.switch) button:focus-visible::after,button.back:focus-visible::after{opacity:1;translate:var(--tx) 0}
+
+/* A label is a mark and a word, never a capsule. */
+.chip{display:inline-flex;align-items:center;gap:.35rem;font-size:var(--t-label);font-weight:600;line-height:1.35;color:var(--ink);white-space:nowrap}
+.chip.recorded::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px solid currentColor}
+.chip.live::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor}
+.chip.config{color:var(--muted)}
+.chip.lost{color:var(--bad)}
+.chip.lost::before{content:"";width:.6rem;height:1.5px;background:currentColor;transform:rotate(-45deg)}
+.chip.placeholder{color:var(--muted)}
+.chip.placeholder::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px dashed currentColor}
+@media (prefers-reduced-motion:no-preference){.chip.live::before{animation:pulse 1.8s ease-in-out infinite}}
+@keyframes pulse{50%{opacity:.3}}
+.chip.paused::before{content:"";width:.4rem;height:.55rem;border-inline:2px solid currentColor}
+.chip.refused{color:var(--muted)}
+.chip.refused::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px solid currentColor;background:linear-gradient(135deg,transparent 42%,currentColor 42% 58%,transparent 58%)}
+/* Panel labels are grey and lighter than the header's status, which stays the one to read first. */
+.chip.quiet{font-weight:450;color:var(--muted)}
+.tag{display:inline-flex;align-items:center;gap:.4rem;font-size:var(--t-label);font-weight:600;line-height:1.35;white-space:nowrap}
+.tag.student{color:var(--student)}
+.tag.teacher{color:var(--teacher)}
+.tag.student::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor;flex:none}
+.tag.teacher::before{content:"";width:.45rem;height:.45rem;background:currentColor;transform:rotate(45deg);flex:none}
+.verdict{display:inline-flex;align-items:center;gap:.4rem;font-weight:600}
+.verdict.bad{color:var(--bad)}
+.verdict.good{color:var(--ok)}
+.verdict svg{width:.9em;height:.9em}
+
+.controlbar{flex:none;display:flex;align-items:center;gap:.4rem .9rem;margin:.1rem .75rem 0;padding:.3rem .4rem .3rem .85rem;min-height:2.65rem;border-radius:var(--r);background:var(--panel);border:1px solid var(--edge)}
+.control{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .7rem}
+.control .kind{display:flex;align-items:baseline;gap:.5rem;flex:none}
+.control .what{font-weight:600}
+.control .kind .note{font-size:var(--t-label)}
+/* The sentence gives way first, to two lines, so the kind, the controller and the verdict stay on one row. */
+.control>.note{flex:1 1 0;min-width:5rem;text-wrap:pretty;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
+.control .verdict{margin-left:auto;flex:none}
+/* The page's one capsule; its button stays quiet until there is text, so the stage keeps the brightest pixels. */
+.teach{position:relative;flex:none;display:flex;align-items:center;gap:.2rem;padding:2px;border-radius:999px;border:1px solid var(--edge-strong);background:var(--well)}
+.teach:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
+.teach .field{position:relative;display:flex}
+.teach input{font:inherit;color:var(--ink);width:16rem;height:2.3rem;padding:0 .4rem 0 .75rem;border:0;background:none;caret-color:var(--accent);outline:none}
+.teach .field:has(.count:not(:empty)) input{padding-right:4.8rem}
+.teach input::placeholder{color:var(--muted)}
+.teach input:read-only{color:var(--muted)}
+.teach .count{position:absolute;right:.6rem;top:50%;translate:0 -50%;font-size:var(--t-label);color:var(--muted);pointer-events:none}
+.teach input[aria-invalid="true"]~.count{color:var(--bad)}
+.teach button{position:relative;flex:none;width:2.3rem;height:2.3rem;padding:0;border:0;border-radius:50%;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;transition:transform .12s var(--ease-out)}
+.teach .wait,.teach[aria-busy="true"] .go{display:none}
+.teach[aria-busy="true"] .wait{display:block}
+@media (prefers-reduced-motion:no-preference){.teach .wait{animation:spin .8s linear infinite}}
+@keyframes spin{to{rotate:1turn}}
+.teach button:active:not(:disabled){transform:scale(.96)}
+.teach:has(input:placeholder-shown) button,.teach button:disabled{background:var(--raised);color:var(--ink)}
+.teach button:disabled{cursor:default}
+.teach[aria-busy="true"] button{cursor:progress}
+.teach .i{width:1.1rem;height:1.1rem}
+.answer{right:0;width:min(26rem,calc(100vw - 1.5rem));transform-origin:top right}
+.answer p{margin:0}
+.answer .what{font-weight:600;margin-bottom:.2rem}
+.answer ul{margin:0 0 .3rem;padding-left:1.1rem;overflow-wrap:anywhere}
+.taught{margin:0;color:var(--muted)}
+.taught q{color:var(--ink)}
+
+/* Above the main area, so the switch's tooltips show over the panels. */
+.results-strip{--top:1.75rem;--line:1.1rem;position:relative;z-index:2;flex:none;display:flex;margin:.35rem .75rem 0;background:var(--panel);border:1px solid var(--edge);border-radius:var(--r)}
+.results-strip .labels{flex:none;display:grid;grid-template-rows:var(--top) var(--line) var(--line);align-items:center;margin:0;padding:.2rem .7rem .2rem .85rem;border-right:1px solid var(--edge);font-size:var(--t-label);line-height:1;color:var(--muted)}
+.results-strip .labels .status{color:var(--ink);font-weight:600}
+.columns{flex:1;min-width:0;display:flex;list-style:none;margin:0;padding:.2rem .3rem;overflow-x:auto;scrollbar-width:thin}
+/* Twenty columns fit at 1280 px. */
+.columns li{flex:1 0 3.4rem;display:flex}
+.columns .none{align-self:center;padding:0 .5rem;font-size:var(--t-label)}
+.column{flex:1;display:grid;grid-template-rows:var(--top) var(--line) var(--line);place-items:center;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--ink);cursor:pointer;transition:background-color .15s}
+@media (hover:hover){.column:hover{background:var(--row)}}
+.column:focus-visible{background:var(--raised);outline-offset:-2px}
+.column[aria-current]{box-shadow:inset 0 -2px 0 var(--accent);background:var(--row)}
+.column .mark{width:1.5rem;height:1.5rem}
+.column .plain{width:.95rem;height:.95rem;color:var(--muted)}
+.results-strip>.switch{flex:none;display:flex;align-items:center;gap:.1rem;padding:0 .3rem;border-left:1px solid var(--edge)}
+.switch button[aria-disabled="true"]{color:var(--dim);cursor:default}
+.switch button[aria-disabled="true"][aria-pressed="true"]::before{opacity:.45}
+
+#results,main[data-view="seed"]>.camera{display:none}
+main[data-view="seed"]>#results{display:flex;flex-direction:column;overflow:hidden}
+.seed-head{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .6rem;padding:.3rem .45rem;border-bottom:1px solid var(--edge)}
+.seed-head h2{display:flex;align-items:center;gap:.45rem;font-size:1rem;color:var(--ink)}
+:is(button.back,.switch button){position:relative;flex:none;display:inline-flex;align-items:center;justify-content:center;width:2.3rem;height:2.3rem;padding:0;border:0;border-radius:7px;background:none;color:var(--ink);cursor:pointer;transition:background-color .15s}
+@media (hover:hover){:is(button.back,.switch button):hover{background:var(--raised)}}
+:is(button.back,.switch button):focus-visible{background:var(--raised)}
+.switch button[aria-pressed="true"]::before{content:"";position:absolute;left:.45rem;right:.45rem;bottom:0;height:2px;border-radius:1px;background:var(--accent)}
+.control button.back{margin-left:-.5rem}
+.cards{flex:1;min-height:0;display:grid;grid-template-columns:repeat(var(--n),minmax(0,1fr));gap:.5rem;padding:.5rem}
+.card{display:flex;flex-direction:column;gap:.4rem;min-width:0;min-height:0;padding:.5rem .55rem .6rem;border:0;border-radius:var(--r);background:none;color:inherit;font:inherit;text-align:left}
+button.card{cursor:pointer;transition:background-color .15s}
+@media (hover:hover){button.card:hover{background:var(--row)}}
+button.card:focus-visible{background:var(--row)}
+.card-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem .6rem;font-weight:600}
+.card-head .note{font-weight:450;font-size:var(--t-label)}
+.card .cell{flex:1}
+/* The verdict and up to two lines of its reason, so every card's frame sits at the same height. */
+.card-verdict{display:flex;flex-direction:column;gap:.15rem;min-height:4.5em}
+.verdict.warn{color:var(--warn)}
+.mark{width:1.25rem;height:1.25rem}
+.mark.up{color:var(--ok);stroke-width:2.6}
+.mark.down{color:var(--bad);stroke-width:2.6}
+.mark.pass{color:var(--ok-quiet)}
+.mark.fail{color:var(--bad-quiet)}
+.mark.error{color:var(--warn)}
+.mark.pending{color:var(--muted)}
+
+main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.95fr);gap:.6rem;padding:.45rem .75rem .4rem}
+.col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
+/* One panel whose sections keep their own heading and label, since their provenance can differ. */
+.side{display:flex;flex-direction:column;min-height:0;overflow-y:auto;background:var(--panel);border:1px solid var(--edge);border-radius:var(--r)}
+.side[data-more]{mask-image:linear-gradient(to bottom,#000 calc(100% - 3rem),transparent)}
+.side .panel{flex:none}
+.side>.panel{background:none;border:0;border-radius:0;box-shadow:none}
+.side>.panel+.panel{border-top:1px solid var(--edge)}
+.side>.panel>header{border-bottom:0;padding-bottom:.1rem}
+
+/* The row wraps by whole items wherever it runs out of width, so no value or label is ever clipped. */
+footer.models{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .9rem;padding:.3rem .75rem .4rem;border-top:1px solid var(--edge);font-size:var(--t-label)}
+footer.models .item{white-space:nowrap}
+footer.models b{font-weight:600}
+footer.models .chip:last-child{margin-left:auto}
+footer.models .v{color:var(--muted)}
+.panel{background:var(--panel);border:1px solid var(--edge);border-radius:var(--r);min-width:0;min-height:0}
+/* Rounded containers mask their content to the radius; isolation keeps composited children (row and flash animations) inside it in WebKit too. */
+.panel,.side,.shot,.cited,.thumb,.caption,.pop{isolation:isolate}
+.answer{overflow:hidden}
+.panel>header{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;padding:.4rem .75rem;border-bottom:1px solid var(--edge)}
+.panel>header .chip:last-child,.panel>header>span:last-child{margin-left:auto}
+.panel .body{padding:.5rem .75rem;overflow-wrap:anywhere}
+
+/* The stage is a dark well, so the high-key render has an edge and reads as a camera feed, not a picture in a card. */
+.camera{background:var(--well)}
+/* The stage asks for a frame as wide as the panel, shrinking only to fit its height; the filmstrip gets what is left. */
+.stage{flex:0 1 auto;min-height:0;display:flex;flex-direction:column;gap:.45rem;padding:.55rem .6rem}
+.frame{flex:0 1 auto;aspect-ratio:4/3;min-height:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:.7rem}
+.cell{min-height:0;display:grid;place-items:center;container-type:size}
+.shot{position:relative;width:min(100cqw,133.33cqh);aspect-ratio:4/3;background:var(--well);border-radius:var(--r-sm);box-shadow:0 0 0 1px var(--edge);overflow:hidden}
+.shot img{display:block;width:100%;height:100%;object-fit:contain}
+/* The notch's ::before and ::after are inverted corners, so it reads as cut into the frame, not a capsule over it. */
+.notch{--nr:.5rem;position:absolute;top:0;left:0;z-index:1;display:flex;align-items:center;gap:.6rem;max-width:calc(100% - 2rem);margin:0;padding:.3rem .7rem .4rem .55rem;border-bottom-right-radius:var(--nr);background:var(--well);font-weight:600}
+.notch::before,.notch::after{content:"";position:absolute;width:var(--nr);height:var(--nr);background:radial-gradient(circle at 100% 100%,transparent calc(var(--nr) - .5px),var(--well) var(--nr))}
+.notch::before{top:0;left:100%}
+.notch::after{top:100%;left:0}
+.said{display:inline-flex;align-items:center;gap:.4rem;min-width:0;font-family:var(--mono)}
+.said .i{width:1rem;height:1rem}
+.said.student{color:var(--student)}
+.said.teacher{color:var(--teacher)}
+.shot>.tag{position:absolute;right:.5rem;bottom:.5rem;z-index:1;padding:.1rem .55rem;border-radius:999px;background:var(--well);box-shadow:0 0 0 1px var(--edge-strong)}
+/* Frame-sized, so the stage keeps its shape between episodes and while nothing is on camera yet. */
+.slate{display:grid;place-content:center;gap:.4rem;padding:1.5rem;text-align:center;text-wrap:balance}
+.slate p{margin:0}
+.slate .what{font-weight:600}
+/* The fine-tune's contact sheet: n × n frames of 4:3 fill the 4:3 frame. */
+.sheet ol{position:absolute;inset:0;margin:0;padding:0;list-style:none;display:grid;grid-template:repeat(var(--n),minmax(0,1fr))/repeat(var(--n),minmax(0,1fr));gap:2px}
+.sheet li{position:relative;overflow:hidden;background:var(--well)}
+.sheet img{display:block;width:100%;height:100%;object-fit:cover}
+
+/* As many 4:3 thumbnails as fill the strip's height, 6 down to 3, earliest dropped first: n need an aspect ratio of n × 4/3. */
+.strip{--g:.4rem;list-style:none;margin:0;padding:.1rem .6rem .6rem;display:flex;align-items:flex-end;gap:var(--g);flex:1 1 0;min-height:0;container-type:size}
+/* Move's pair is the peak, so no thumbnail competes with it at any size. */
+.strip:empty,#stage:has(.cell + .cell) + .strip{display:none}
+.strip li{--w:min((100cqw - 5 * var(--g)) / 6,100cqh * 4 / 3);position:relative;flex:none;width:var(--w)}
+@container (aspect-ratio < 8){.strip li{--w:min((100cqw - 4 * var(--g)) / 5,100cqh * 4 / 3)}.strip li:nth-last-child(n+6){display:none}}
+@container (aspect-ratio < 20 / 3){.strip li{--w:min((100cqw - 3 * var(--g)) / 4,100cqh * 4 / 3)}.strip li:nth-last-child(n+5){display:none}}
+@container (aspect-ratio < 16 / 3){.strip li{--w:min((100cqw - 2 * var(--g)) / 3,100cqh * 4 / 3)}.strip li:nth-last-child(n+4){display:none}}
+@container (height < 3rem){.strip li{display:none}}
+.thumb{position:relative;height:min(100cqh,var(--w));background:var(--well);border-radius:4px;overflow:hidden}
+.strip img{display:block;width:100%;height:100%;object-fit:cover}
+.strip li.now .thumb{outline:1.5px solid var(--ink);outline-offset:2px}
+.strip li.moved .thumb::before{content:"";position:absolute;top:0;right:0;z-index:1;border-style:solid;border-width:0 .8rem .8rem 0;border-color:transparent var(--accent) transparent transparent}
+/* Each thumbnail's step sits in a corner notch, so the thumbnails take the strip's whole height. */
+.strip .st{position:absolute;top:0;left:0;z-index:1;padding:0 .35rem .1rem .3rem;border-bottom-right-radius:4px;background:var(--well);font-size:var(--t-label);color:var(--muted)}
+.strip li.moved .st{background:var(--accent);color:var(--on-accent)}
+/* After the frame rules, so a missing frame keeps its dot grid. */
+[data-missing]{background:radial-gradient(circle at 1px 1px,rgb(255 255 255 / .16) 1px,transparent 1.6px) 0 0 / 11px 11px,var(--well)}
+[data-missing] img{visibility:hidden}
+[data-missing]::after{content:"Frame missing";position:absolute;inset:0;display:grid;place-items:center;color:var(--muted)}
+.foot{flex:none;display:flex;align-items:center;gap:.5rem}
+.foot .moved-at{flex:none;display:inline-flex;align-items:center;gap:.35rem;padding-left:.55rem;font-weight:600}
+.foot>.chip:last-child{margin-left:auto}
+.caption{flex:1;min-width:0;margin:0;padding:.3rem .55rem;border-radius:var(--r-sm);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+/* The move's caption is the stage's one raised line: grey, in full ink, the colour left to the frames. */
+.caption.moved{background:var(--raised);color:var(--ink);font-weight:600;white-space:normal;text-wrap:pretty;box-shadow:inset 0 0 0 1px var(--edge)}
+.caption.wrap{white-space:normal;text-wrap:pretty}
+/* A clamped caption's padding would show the top of the line after its last; a transparent border keeps that gap blank. */
+.caption.clamped{padding-block:0;border-block:.3rem solid transparent}
+/* Two columns: the stage takes the left half at full height; the side column folds into a band over the decisions. */
+@media (min-width:1001px){
+  .bar .top{flex-wrap:nowrap}
+  main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:fit-content(60%) minmax(0,1fr);grid-template-areas:"cam side" "cam log"}
+  .camera,.results{grid-area:cam}
+  .decisions{grid-area:log}
+  .side{grid-area:side;display:grid;grid-template-columns:fit-content(20rem) minmax(0,1fr);grid-template-areas:"rounds diag" "train train"}
+  .side>#p-diagnosis{border-top:0;border-left:1px solid var(--edge)}
+  #p-rounds{grid-area:rounds}
+  #p-diagnosis{grid-area:diag}
+  #p-training{grid-area:train}
+  /* Each panel keeps its content's height and the band scrolls, so no panel ever overlaps the next. */
+  .side>.panel{min-height:auto}
+  .side>.panel>header{flex-wrap:nowrap}
+  .side>.panel>header h2{white-space:nowrap}
+  .side .cited-row{grid-template-columns:minmax(0,6rem) minmax(0,1fr)}
+  /* The panel's heading folds into the caption line, so the frame takes the panel's height. */
+  .camera>header{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+  /* Move is the take's peak: the pair fills the whole width, and the caption carries the log's marked row. */
+  main:has(#stage .cell + .cell){grid-template-areas:"cam cam" "cam cam"}
+  main:has(#stage .cell + .cell) :is(.side,.decisions){display:none}
+  /* Two 4:3 frames side by side, so the caption sits right under the pair. */
+  .frame:has(.cell + .cell){aspect-ratio:8/3}
+  /* The pair is as wide as the window allows; the height it leaves sits above and below it, not in one band. */
+  .stage:has(.cell + .cell){margin-block:auto}
+}
+/* Below 1280 px, held-out and the diagnosis still sit side by side (SPEC §3.5), each narrower. */
+@media (min-width:1001px) and (max-width:1279px){
+  .side{grid-template-columns:fit-content(15rem) minmax(0,1fr)}
+  .side>#p-rounds>header{flex-wrap:wrap}
+  .side .cited-row{grid-template-columns:minmax(0,4.5rem) minmax(0,1fr)}
+  /* The control bar keeps one row: the episode's kind stands over its seed, and the Teach box narrows. */
+  .control .kind{flex-direction:column;align-items:flex-start;gap:0;line-height:1.25}
+  .teach input{width:12.5rem}
+  .teach input::placeholder{font-size:var(--t-label)}
+}
+.shot.moved{outline:2px solid var(--accent);outline-offset:3px}
+/* Rare and aimed at the back of the room, so longer than UI feedback; a ring only, so it covers none of the frame. */
+@media (prefers-reduced-motion:no-preference){
+  .shot.flash::before{content:"";position:absolute;inset:0;z-index:1;box-shadow:inset 0 0 0 .45rem var(--accent);pointer-events:none;animation:flash .45s var(--ease-out) forwards}
+}
+@keyframes flash{to{opacity:0}}
+.stop{font-family:var(--sans);font-weight:600;color:var(--ink)}
+
+ol.log{list-style:none;margin:0;padding:0;overflow:auto;min-height:0;flex:1}
+ol.log li{position:relative;display:grid;grid-template-columns:1.4rem minmax(0,1fr);gap:.15rem .5rem;padding:.4rem .75rem;border-bottom:1px solid var(--edge);align-items:baseline}
+ol.log li .n{font-size:var(--t-label);color:var(--muted);text-align:right}
+ol.log li.event .n{color:inherit;display:flex;justify-content:flex-end;align-self:center}
+ol.log li.event .n svg{width:1em;height:1em}
+ol.log .line{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:0 .6rem;min-width:0}
+ol.log .skill{font:600 1rem/1.35 var(--mono);overflow-wrap:anywhere}
+ol.log li.student .skill{color:var(--student)}
+ol.log li.teacher .skill{color:var(--teacher)}
+ol.log .reason{grid-column:2;text-wrap:pretty;overflow-wrap:anywhere}
+.clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.clamped.four{-webkit-line-clamp:4}
+.clamped.two{-webkit-line-clamp:2}
+ol.log .right{display:flex;gap:.6rem;align-items:baseline;white-space:nowrap;font-size:var(--t-label)}
+ol.log .ok{color:var(--ok);display:inline-flex}
+ol.log .ok svg{width:1em;height:1em}
+#chip-log{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;font-size:var(--t-label)}
+ol.log .no{color:var(--bad);font-weight:600}
+ol.log .lat{color:var(--muted)}
+ol.log li.event{background:var(--row);font-weight:600}
+ol.log li.event .d{font-weight:450;color:var(--muted);overflow-wrap:anywhere}
+ol.log li.event.take{color:var(--teacher)}
+ol.log li.event.bad{color:var(--bad)}
+ol.log li.event.good{color:var(--ok)}
+ol.log li.event.warn{color:var(--warn)}
+ol.log li.empty{display:block;color:var(--muted);border-bottom:0}
+ol.log li.event.moved{background:var(--raised);color:var(--ink)}
+ol.log li.focus{box-shadow:inset 0 0 0 1.5px var(--accent)}
+ol.log .after{grid-column:2;font-size:var(--t-label);font-weight:600;color:var(--ink)}
+.gain{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .7rem}
+/* The one large number: size alone sets it apart, so it stays at a medium weight. */
+.fig{white-space:nowrap;font-size:var(--t-fig);font-weight:500;line-height:1.05;letter-spacing:-.025em}
+.rates{display:flex;flex-direction:column;white-space:nowrap}
+ol.log li.fresh{animation:in .16s var(--ease-out)}
+@keyframes in{from{opacity:0;transform:translateY(4px)}}
+ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
+
+.stack>*+*{margin-top:.35rem}
+.files{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.2rem .7rem;margin:0;align-items:baseline}
+.files dt{font-size:var(--t-label);font-weight:600;color:var(--muted)}
+.files dd{margin:0;text-wrap:pretty}
+.acting-on{margin:0;font-weight:600;color:var(--teacher)}
+.cited-row{display:grid;grid-template-columns:minmax(0,8rem) minmax(0,1fr);gap:.6rem;align-items:start}
+.cited{position:relative;aspect-ratio:4/3;background:var(--well);border-radius:var(--r-sm);overflow:hidden;box-shadow:0 0 0 1px var(--edge)}
+.cited img{display:block;width:100%;height:100%;object-fit:cover}
+
+/* Reduced motion keeps a log row's fade, which carries no movement, and drops every slide, scale and flash. */
+@media (prefers-reduced-motion:reduce){
+  ol.log li.fresh{animation-name:fade}
+  *,*::before,*::after{transition:none!important}
+}
+@keyframes fade{from{opacity:0}}
+@media (prefers-contrast:more){:root{--edge:#5c5c62;--edge-strong:#707077;--muted:#c4c4c9;--dim:#a3a3a8}}
+@media (max-width:1000px){
+  body{height:auto;overflow:auto}
+  .controlbar{flex-wrap:wrap}
+  .teach,.teach .field,.teach input{flex:1;width:auto}
+  main{grid-template-columns:minmax(0,1fr)}
+  .col{overflow:visible}
+  .cell{container-type:normal}
+  .shot{width:100%}
+  /* A page that scrolls has the height for Move's pair one above the other, each the full width. */
+  .frame{grid-auto-flow:row;aspect-ratio:auto}
+  .strip{flex:none;container-type:normal;display:grid}
+  .strip li{width:auto}
+  .thumb{height:auto;aspect-ratio:4/3}
+  ol.log{max-height:24rem}
+  .strip{grid-template-columns:repeat(3,minmax(0,1fr))}
+  footer.models .item{white-space:normal}
+  .caption{white-space:normal}
+}
