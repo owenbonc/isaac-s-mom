@@ -91,7 +91,7 @@ Every result is the **student alone** on sealed held-out scenes, against a contr
 | ...with the **bin moved after the lift** | **17/20** | untrained model: 0/20 | the showcase run's `report.json`, [PR #34](https://github.com/owenbonc/isaac-s-mom/pull/34#issuecomment-6718403706) |
 | **The student acts on what it sees** (on a Mac) | **19/20** with its camera | 0/20 with a grey image | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6719281987) |
 | **Demos teach the decision to stop** | 56 demos: **18/20** | 14 or 28 demos: 0/20 | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6719281987) |
-| **Accepted demos replay exactly** | **56/56** | — | [PR #34](https://github.com/owenbonc/isaac-s-mom/pull/34#issuecomment-6718403706) |
+| **Accepted demos replay exactly** (on the machine that recorded them) | **56/56** | — | [PR #34](https://github.com/owenbonc/isaac-s-mom/pull/34#issuecomment-6718403706) |
 
 **Recovery lessons on the fixed-feet student** (v1, 52 demos → v2, 117 demos with recovery and box-moved demos):
 
