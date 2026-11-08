@@ -3,6 +3,7 @@ import time
 from collections.abc import Iterator
 from contextlib import contextmanager
 from pathlib import Path
+from typing import Literal
 
 from isaacs_mom.contracts import EpisodeManifest, Perturbation, Split
 from isaacs_mom.orchestrator.events import EventLog
@@ -12,6 +13,9 @@ from isaacs_mom.validator import Recorder, validate
 
 MAX_STEPS = 20
 PERTURB_SEED_OFFSET = 7919
+# Raised this far above where it started, the box has been lifted: the lift trigger reads it from ground truth on the
+# orchestrator side only (rule 1), so it fires on the lift that worked, not on the skill's name.
+LIFTED_M = 0.03
 HEARTBEAT_SECONDS = 10.0
 
 
@@ -45,6 +49,7 @@ def run_episode(
     instruction: str,
     takeover: Policy | None = None,
     perturb_at: int | None = None,
+    move_bin_after_lift: bool = False,
     max_steps: int = MAX_STEPS,
     acting_on: str | None = None,
     demo: bool = False,
@@ -52,10 +57,12 @@ def run_episode(
 ) -> EpisodeManifest:
     """One recorded episode. If `policy` stops without success, `takeover` (when given) continues from there.
 
-    `acting_on` names the failed episode whose diagnosis a teacher demonstration acts on, and `demo` marks the
-    judged take (SPEC §3.5).
+    `perturb_at` moves the box before that step; `move_bin_after_lift` moves the bin before the first step after the
+    box is lifted (SPEC §3.5, §6.10). `acting_on` names the failed episode whose diagnosis a teacher demonstration acts
+    on, and `demo` marks the judged take (SPEC §3.5).
     """
     episode_id = sim.reset(seed)
+    resting_z = sim.ground_truth().box_xyz[2]
     recorder = Recorder.start(
         run_dir,
         episode_id=episode_id,
@@ -96,9 +103,15 @@ def run_episode(
                 reason="student did not succeed; teacher takes over",
             )
         for _ in range(max_steps):
+            kind: Literal["move_box", "move_bin"] | None = None
             if total_steps == perturb_at:
                 perturb_at = None  # once: a takeover at this step must not move it again
-                perturbation = Perturbation(kind="move_box", seed=seed + PERTURB_SEED_OFFSET)
+                kind = "move_box"
+            elif move_bin_after_lift and sim.ground_truth().box_xyz[2] > resting_z + LIFTED_M:
+                move_bin_after_lift = False  # once
+                kind = "move_bin"
+            if kind is not None:
+                perturbation = Perturbation(kind=kind, seed=seed + PERTURB_SEED_OFFSET)
                 # The same pose just before the move, kept outside frames/ so it is never a step (SPEC §3.5).
                 before = sim.observe().head_rgb_jpeg
                 if sim.perturb(perturbation):
@@ -118,6 +131,7 @@ def run_episode(
                         "error",
                         episode_id=episode_id,
                         step=total_steps,
+                        kind=perturbation.kind,
                         error=f"{perturbation.kind} not applied: the sim refused it and nothing moved",
                     )
             obs = sim.observe()

@@ -1,20 +1,21 @@
 """The student evaluation report (SPEC §6 criterion 10): student only, on the sealed held-out seeds, successes out of
-(n - errored) per condition, every episode recorded with its latency and device, and nothing claimed for a condition
-that wasn't run (rule 6)."""
+(n - errored) per condition, every episode recorded with its latency and device, and a bin move counted as an
+adaptation test only where it was applied (rule 6)."""
 
 import json
+import math
 import time
 from pathlib import Path
 from typing import Any
 
 import pytest
 
-from isaacs_mom.contracts import EpisodeManifest, GroundTruth, Observation, SkillCall
+from isaacs_mom.contracts import Controller, EpisodeManifest, GroundTruth, Observation, SkillCall
 from isaacs_mom.orchestrator import evaluation
 from isaacs_mom.orchestrator.evaluation import (
     CONDITIONS,
-    NOT_RUN,
     EpisodeRecord,
+    conditions_for,
     evaluation_report,
     markdown,
     summarise,
@@ -87,8 +88,8 @@ def test_each_condition_scores_successes_out_of_n_minus_errored(tmp_path: Path) 
     assert crashed["seed"] == 3 and crashed["outcome"] == "errored" and crashed["episode_id"].startswith("ep-3-")
     assert (tmp_path / "episodes" / crashed["episode_id"] / "manifest.json").exists()  # its partial recording
     errors = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
-    # Logged as the loop logs it (#24): seed 3 crashes on each of the 3 tasks, for each of the 2 checkpoints.
-    assert [e["data"]["seed"] for e in errors if e["type"] == "error"] == [3] * 6
+    # Logged as the loop logs it (#24): seed 3 crashes in each of the 4 task runs, for each of the 2 checkpoints.
+    assert [e["data"]["seed"] for e in errors if e["type"] == "error"] == [3] * 8
     assert first.score() == "2/3"
     layout = next(r for r in reports if r.checkpoint == "ckpt-r0" and r.condition == "new_layout")
     assert (layout.n, layout.errored, layout.successes) == (8, 2, 4)  # near_bin and far_bin, 4 seeds each
@@ -123,23 +124,124 @@ def test_every_checkpoint_runs_the_same_tasks_and_seeds(tmp_path: Path) -> None:
     records = [json.loads(line) for line in (tmp_path / "evaluation.jsonl").read_text().splitlines()]
     scenarios = {ckpt: {(r["condition"], r["task"], r["seed"]) for r in records if r["checkpoint"] == ckpt}
                  for ckpt in ("ckpt-r0", "run/ckpt-r1")}  # fmt: skip
-    assert scenarios["ckpt-r0"] == scenarios["run/ckpt-r1"] and len(scenarios["ckpt-r0"]) == 12
+    assert scenarios["ckpt-r0"] == scenarios["run/ckpt-r1"] and len(scenarios["ckpt-r0"]) == 16
     assert {r["device"] for r in records} == {"test-device"}
     assert {r["sim_version"] for r in records} == {f"fake-rigged task={t}" for t in asked}
 
 
-def test_a_condition_that_cannot_run_yet_is_reported_as_not_run(tmp_path: Path) -> None:
-    reports, _ = _run(tmp_path)
-    pending = [r for r in reports if r.condition == "move_bin_after_lift"]
-    assert len(pending) == 2 and all(r.n == 0 and r.score() == NOT_RUN["move_bin_after_lift"] for r in pending)
-    records = (tmp_path / "evaluation.jsonl").read_text()
-    assert "move_bin_after_lift" not in records
+class LinesUpAndLifts:
+    """Test-only: lines up on the box from ground truth, hugs and lifts, then stops, so the lift trigger fires."""
+
+    controller: Controller = "student"
+
+    def __init__(self, checkpoint: str, sims: list[FakeSim]) -> None:
+        self.checkpoint: str | None = checkpoint
+        self.sims = sims
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        work_y, closed, lifted = obs.joint_state
+        if lifted:
+            return None
+        if closed:
+            return SkillCall(skill="lift")
+        sim = self.sims[-1]
+        gt, (x, y, heading) = sim.ground_truth(), sim.pose()
+        dy = -math.sin(heading) * (gt.box_xyz[0] - x) + math.cos(heading) * (gt.box_xyz[1] - y) - work_y
+        if abs(dy) > 0.01:
+            return SkillCall(skill="reach_left" if dy > 0 else "reach_right", params={"distance_cm": abs(dy) * 100})
+        return SkillCall(skill="hug")
+
+
+class NeverLifts(StubStudent):
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        return SkillCall(skill="reobserve") if obs.step < 3 else None
+
+
+MOVE = conditions_for("across_room", walking=True)[-1:]
+
+
+def _move_run(tmp_path: Path, lifts: bool, refuse: bool = False) -> list[dict[str, Any]]:
+    sims: list[FakeSim] = []
+
+    def make_sim(task: str) -> TruthSim:
+        sim = FakeSim()
+        if refuse:
+            sim.perturb = lambda perturbation: False  # type: ignore[method-assign]
+        sims.append(sim)
+        return sim
+
+    (report,) = evaluation_report(
+        ["ckpt-r0"],
+        make_sim=make_sim,
+        make_student=(lambda c: LinesUpAndLifts(c, sims)) if lifts else NeverLifts,
+        run_dir=tmp_path,
+        seeds=SEEDS,
+        device="d",
+        conditions=MOVE,
+    )
+    records = [json.loads(line) for line in (tmp_path / "evaluation.jsonl").read_text().splitlines()]
+    counts = (report.adaptation_tests, report.not_applied, report.trigger_not_reached)
+    assert sum(counts) == report.scored == len(SEEDS)  # every scored episode lands in exactly one bucket
+    return records
+
+
+def test_a_bin_move_after_the_lift_is_an_adaptation_test(tmp_path: Path) -> None:
+    records = _move_run(tmp_path, lifts=True)
+    assert {r["adaptation"] for r in records} == {"applied"}
+    manifests = [json.loads(p.read_text()) for p in (tmp_path / "episodes").glob("*/manifest.json")]
+    assert all([p["perturbation"]["kind"] for p in m["perturbations"]] == ["move_bin"] for m in manifests)
+
+
+def test_without_a_lift_there_is_no_adaptation_test(tmp_path: Path) -> None:
+    records = _move_run(tmp_path, lifts=False)
+    assert {r["adaptation"] for r in records} == {"trigger not reached"}
+
+
+def test_a_bin_move_the_sim_refused_is_not_an_adaptation_test(tmp_path: Path) -> None:
+    records = _move_run(tmp_path, lifts=True, refuse=True)
+    assert {r["adaptation"] for r in records} == {"not applied"}
+    manifests = [json.loads(p.read_text()) for p in (tmp_path / "episodes").glob("*/manifest.json")]
+    assert all(m["perturbations"] == [] for m in manifests)  # a refused move isn't recorded (rule 6)
+
+
+def test_only_scored_applied_moves_count_and_adapted_means_accepted() -> None:
+    def record(outcome: str, adaptation: str) -> EpisodeRecord:
+        return EpisodeRecord.model_validate(
+            {
+                "checkpoint": "c",
+                "condition": "move_bin_after_lift",
+                "task": "t",
+                "seed": 1,
+                "episode_id": "e",
+                "sim_version": "v",
+                "outcome": outcome,
+                "reason": "",
+                "latencies_ms": [],
+                "device": "d",
+                "adaptation": adaptation,
+            }  # fmt: skip
+        )
+
+    records = [
+        record("accepted", "applied"),
+        record("rejected", "applied"),
+        record("errored", "applied"),
+        record("accepted", "not applied"),
+        record("rejected", "trigger not reached"),
+    ]
+    report = summarise("c", "move_bin_after_lift", records, 1000.0)
+    assert (report.adaptation_tests, report.adapted, report.not_applied, report.trigger_not_reached) == (2, 1, 1, 1)
+
+
+def test_a_fixed_feet_task_has_no_new_layout_and_every_condition_runs_its_own_task() -> None:
+    names = [(c.name, c.tasks, c.move_bin_after_lift) for c in conditions_for("fixed_feet", walking=False)]
+    assert names == [("training_distribution", ("fixed_feet",), False), ("move_bin_after_lift", ("fixed_feet",), True)]
 
 
 def test_episodes_are_student_only_and_held_out(tmp_path: Path) -> None:
     _run(tmp_path)
     manifests = [json.loads(p.read_text()) for p in (tmp_path / "episodes").glob("*/manifest.json")]
-    assert len(manifests) == 2 * 12
+    assert len(manifests) == 2 * 16
     assert {m["split"] for m in manifests} == {"heldout"}
     assert {s["controller"] for m in manifests for s in m["steps"]} == {"student"}
     assert all(m["takeover_step"] is None for m in manifests)
@@ -181,7 +283,10 @@ def test_the_summary_states_the_sample_size_device_and_budget(tmp_path: Path) ->
     )
     assert "peak GPU memory 1.81 GiB." in markdown(reports, 2000.0, "cuda", SEEDS, 1.81)
     assert "| ckpt-r0 | training_distribution | 2/3 | 1 |" in table
-    assert f"| ckpt-r0 | move_bin_after_lift | {NOT_RUN['move_bin_after_lift']} | - |" in table
+    moved = next(r for r in reports if r.checkpoint == "ckpt-r0" and r.condition == "move_bin_after_lift")
+    adapted = f"{moved.adapted}/{moved.adaptation_tests} (not applied {moved.not_applied}, no lift "
+    assert f"| ckpt-r0 | move_bin_after_lift | {moved.score()} | 1 | {adapted}" in table
+    assert "| ckpt-r0 | training_distribution | 2/3 | 1 | - |" in table
     assert "held-out seeds 1, 3, 20 (n=3 per task)" in markdown(reports, 1000.0, "d", [1, 3, 20])
     saved = json.loads((tmp_path / "evaluation_report.json").read_text())
     assert saved["budget_ms"] == 1000.0 and saved["device"] == "test-device" and saved["seeds"] == SEEDS
