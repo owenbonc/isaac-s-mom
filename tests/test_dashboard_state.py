@@ -1951,3 +1951,44 @@ def test_results_says_once_why_a_run_did_not_start() -> None:
     out = app(REPLAY + script, stream(("instruction", {"text": "juggle", "source": "teach"}), refused))
     assert "Not started" in out["control"] and "Not yet" not in out["control"]
     assert "Not yet: the loop teaches one task" in out["results"]
+
+
+# Every announcement the page makes, in order, from the moment app.js loaded.
+HEARD = """
+const heard = [];
+const said = { get: () => heard.at(-1) || "", set: (t) => heard.push(t) };
+Object.defineProperty(doc.getElementById("announce"), "textContent", said);
+"""
+
+
+def test_a_new_episode_elsewhere_in_the_run_never_re_announces_the_episode_shown() -> None:
+    later = [e for seed in (5, 6, 7) for e in held_out(1, seed, "failed")]
+    script = f"""
+    const later = events.splice(events.length - {len(later)});
+    {REPLAY}
+    vm.runInContext(`MomState.visit(view, {{ tab: "teaching" }}); render();`, context);
+    const shown = heard.length;
+    for (const e of later) {{ sources[0].onmessage({{ data: JSON.stringify(e) }}); flush(); }}
+    return heard.slice(shown - 1);
+    """
+    out = app(HEARD + script, stream(started("a"), decision(0), executed(0), verdict(False), *later))
+    assert len(out) == 1 and out[0].startswith("Episode 1 of 1, student trial.")
+
+
+def test_results_list_is_announced_with_the_seeds_it_shows_and_the_mark_it_is_filtered_to() -> None:
+    script = """
+    vm.runInContext(`
+      MomState.visit(view, { only: "up" }); render();
+      MomState.visit(view, { seed: 1, focus: 1 }); render();
+      MomState.keydown(view, { key: "Escape" }, Date.now() / 1000); render();
+      MomState.visit(view, { only: null }); render();
+    `, context);
+    return heard;
+    """
+    assert app(HEARD + REPLAY + script, stream(*TWO_EVALUATIONS)) == [
+        "Results: 3 held-out seeds.",
+        "Results: 1 of 3 held-out seeds, marked improved.",
+        "Seed 1, improved: Failed → Succeeded.",
+        "Results: 1 of 3 held-out seeds, marked improved.",
+        "Results: 3 held-out seeds.",
+    ]

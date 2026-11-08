@@ -10,7 +10,7 @@ let logFollowing = true;
 // Where following last parked the log: its foot, or the stage frame's row while a later decision runs.
 let logAnchor = 0;
 let flashedFrame = null;
-let lastHeard = { text: "", episode: null, count: 0, paused: false, lost: false };
+let lastHeard = { text: "", episode: null, only: null, paused: false, lost: false };
 // A one-off line for the announcer: the box or bin move, heard once when it arrives live.
 let news = "";
 // Saved run files the events don't carry (SPEC §3.5): each trained round's training-set summary and the replay
@@ -117,19 +117,21 @@ function position(ep) {
 }
 
 // Screen readers hear the episode when the view moves to another, who is in control and the verdict when either
-// changes, a move between Results' list and its seeds, and a pause or resume; not every step.
+// changes, a move between Results' list and its seeds or to another filter, and a pause or resume; not every step.
 function announce(text) {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
   const place = MomState.where(view);
-  const heard = { text, place, seed: view.seed, episode: ep && ep.id, count: s.episodes.length, paused: view.frozen !== null, lost: view.lost };
+  const heard = { text, place, seed: view.seed, episode: ep && ep.id, only: view.only, paused: view.frozen !== null, lost: view.lost };
   const parts = [];
   if (heard.paused !== lastHeard.paused) parts.push(heard.paused ? "Paused." : "Resumed.");
   if (heard.lost !== lastHeard.lost) parts.push(heard.lost ? "Connection to the run lost, retrying." : "Connection restored.");
   const row = place === "seed" && MomState.results(s).seeds.find((x) => x.seed === view.seed);
-  if (ep && (heard.episode !== lastHeard.episode || heard.count !== lastHeard.count)) parts.push(`${position(ep) || `Seed ${view.seed}`}, ${kindOf(ep)[0].toLowerCase()}.`, text);
-  else if (place === "list" && heard.place !== lastHeard.place) parts.push(`Results: ${MomState.results(s).seeds.length} held-out seeds.`);
-  else if (row && (heard.place !== lastHeard.place || heard.seed !== lastHeard.seed)) parts.push(`Seed ${row.seed}, ${MARK[row.mark].toLowerCase()}: ${outcomes(row)}.`);
+  if (ep && heard.episode !== lastHeard.episode) parts.push(`${position(ep) || `Seed ${view.seed}`}, ${kindOf(ep)[0].toLowerCase()}.`, text);
+  else if (place === "list" && (heard.place !== lastHeard.place || heard.only !== lastHeard.only)) {
+    const { seeds, counts } = MomState.results(s);
+    parts.push(view.only === null ? `Results: ${seeds.length} held-out seeds.` : `Results: ${counts[view.only]} of ${seeds.length} held-out seeds, marked ${MARK[view.only].toLowerCase()}.`);
+  } else if (row && (heard.place !== lastHeard.place || heard.seed !== lastHeard.seed)) parts.push(`Seed ${row.seed}, ${MARK[row.mark].toLowerCase()}: ${outcomes(row)}.`);
   else if (text !== lastHeard.text) parts.push(text);
   parts.push(news);
   news = "";
