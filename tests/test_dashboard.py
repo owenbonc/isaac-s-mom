@@ -24,12 +24,13 @@ from isaacs_mom.contracts import (
 )
 from isaacs_mom.orchestrator.dashboard.server import REPLAYED, create_app, tail_events
 from isaacs_mom.orchestrator.episode import heartbeat, run_episode
-from isaacs_mom.orchestrator.events import EventLog
+from isaacs_mom.orchestrator.events import EventLog, read_events
 from isaacs_mom.orchestrator.loop import run_loop
-from isaacs_mom.orchestrator.runs import launch_run
+from isaacs_mom.orchestrator.runs import NO_KEY, launch_run, list_runs
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import BASE_CHECKPOINT, StubStudent, stub_finetune
 from isaacs_mom.tasks.example import OFFLINE_PROPOSAL
+from isaacs_mom.teacher import argon as argon_module
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 
 JPEG = b"\xff\xd8\xff\xd9"
@@ -714,3 +715,100 @@ def test_a_launched_run_runs_in_its_own_session_with_its_output_in_the_log(tmp_p
     while len(log.read_text().splitlines()) < 2 and time.monotonic() < deadline:
         time.sleep(0.05)
     assert sorted(log.read_text().splitlines()) == ["True", "to stderr"]
+
+
+KEY = "dummy-gemini-key-1108"
+
+
+def taught_run(tmp_path: Path, *, episode: bool) -> Path:
+    """A Teach-started run as its `mom run` finds it: the instruction, and the first episode if it got that far."""
+    run_dir = tmp_path / "runs" / "teach-20261108-040000-abcd"
+    events = EventLog(run_dir, run_dir.name)
+    events.emit("instruction", text="put the box in the bin", source="teach")
+    if episode:
+        events.emit("episode_started", episode_id="ep-1", seed=3000, split="dev")
+    return run_dir
+
+
+def stop_with(run_dir: Path, script: str) -> list[tuple[str, dict]]:
+    """Runs `script` as the run's `mom run` and waits for the dashboard to note how it ended; the run's events."""
+    watcher = launch_run([sys.executable, "-c", script], run_dir / "run.log")
+    watcher.join(timeout=30)
+    assert not watcher.is_alive()
+    return [(event.type, event.data) for event in read_events(run_dir)]
+
+
+def test_a_run_that_stops_before_its_first_episode_is_not_started_with_the_logs_last_line(tmp_path: Path) -> None:
+    run_dir = taught_run(tmp_path, episode=False)
+    events = stop_with(run_dir, "print('loading the sim'); print('boom'); print(); raise SystemExit(3)")
+    assert events[1:] == [("error", {"error": "not started: mom run stopped: boom"})]
+    [listed] = list_runs(tmp_path / "runs", time.time())
+    assert (listed.status, listed.reason) == ("not_started", "mom run stopped: boom")
+
+
+def test_a_run_that_stops_after_its_first_episode_says_so_and_is_no_longer_live(tmp_path: Path) -> None:
+    run_dir = taught_run(tmp_path, episode=True)
+    events = stop_with(run_dir, "print('boom'); raise SystemExit(3)")
+    assert events[2:] == [("error", {"error": "mom run stopped (exit 3): boom"})]
+    [listed] = list_runs(tmp_path / "runs", time.time())
+    assert (listed.status, listed.reason) == ("recorded", None)  # it stopped seconds ago, but it isn't running
+
+
+def test_a_run_that_finishes_adds_no_event(tmp_path: Path) -> None:
+    run_dir = taught_run(tmp_path, episode=True)
+    assert len(stop_with(run_dir, "print('done')")) == 2
+
+
+def test_a_run_with_nothing_in_its_log_says_so(tmp_path: Path) -> None:
+    events = stop_with(taught_run(tmp_path, episode=False), "raise SystemExit(1)")
+    assert events[-1] == ("error", {"error": "not started: mom run stopped: run.log is empty"})
+
+
+def test_a_run_killed_mid_write_still_gets_its_error_on_a_line_of_its_own(tmp_path: Path) -> None:
+    run_dir = taught_run(tmp_path, episode=True)
+    half = "open('events.jsonl', 'a').write('{\"t\": 1, \"run_id\"'); print('killed'); raise SystemExit(1)"
+    watcher = launch_run([sys.executable, "-c", f"import os; os.chdir({str(run_dir)!r}); {half}"], run_dir / "run.log")
+    watcher.join(timeout=30)
+    events = [(event.type, event.data) for event in read_events(run_dir)]
+    assert events[-1] == ("error", {"error": "mom run stopped (exit 1): killed"})
+
+
+def test_a_stopped_runs_reason_hides_the_key_and_is_cut_to_300_characters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", KEY)
+    run_dir = taught_run(tmp_path, episode=False)
+    events = stop_with(run_dir, f"print('400 key {KEY} rejected, ' + 'x' * 1000); raise SystemExit(1)")
+    error = str(events[-1][1]["error"])
+    assert error == "not started: mom run stopped: " + ("400 key [key] rejected, " + "x" * 1000)[:300]
+    # Replaced before the cut, so a key that straddles it leaves no part of itself.
+    (run_dir / "run.log").unlink()
+    events = stop_with(run_dir, f"print('y' * 297 + {KEY!r}); raise SystemExit(1)")
+    assert events[-1][1]["error"] == "not started: mom run stopped: " + "y" * 297 + "[ke"
+
+
+def test_a_teach_with_no_key_says_argon_is_not_reachable_from_this_machine(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    monkeypatch.setattr(argon_module, "ENV_PATH", tmp_path / "no.env")
+
+    def launch(args: list[str], log: Path) -> None:
+        pytest.fail("mom run started")
+
+    app = create_app(tmp_path / "runs", generate=None, launch=launch)
+    client = TestClient(app, base_url=LOCAL, client=("127.0.0.1", 50000))
+    response = teach(client, "put the box in the bin")
+    assert (response.status_code, response.json()["reasons"]) == (200, [NO_KEY])
+    assert NO_KEY == "Argon isn't reachable: GEMINI_API_KEY is not set on the machine serving the dashboard"
+    [listed] = client.get("/runs").json()
+    assert (listed["status"], listed["reason"]) == ("not_started", NO_KEY)
+
+
+def test_a_task_generator_failure_hides_the_key_and_is_cut_to_300_characters(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", KEY)
+    client, _ = teach_client(tmp_path, RuntimeError(f"400 key {KEY} not valid " + "x" * 1000))
+    [reason] = teach(client, "put the box in the bin").json()["reasons"]
+    assert reason == ("task generator failed: RuntimeError: 400 key [key] not valid " + "x" * 1000)[:300]
