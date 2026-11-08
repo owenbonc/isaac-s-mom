@@ -171,9 +171,14 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 
 main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.95fr);gap:.6rem;padding:.45rem .75rem .4rem}
 .col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
-.side{display:flex;flex-direction:column;gap:.6rem;min-height:0;overflow-y:auto}
+/* Held-out success, the diagnosis and the training sets are one panel: its sections part on hairlines, each keeps
+   its own heading and provenance label, since they can differ. */
+.side{display:flex;flex-direction:column;min-height:0;overflow-y:auto;background:var(--glass);border:1px solid var(--edge);border-radius:var(--r);box-shadow:inset 0 1px 0 var(--edge-top),var(--lift)}
 .side[data-more]{mask-image:linear-gradient(to bottom,#000 calc(100% - 3rem),transparent)}
 .side .panel{flex:none}
+.side>.panel{background:none;border:0;border-radius:0;box-shadow:none}
+.side>.panel+.panel{border-top:1px solid var(--edge)}
+.side>.panel>header{border-bottom:0;padding-bottom:.1rem}
 
 /* The row wraps by whole items wherever it runs out of width, so no value or label is ever clipped. */
 footer.models{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .9rem;padding:.3rem .75rem .4rem;border-top:1px solid var(--edge);font-size:var(--t-label)}
@@ -249,7 +254,8 @@ footer.models .v{color:var(--muted)}
   .decisions{grid-area:log}
   /* The held-out column is as wide as its heading and chip on one line; the diagnosis takes the rest, and the
      training sets and replay run the band's full width under both. */
-  .side{grid-area:side;display:grid;grid-template-columns:min-content minmax(0,1fr);grid-template-areas:"rounds diag" "train train";align-items:start}
+  .side{grid-area:side;display:grid;grid-template-columns:min-content minmax(0,1fr);grid-template-areas:"rounds diag" "train train"}
+  .side>#p-diagnosis{border-top:0;border-left:1px solid var(--edge)}
   #p-rounds{grid-area:rounds}
   #p-diagnosis{grid-area:diag}
   #p-training{grid-area:train}
@@ -272,6 +278,7 @@ footer.models .v{color:var(--muted)}
    episode keys show their icons alone (their names stay for screen readers and in their tooltips). */
 @media (min-width:1001px) and (max-width:1279px){
   .side{grid-template-columns:minmax(0,1fr);grid-template-areas:"rounds" "diag" "train"}
+  .side>#p-diagnosis{border-left:0;border-top:1px solid var(--edge)}
   .teach input{width:13.5rem}
   .presenter .name{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .presenter button:has(.name){width:1.95rem;padding:0;justify-content:center}
