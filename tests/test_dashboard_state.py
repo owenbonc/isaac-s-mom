@@ -166,7 +166,7 @@ def test_rounds_keep_their_n_and_a_new_episode_replaces_the_current_one() -> Non
         decision(0),
         ("episode_started", {"episode_id": "b"}),
     )
-    assert [(r["checkpoint"], r["successes"], r["n"], r["errored"]) for r in out["state"]["rounds"]] == [
+    assert [(r["checkpoint"], r["successes"], r["n"], r.get("errored")) for r in out["state"]["rounds"]] == [
         ("ckpt-r0", 0, 20, 0),
         ("ckpt-r1", 3, 20, 2),
     ]

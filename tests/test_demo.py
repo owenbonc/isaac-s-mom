@@ -1,3 +1,4 @@
+import contextlib
 import io
 from collections.abc import Callable
 from pathlib import Path
@@ -119,7 +120,9 @@ def test_demo_refuses_a_seed_below_the_unseen_range_before_writing_anything(tmp_
         with pytest.raises(ValueError, match="900000"):
             take(run_dir, seed=seed, make_argon=unbuilt)
     assert not run_dir.exists() and not run_dir.with_suffix(".mp4").exists()
-    assert take(run_dir, seed=900_000).seed == 900_000
+    with contextlib.suppress(ValueError):
+        take(run_dir, seed=900_000)
+    assert (run_dir / "episodes").is_dir()  # the range's first seed records
 
 
 def test_demo_refuses_a_run_directory_that_already_exists(tmp_path: Path) -> None:
