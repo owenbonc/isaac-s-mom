@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -2414,3 +2415,100 @@ def test_the_filmstrip_ends_on_the_stage_frame_so_a_strip_that_drops_its_earlies
     return [null, 0, 1, 4].map(strip);
     """
     assert run(script, stream(started("a"), *steps)) == ["2 3 4 5 6 [7]", "[0]", "0 [1]", "0 1 2 3 [4]"]
+
+
+def tick(round_: object, step: object, total: object) -> tuple[str, dict]:
+    return "finetune_progress", {"round": round_, "step": step, "total": total}
+
+
+def progress(*events: tuple[str, dict]) -> object:
+    """The fine-tune's progress in whole percent after round 1's fine-tune starts and `events` follow."""
+    return fold(("finetune_started", {"round": 1}), *events)["state"]["finetune"]["pending"]["progress"]
+
+
+def test_the_finetune_progress_is_the_latest_report_of_the_round_under_way_in_whole_percent() -> None:
+    assert progress() is None  # no report yet, so the bar says it is starting
+    assert progress(tick(1, 0, 300)) == 0
+    assert progress(tick(1, 29, 100)) == 29  # whole steps, never a float that rounds 29 down to 28
+    assert progress(tick(1, 100, 300)) == 33
+    assert progress(tick(1, 300, 300)) == 100
+    assert progress(tick(1, 30, 300), tick(1, 150, 300)) == 50
+    # another round's report is not this fine-tune's
+    assert progress(tick(1, 150, 300), tick(0, 299, 300), tick(2, 1, 300), ("finetune_progress", {})) == 50
+
+
+@pytest.mark.parametrize(
+    "step,total", [(None, 300), (1.5, 3), ("1", 3), (1, "3"), (1, 0), (1, -3), (4, 3), (-1, 3), (True, 3)]
+)
+def test_a_malformed_finetune_progress_report_reads_starting_never_a_guess(step: object, total: object) -> None:
+    assert progress(tick(1, 1, 3), tick(1, step, total)) is None
+
+
+def test_a_finetune_progress_ends_with_its_finetune_and_a_new_round_starts_from_starting() -> None:
+    done = fold(("finetune_started", {"round": 1}), tick(1, 3, 3), ("finetune_completed", {"round": 1}))
+    assert done["state"]["finetune"]["pending"] is None
+    assert progress(tick(1, 3, 3), ("finetune_completed", {"round": 1}), ("finetune_started", {"round": 2})) is None
+
+
+def test_the_finetune_stage_shows_a_progressbar_with_its_percentage_or_starting() -> None:
+    script = 'return writes.filter(([id]) => id === "stage").pop()[1];'
+    fresh = "for (const e of events) e.t = Date.now() / 1000;"
+    stage = app(fresh + REPLAY + script, stream(started("a"), ("finetune_started", {"round": 1}), tick(1, 120, 400)))
+    assert re.search(r'role="progressbar"[^>]*aria-valuenow="30"', stage) and ">30%<" in stage
+    stage = app(fresh + REPLAY + script, stream(started("a"), ("finetune_started", {"round": 1})))
+    assert 'role="progressbar"' in stage and "aria-valuenow" not in stage and ">Starting<" in stage
+
+
+INDEX_HTML = STATE_JS.parent / "index.html"
+LOADING = ("control", "columns", "stage", "p-rounds", "p-diagnosis", "p-training", "log")
+
+
+class Skeleton(HTMLParser):
+    """index.html's skeleton blocks as (container id, hidden from assistive tech), and the text it speaks as Loading."""
+
+    VOID = {"meta", "link", "input", "br", "img"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, str | None, bool]] = []
+        self.blocks: list[tuple[str | None, bool]] = []
+        self.loading = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = dict(attrs)
+        _, container, hidden = self.stack[-1] if self.stack else ("", None, False)
+        here = (a.get("id") if a.get("id") in LOADING else container, hidden or a.get("aria-hidden") == "true")
+        if "skel" in (a.get("class") or "").split():
+            self.blocks.append(here)
+        if tag not in self.VOID:
+            self.stack.append((tag, *here))
+
+    def handle_endtag(self, tag: str) -> None:
+        while self.stack and self.stack.pop()[0] != tag:
+            pass
+
+    def handle_data(self, data: str) -> None:
+        if data.strip() == "Loading" and not (self.stack and self.stack[-1][2]):
+            self.loading += 1
+
+
+def test_a_run_shows_hidden_skeletons_and_says_loading_once_until_its_replay_settles_then_its_content() -> None:
+    page = Skeleton()
+    page.feed(INDEX_HTML.read_text())
+    assert {container for container, _ in page.blocks} == set(LOADING)
+    assert all(hidden for _, hidden in page.blocks)
+    assert page.loading == 1
+    script = """
+    const [source] = sources;
+    source.onopen();
+    for (const e of events) source.onmessage({ data: JSON.stringify(e) });
+    const replaying = writes.map(([id]) => id);
+    source.listeners.replayed();
+    flush();
+    return { replaying, after: Object.fromEntries(writes) };
+    """
+    out = app(script, stream(started("a"), decision(0), executed(0)))
+    # the skeleton stays until the replay settles, then every container shows the run, no block left
+    assert not set(out["replaying"]) & set(LOADING)
+    for id_ in LOADING:
+        assert id_ in out["after"] and not re.search(r'class="[^"]*\bskel', out["after"][id_]), id_
