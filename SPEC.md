@@ -127,7 +127,7 @@ class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
 `{image: "<path to frame>", instruction, feedback, target: SkillTarget}` (skill and params only, never the reason) from teacher steps of accepted dev episodes only. When an accepted demonstration's last step is the teacher's `reobserve`, one more example follows it: the same frame, feedback `reobserve: ok`, target `reobserve`, which is the second `reobserve` that ends the student's episode (§3.2).
 
 ### 4.4 Events (`events.jsonl`)
-`{t, run_id, type, data}` with `type` in `episode_started, observation, decision, action_executed, perturbation, validation, diagnosis, finetune_started, finetune_progress, finetune_completed, evaluation_result, argon_call, error, heartbeat, instruction`. `finetune_progress` carries `{round, step, total}` (optimizer steps done and in all), at most one a second.
+`{t, run_id, type, data}` with `type` in `episode_started, observation, decision, action_executed, perturbation, validation, diagnosis, finetune_started, finetune_progress, finetune_completed, evaluation_result, argon_call, error, heartbeat, instruction`. `finetune_progress` carries `{round, step, total}` (optimizer steps done and in all), at most one a second besides the last step, which is always sent.
 
 ## 5. Stack and layout
 
