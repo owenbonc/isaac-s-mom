@@ -9,10 +9,11 @@ answer is asked again on the same frame after a wait, and neither records a step
 """
 
 import json
+import re
 from collections.abc import Callable
 from typing import Literal
 
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel, Field, ValidationError
 
 from isaacs_mom.contracts import (
     MAX_ANGLE_DEG,
@@ -29,6 +30,10 @@ from isaacs_mom.teacher.argon import Argon, Part, Purpose
 ATTEMPTS = 3  # per step, on the same frame, waiting between them (SPEC §3.3); then the demo ends
 DIAGNOSIS_FRAMES = 4  # the first frame and the last three: the start and how it went wrong, at a bounded cost
 RAW_LOG_CHARS = 500
+ROUND_FRAMES = 8  # decision points across a whole round, at a bounded cost
+ROUND_MODES = 3
+EPISODE_ID = re.compile(r"ep-\d+-[0-9a-f]+")
+EXPLAINS = re.compile(r" Explains: (ep-[^.]+)\.$")
 
 SKILL_SCHEMA = json.dumps(SkillCall.model_json_schema())
 
@@ -121,14 +126,18 @@ def _diagnosis(answer: str) -> Diagnosis | None:
     return parsed if isinstance(parsed, Diagnosis) else None
 
 
+def _steps(episode: EpisodeManifest) -> list[str]:
+    return [
+        f"step {s.step} [{s.controller}] {s.skill_call.model_dump_json(exclude={'reason'})} -> "
+        + ("ok" if s.ok else f"refused: {s.error}")
+        for s in episode.steps
+    ]
+
+
 def diagnose(failed: EpisodeManifest, frames: list[bytes], argon: Argon) -> Diagnosis:
     """From a failed episode's frames, skill calls and validator reason, a failure hypothesis."""
     reason = failed.validation.reason if failed.validation else "no validation"
-    steps = [
-        f"step {s.step} [{s.controller}] {s.skill_call.model_dump_json(exclude={'reason'})} -> "
-        + ("ok" if s.ok else f"refused: {s.error}")
-        for s in failed.steps
-    ]
+    steps = _steps(failed)
     prompt = f"""{ROBOT}
 
 A student policy failed this task: {failed.instruction}
@@ -146,6 +155,104 @@ Diagnose the most likely cause of the failure from this evidence only. Answer wi
         return diagnosis
     why = "Argon over budget" if diagnosis == "over budget" else "Argon unavailable or no usable answer"
     return Diagnosis(hypothesis=f"not diagnosed: {why}", evidence=reason, confidence=0.0, lesson="")
+
+
+class _Mode(BaseModel):
+    hypothesis: str
+    evidence: str
+    confidence: float = Field(ge=0.0, le=1.0)
+    lesson: str
+    explains: list[str] = Field(min_length=1)
+
+
+class _Modes(BaseModel):
+    modes: list[_Mode] = Field(min_length=1, max_length=ROUND_MODES)
+
+
+def explained_by(mode: Diagnosis) -> list[str]:
+    """The failed trials a failure mode from `diagnose_round` names, read back from the end of its evidence."""
+    match = EXPLAINS.search(mode.evidence)
+    return match.group(1).split(", ") if match else []
+
+
+def _accepted(episode: EpisodeManifest) -> bool:
+    return episode.validation is not None and episode.validation.accepted
+
+
+def _decision_frames(trials: list[tuple[EpisodeManifest, list[bytes]]]) -> list[Part]:
+    """Up to ROUND_FRAMES labelled frames where a trial decided (before its first refused call, and before `place`),
+    failed trials first, one frame per trial in turn."""
+    queues = []
+    for episode, frames in sorted(trials, key=lambda trial: _accepted(trial[0])):
+        points, refused = [], False
+        for step, frame in zip(episode.steps, frames, strict=True):
+            first_refusal = not step.ok and not refused
+            refused = refused or not step.ok
+            if first_refusal or step.skill_call.skill == "place":
+                outcome = "ok" if step.ok else "refused"
+                label = f"trial {episode.episode_id}, step {step.step}, before {step.skill_call.skill} ({outcome}):"
+                points.append((label, frame))
+        queues.append(points)
+    parts: list[Part] = []
+    while len(parts) < 2 * ROUND_FRAMES and any(queues):
+        for queue in queues:
+            if queue and len(parts) < 2 * ROUND_FRAMES:
+                label, frame = queue.pop(0)
+                parts += [label, frame]
+    return parts
+
+
+def _round_modes(answer: str, trial_ids: set[str], failed_ids: set[str]) -> list[Diagnosis] | None:
+    parsed = _strict(_Modes, answer)
+    if not isinstance(parsed, _Modes):
+        return None
+    modes = []
+    for mode in parsed.modes:
+        explains = list(dict.fromkeys(mode.explains))
+        cited = set(EPISODE_ID.findall(f"{mode.hypothesis} {mode.evidence} {mode.lesson}"))
+        if not set(explains) <= failed_ids or not cited <= trial_ids:  # only this round's trials, only its failures
+            return None
+        evidence = f"{mode.evidence} Explains: {', '.join(explains)}."
+        modes.append(Diagnosis(hypothesis=mode.hypothesis, evidence=evidence, confidence=mode.confidence,
+                               lesson=mode.lesson))  # fmt: skip
+    return modes
+
+
+def diagnose_round(trials: list[tuple[EpisodeManifest, list[bytes]]], argon: Argon) -> list[Diagnosis]:
+    """The round's failure modes, from every student trial of it, failed and successful, in one Argon call: each
+    mode names the failed trials it explains. Empty when Argon is unreachable, over budget or unusable, so the
+    per-episode lessons stand."""
+    failed = [episode for episode, _ in trials if not _accepted(episode)]
+    if not failed:
+        return []
+    blocks = []
+    for episode, _ in trials:
+        outcome = "succeeded" if _accepted(episode) else "failed"
+        verdict = episode.validation.reason if episode.validation else "no validation"
+        lines = "\n".join(f"  {line}" for line in _steps(episode)) or "  (no skill calls)"
+        blocks.append(f"trial {episode.episode_id} ({outcome}), the validator's verdict: {verdict}\n{lines}")
+    prompt = f"""{ROBOT}
+
+A student policy tried this task {len(trials)} times this round, and {len(failed)} of them failed.
+The task: {trials[0][0].instruction}
+Every trial's skill calls, in order, and the independent validator's verdict:
+{chr(10).join(blocks)}
+The images are moments where trials decided, each labelled with its trial, step and the call it made next.
+
+Group the failures by cause: compare them with each other and with the trials that succeeded. Answer with exactly
+this JSON object, 1 to {ROUND_MODES} modes, the one explaining the most failures first:
+{{"modes": [{{"hypothesis": str, "evidence": str, "confidence": number 0-1, "lesson": str, "explains": [str]}}]}}
+`explains` lists the ids of the failed trials the mode accounts for. Cite only the trials above. `lesson` is one
+sentence the teacher should apply when demonstrating this task."""
+    answer = argon.ask("diagnose", [prompt, *_decision_frames(trials)])  # one call per round (rule 5)
+    if answer is None:
+        return []
+    ids = {episode.episode_id for episode, _ in trials}
+    modes = _round_modes(answer, ids, {episode.episode_id for episode in failed})
+    if modes is None:
+        argon.error("diagnose", "unusable round diagnosis", raw=answer[:RAW_LOG_CHARS])
+        return []
+    return modes
 
 
 def choose_scenes(failures: list[EpisodeManifest], n: int, start: int = DEV_SEED_START) -> list[int]:

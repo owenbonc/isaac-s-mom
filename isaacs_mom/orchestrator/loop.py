@@ -14,8 +14,9 @@ from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, adapter_dir, finetune
-from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
+from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose, diagnose_round, explained_by
 from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.validator.recorder import write_atomically
 from isaacs_mom.validator.rules import RECORDING_ERROR
 from isaacs_mom.validator.training import build_training_set
 
@@ -91,6 +92,27 @@ def bin_moves(events_path: Path) -> str:
     )
 
 
+def lesson_plan(
+    demos: int, modes: list[Diagnosis], diagnosed: list[tuple[str, Diagnosis]]
+) -> list[tuple[str | None, Diagnosis | None]]:
+    """What each of a round's demonstrations acts on: shared among the round's failure modes by how many failures
+    each explains, each acting on a failed episode its mode names; without modes, the per-episode lessons in turn."""
+    named = [(mode, ids) for mode in modes if (ids := explained_by(mode))]
+    if not named:
+        lessons: list[tuple[str | None, Diagnosis | None]] = [*diagnosed] or [(None, None)]
+        return [lessons[i % len(lessons)] for i in range(demos)]
+    total = sum(len(ids) for _, ids in named)
+    given = [0] * len(named)
+    plan: list[tuple[str | None, Diagnosis | None]] = []
+    for i in range(demos):
+        # The mode furthest behind its share after this demonstration; ties go to the mode Argon listed first.
+        k = max(range(len(named)), key=lambda m: (len(named[m][1]) * (i + 1) / total - given[m], -m))
+        mode, ids = named[k]
+        plan.append((ids[given[k] % len(ids)], mode))
+        given[k] += 1
+    return plan
+
+
 def run_loop(
     sim: TruthSim,
     run_dir: Path,
@@ -116,6 +138,7 @@ def run_loop(
         if results[-1].rate >= TARGET_RATE or round_ == max_rounds:
             break
         trial_start = DEV_SEED_START + 1000 * round_
+        trials: list[EpisodeManifest] = []
         failures: list[EpisodeManifest] = []
         for seed in range(trial_start, trial_start + dev_trials):
             manifest = run_episode(
@@ -128,6 +151,7 @@ def run_loop(
                 round_=round_,
                 instruction=INSTRUCTION,
             )
+            trials.append(manifest)
             if manifest.validation and not manifest.validation.accepted:
                 failures.append(manifest)
         diagnosed: list[tuple[str, Diagnosis]] = []
@@ -137,11 +161,23 @@ def run_loop(
                 diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps], argon)
             events.emit("diagnosis", episode_id=manifest.episode_id, **diagnosis.model_dump())
             diagnosed.append((manifest.episode_id, diagnosis))
-        lessons: list[tuple[str | None, Diagnosis | None]] = [*diagnosed] or [(None, None)]
+        modes: list[Diagnosis] = []
+        if failures:
+            frames = [
+                (m, [(run_dir / "episodes" / m.episode_id / s.frame).read_bytes() for s in m.steps]) for m in trials
+            ]
+            with heartbeat(events, failures[0].episode_id, HEARTBEAT_SECONDS):
+                modes = diagnose_round(frames, argon)
+        plan = lesson_plan(demos, modes, diagnosed)
+        seeds = choose_scenes(failures, demos, start=trial_start + 500)  # rejected trials come back first
+        record = [
+            {**m.model_dump(), "demo_seeds": [seed for seed, (_, d) in zip(seeds, plan, strict=True) if d is m]}
+            for m in modes
+        ]
+        write_atomically(run_dir / f"diagnosis_r{round_}.json", json.dumps(record, indent=2))  # rule 6: what taught
         moved = moves_bin(demos, move_bin_share)
-        # Rejected trials come back first, in the order of their diagnoses; fresh seeds cycle through the lessons.
-        for i, seed in enumerate(choose_scenes(failures, demos, start=trial_start + 500)):
-            failed_id, diagnosis = lessons[i % len(lessons)]
+        for i, seed in enumerate(seeds):
+            failed_id, diagnosis = plan[i]
             run_episode(
                 sim,
                 ArgonPolicy(diagnosis, argon),

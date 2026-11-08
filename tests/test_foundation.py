@@ -1,5 +1,6 @@
 import json
 import math
+import re
 import sys
 from collections.abc import Callable
 from pathlib import Path
@@ -9,11 +10,19 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, SkillCall, SkillTarget
+from isaacs_mom.contracts import (
+    Controller,
+    Diagnosis,
+    EpisodeManifest,
+    Observation,
+    Perturbation,
+    SkillCall,
+    SkillTarget,
+)
 from isaacs_mom.orchestrator import cli, loop
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import evaluate, run_loop
+from isaacs_mom.orchestrator.loop import evaluate, lesson_plan, run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
@@ -656,3 +665,70 @@ def test_the_run_reports_the_bin_moves_that_happened_not_the_share_asked_for(tmp
     expected = "the bin moved right after the lift in 1 of 3 teacher demonstrations (2 scheduled)"
     assert loop.bin_moves(tmp_path / "events.jsonl") == expected
     assert loop.bin_moves(tmp_path / "missing.jsonl").startswith("the bin moved right after the lift in 0 of 0")
+
+
+def _mode(name: str, ids: list[str]) -> Diagnosis:
+    return Diagnosis(hypothesis=name, evidence=f"seen Explains: {', '.join(ids)}.", confidence=0.8, lesson=name)
+
+
+def test_demonstrations_are_shared_among_the_modes_by_the_failures_each_explains() -> None:
+    far, short = [f"ep-{i}-aa" for i in range(6)], [f"ep-{i}-bb" for i in range(6, 10)]
+    plan = lesson_plan(20, [_mode("far", far), _mode("short", short)], [])
+    taught = [diagnosis.hypothesis for _, diagnosis in plan if diagnosis]
+    assert taught.count("far") == 12 and taught.count("short") == 8  # 6:4 of 20
+    assert {"far", "short"} <= set(taught[:3])  # spread through the round, not one mode then the other
+    for acting_on, diagnosis in plan:
+        assert diagnosis is not None and acting_on in (far if diagnosis.hypothesis == "far" else short)
+    assert {acting_on for acting_on, d in plan if d and d.hypothesis == "far"} == set(far)  # every failure re-taught
+
+
+def test_without_modes_the_per_episode_lessons_take_turns_as_before() -> None:
+    diagnosed = [("ep-1-aa", _mode("one", [])), ("ep-2-aa", _mode("two", []))]
+    assert lesson_plan(3, [], diagnosed) == [diagnosed[0], diagnosed[1], diagnosed[0]]
+    assert lesson_plan(2, [], []) == [(None, None), (None, None)]
+
+
+def _round_argon(run_dir: Path, answer: Callable[[list[str]], str]) -> tuple[Argon, list[str]]:
+    """A stub teacher whose round-level diagnosis is `answer(failed ids)`; act prompts are kept."""
+    acted: list[str] = []
+
+    def generate(purpose: Purpose, parts: list[Part]) -> str:
+        text = str(parts[0])
+        if purpose == "diagnose" and "Group the failures by cause" in text:
+            return answer(re.findall(r"trial (ep-\S+) \(failed\)", text))
+        if purpose == "act":
+            acted.append(text)
+        return stub_generate(purpose, parts)
+
+    return Argon(EventLog(run_dir, "t"), generate=generate), acted
+
+
+def _demos(run_dir: Path) -> list[dict[str, Any]]:
+    logged = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    return [e["data"] for e in logged if e["type"] == "episode_started" and e["data"].get("acting_on")]
+
+
+def test_a_round_teaches_by_its_failure_modes_and_records_them(tmp_path: Path) -> None:
+    def one_mode(failed: list[str]) -> str:
+        mode = {"hypothesis": "twists too far", "evidence": "every failure", "confidence": 0.9,
+                "lesson": "stop twisting once the bin is ahead", "explains": failed}  # fmt: skip
+        return json.dumps({"modes": [mode]})
+
+    argon, acted = _round_argon(tmp_path, one_mode)
+    run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=3, dev_trials=2, argon=argon, make_student=StubStudent,
+             train_student=stub_finetune)  # fmt: skip
+    (record,) = json.loads((tmp_path / "diagnosis_r0.json").read_text())
+    failed = [e["episode_id"] for e in map(json.loads, (tmp_path / "events.jsonl").read_text().splitlines())
+              if e["type"] == "diagnosis" for e in [e["data"]]]  # fmt: skip
+    assert record["hypothesis"] == "twists too far" and len(record["demo_seeds"]) == 3
+    assert {d["acting_on"] for d in _demos(tmp_path)} <= set(failed)  # a failed episode its mode names
+    assert acted and all("stop twisting once the bin is ahead" in prompt for prompt in acted)
+    assert len(failed) == 2  # the per-episode diagnoses still run, one per failed trial
+
+
+def test_an_unusable_round_diagnosis_leaves_the_per_episode_lessons(tmp_path: Path) -> None:
+    argon, acted = _round_argon(tmp_path, lambda failed: "not json")
+    run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=2, dev_trials=2, argon=argon, make_student=StubStudent,
+             train_student=stub_finetune)  # fmt: skip
+    assert json.loads((tmp_path / "diagnosis_r0.json").read_text()) == []
+    assert [d["acting_on"] for d in _demos(tmp_path)] and acted  # the round still teaches, on today's lessons
