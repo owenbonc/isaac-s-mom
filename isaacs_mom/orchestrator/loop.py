@@ -9,7 +9,7 @@ from functools import partial
 from pathlib import Path
 from typing import Any
 
-from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult
+from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult, GroundTruth, Validation
 from isaacs_mom.orchestrator.episode import HEARTBEAT_SECONDS, heartbeat, run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
@@ -21,7 +21,7 @@ from isaacs_mom.teacher import ArgonPolicy, FailureMode, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator.recorder import write_atomically, write_manifest
 from isaacs_mom.validator.replay import replay_accepted
-from isaacs_mom.validator.rules import RECORDING_ERROR
+from isaacs_mom.validator.rules import RECORDING_ERROR, validate
 from isaacs_mom.validator.training import build_training_set
 
 INSTRUCTION = "Hug the orange box, lift it, and put it in the green bin."
@@ -33,6 +33,7 @@ DEV_TRIALS = 10
 MOVE_BIN_SHARE = 0.25  # of each round's teacher demonstrations, the bin moves right after the lift (§3.5)
 
 StudentFactory = Callable[[str], Policy]
+Verdict = Callable[[GroundTruth], Validation]
 StudentTrainer = Callable[[Path, str, int], str]
 
 
@@ -55,6 +56,7 @@ def evaluate(
     make_student: StudentFactory = StudentPolicy,
     instruction: str = INSTRUCTION,
     from_run: dict[str, Any] | None = None,
+    verdict: Verdict = validate,
 ) -> EvaluationResult:
     seeds = sorted(heldout_seeds())
     successes = errored = 0
@@ -70,15 +72,16 @@ def evaluate(
                 split="heldout",
                 round_=round_,
                 instruction=instruction,
+                verdict=verdict,
             )
         except Exception as error:  # a crash is the system's fault, not the student's, so it's counted apart (§3.5)
             errored += 1
             events.emit("error", seed=seed, split="heldout", round=round_, error=f"{type(error).__name__}: {error}")
             continue
-        verdict = manifest.validation
-        if verdict is None or verdict.reason.startswith(RECORDING_ERROR):
+        judged = manifest.validation
+        if judged is None or judged.reason.startswith(RECORDING_ERROR):
             errored += 1
-        elif verdict.accepted:
+        elif judged.accepted:
             successes += 1
     result = EvaluationResult(checkpoint=checkpoint, round=round_, successes=successes, n=len(seeds), errored=errored)
     events.emit(
@@ -219,6 +222,7 @@ def run_loop(
     instruction: str = INSTRUCTION,
     move_bin_share: float = MOVE_BIN_SHARE,
     from_run: Path | None = None,
+    verdict: Verdict = validate,
 ) -> list[EvaluationResult]:
     if not 0 <= move_bin_share <= 1:
         raise ValueError(f"move_bin_share is a share of the demonstrations, not {move_bin_share}")
@@ -234,7 +238,11 @@ def run_loop(
         source = None
         if carry is not None and round_ == 0:
             source = {"run": carry.source.name, "checkpoint": carry.checkpoint, "carried": len(carry.episodes)}
-        results.append(evaluate(sim, checkpoint, round_, run_dir, events, make_student, instruction, from_run=source))
+        results.append(
+            evaluate(
+                sim, checkpoint, round_, run_dir, events, make_student, instruction, from_run=source, verdict=verdict
+            )
+        )
         if results[-1].rate >= TARGET_RATE or round_ == max_rounds:
             break
         trial_start = DEV_SEED_START + 1000 * round_
@@ -250,13 +258,14 @@ def run_loop(
                 split="dev",
                 round_=round_,
                 instruction=instruction,
+                verdict=verdict,
             )
-            verdict = manifest.validation
+            judged = manifest.validation
             # A recording error is a simulator bug, never a lesson, so the teacher diagnoses it in neither way.
-            if verdict and verdict.reason.startswith(RECORDING_ERROR):
+            if judged and judged.reason.startswith(RECORDING_ERROR):
                 continue
             trials.append(manifest)
-            if verdict and not verdict.accepted:
+            if judged and not judged.accepted:
                 failures.append(manifest)
         diagnosed: list[tuple[str, Diagnosis]] = []
         for manifest in failures:
@@ -295,6 +304,7 @@ def run_loop(
                 split="dev",
                 round_=round_,
                 instruction=instruction,
+                verdict=verdict,
                 acting_on=failed_id,
                 move_bin_after_lift=i in moved,
             )
@@ -314,5 +324,5 @@ def run_loop(
             duration_s=duration_s,
             checkpoint_path=str(path) if path else None,
         )
-    replay_accepted(sim, run_dir)  # SPEC §3.6 step 6
+    replay_accepted(sim, run_dir, verdict)  # SPEC §3.6 step 6
     return results

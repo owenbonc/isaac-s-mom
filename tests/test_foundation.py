@@ -15,6 +15,7 @@ from isaacs_mom.contracts import (
     Diagnosis,
     EpisodeManifest,
     ExecResult,
+    GroundTruth,
     Observation,
     Perturbation,
     ReplayReport,
@@ -33,6 +34,8 @@ from isaacs_mom.seeds import DEV_SEED_START, SealedSeedError, assert_not_heldout
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.student.checkpoints import ADAPTER_FILES
+from isaacs_mom.tasks.example import OFFLINE_PROPOSAL
+from isaacs_mom.tasks.spec import TaskSpec
 from isaacs_mom.teacher import FailureMode, choose_scenes
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 from isaacs_mom.validator import replay, validate
@@ -1206,6 +1209,123 @@ def test_a_refused_from_run_is_a_usage_error_that_writes_nothing(
     monkeypatch.chdir(tmp_path)
     (tmp_path / "runs" / "prev" / "checkpoints" / "ckpt-r1").mkdir(parents=True)  # not finished
     argv = ["mom", "run", "--sim", "fake", "--student", "stub", "--run-id", "next", "--from-run", "runs/prev"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(BaseException) as stopped:
+        cli.main()
+    assert isinstance(stopped.value, SystemExit) and stopped.value.code == 2
+    assert not (tmp_path / "runs" / "next").exists()
+
+
+def _rule(reason: str, accepted: bool) -> Callable[[GroundTruth], Validation]:
+    return lambda _gt: Validation(task_success=accepted, physics_valid=True, reason=reason)
+
+
+def test_a_generated_tasks_rule_judges_every_episode_the_loop_runs(tmp_path: Path) -> None:
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=2,
+        dev_trials=2,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=StubStudent,
+        train_student=stub_finetune,
+        verdict=_rule("spec: box not on the shelf", False),
+    )
+    manifests = list(_manifests(tmp_path).values())
+    kinds = {(m.split, any(s.controller == "teacher" for s in m.steps)) for m in manifests}
+    assert kinds == {("heldout", False), ("dev", False), ("dev", True)}  # the exams, the trials and the demos
+    assert {m.validation.reason for m in manifests if m.validation} == {"spec: box not on the shelf"}
+    assert all(m.validation for m in manifests)
+
+
+def test_the_loops_replay_judges_by_the_same_rule(tmp_path: Path) -> None:
+    results = run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=0,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=StubStudent,
+        train_student=stub_finetune,
+        verdict=_rule("spec: every rule holds", True),
+    )
+    report = ReplayReport.model_validate_json((tmp_path / "replay_report.json").read_text())
+    assert results[0].successes == len(heldout_seeds()) == report.replayed == report.reproduced
+
+
+def _spec_file(tmp_path: Path) -> tuple[Path, TaskSpec]:
+    words = "put the box on the shelf, even if it moves"
+    spec = TaskSpec.model_validate_json(json.dumps({**OFFLINE_PROPOSAL, "instruction": words}))
+    path = tmp_path / "spec.json"
+    path.write_text(spec.model_dump_json())
+    return path, spec
+
+
+def test_mom_run_teaches_a_generated_task_from_the_tasks_learn_run_it_names(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    path, spec = _spec_file(tmp_path)
+    _earlier_run(tmp_path / "runs", "taught")
+    judged: list[str] = []
+
+    def rule(given: TaskSpec, gt: GroundTruth) -> Validation:
+        judged.append(given.name)
+        return Validation(task_success=False, physics_valid=True, reason="judged by the spec")
+
+    monkeypatch.setattr(cli, "spec_sim", lambda _spec: FakeSim())  # the scene is MuJoCo's; the plumbing is the same
+    monkeypatch.setattr(cli, "judge", rule)
+    argv = [
+        "mom",
+        "run",
+        "--sim",
+        "mujoco",
+        "--student",
+        "stub",
+        "--teacher",
+        "stub",
+        "--spec",
+        str(path),
+        "--from-run",
+        "runs/prev",
+        "--run-id",
+        "next",
+        "--rounds",
+        "1",
+        "--demos",
+        "1",
+        "--dev-trials",
+        "1",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    cli.main()
+    run_dir = tmp_path / "runs" / "next"
+    assert (run_dir / "spec.json").is_file()
+    assert TaskSpec.model_validate_json((run_dir / "spec.json").read_text()) == spec  # rule 6: what it was taught
+    logged = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    assert [e["data"]["text"] for e in logged if e["type"] == "instruction"] == [spec.instruction]
+    carried = set(json.loads((run_dir / "from_run.json").read_text())["episodes"])
+    new = {k: m for k, m in _manifests(run_dir).items() if k not in carried}
+    assert new and {m.instruction for m in new.values()} == {spec.instruction}  # the person's words throughout
+    assert {m.validation.reason for m in new.values() if m.validation} == {"judged by the spec"}
+    assert judged and set(judged) == {spec.name}
+    assert "round 0 started from prev/ckpt-r1" in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    "extra",
+    [["--sim", "fake"], ["--task", "near_bin"], ["--instruction", "something else"], ["--spec-missing"]],
+)
+def test_a_spec_the_run_cant_use_is_a_usage_error_that_writes_nothing(
+    extra: list[str], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    path, _ = _spec_file(tmp_path)
+    if extra == ["--spec-missing"]:
+        path, extra = tmp_path / "nowhere.json", []
+    argv = ["mom", "run", "--student", "stub", "--teacher", "stub", "--spec", str(path), "--run-id", "next", *extra]
     monkeypatch.setattr(sys, "argv", argv)
     with pytest.raises(BaseException) as stopped:
         cli.main()
