@@ -63,32 +63,35 @@ def lora_train(
     epoch_losses: list[float] = []
     order = list(range(len(examples)))
     steps = EPOCHS * math.ceil(len(order) / GRAD_ACCUM)
+    sample = random.sample(examples, min(ACCURACY_SAMPLE, len(examples)))
+    total = steps + len(sample)
     step = 0
     for _ in range(EPOCHS):
         random.shuffle(order)
-        total = 0.0
+        loss_sum = 0.0
         for i, index in enumerate(order, 1):
             group_size = min(GRAD_ACCUM, len(order) - (i - 1) // GRAD_ACCUM * GRAD_ACCUM)
             loss = model(**batch(examples[index])).loss
             (loss / group_size).backward()
-            total += loss.item()
+            loss_sum += loss.item()
             if i % GRAD_ACCUM == 0 or i == len(order):
                 optimizer.step()
                 optimizer.zero_grad()
                 step += 1
                 if progress:
-                    progress(step, steps)
-        epoch_losses.append(round(total / len(order), 4))
+                    progress(step, total)
+        epoch_losses.append(round(loss_sum / len(order), 4))
 
     model.eval()
-    sample = random.sample(examples, min(ACCURACY_SAMPLE, len(examples)))
     correct = 0
-    for example in sample:
+    for i, example in enumerate(sample, 1):
         text = vlm.reply(
             model, processor, device, images[example["image"]], example["instruction"], example["feedback"]
         )
         with contextlib.suppress(UnparseableReply):
             correct += parse_reply(text).skill == SkillCall.model_validate_json(example["target"]).skill
+        if progress:
+            progress(steps + i, total)
 
     with tempfile.TemporaryDirectory() as out:
         model.save_pretrained(out)
