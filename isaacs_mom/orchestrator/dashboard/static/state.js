@@ -358,7 +358,7 @@
     // An evaluation's held-out episodes follow the previous evaluation's result, as testing() reads them.
     const ends = s.rounds.map((r) => r.after);
     const tail = s.episodes.slice(ends.length ? ends[ends.length - 1] : 0).find((e) => e.split === "heldout");
-    const underway = !conditioned(s) && Boolean(tail || s.crashes.some((c) => c.evaluation === ends.length));
+    const underway = !conditioned(s) && (tail || s.crashes.some((c) => c.evaluation === ends.length));
     const kept = s.rounds.flatMap((r, k) => (counted(r) ? [k] : []));
     const checkpoints = kept.map((k) => ({ round: s.rounds[k].round, checkpoint: s.rounds[k].checkpoint, name: roundName(s.rounds[k]), done: true }));
     if (underway) {
