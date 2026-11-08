@@ -683,7 +683,7 @@ def test_demonstrations_are_shared_among_the_modes_by_the_failures_each_explains
     assert {acting_on for acting_on, d in plan if d and d.hypothesis == "far"} == set(far)  # every failure re-taught
 
 
-def test_without_modes_the_per_episode_lessons_take_turns_as_before() -> None:
+def test_without_modes_the_per_episode_lessons_take_turns() -> None:
     diagnosed = [("ep-1-aa", _mode("one", [])), ("ep-2-aa", _mode("two", []))]
     assert lesson_plan(3, [], diagnosed) == [diagnosed[0], diagnosed[1], diagnosed[0]]
     assert lesson_plan(2, [], []) == [(None, None), (None, None)]
@@ -732,4 +732,4 @@ def test_an_unusable_round_diagnosis_leaves_the_per_episode_lessons(tmp_path: Pa
     run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=2, dev_trials=2, argon=argon, make_student=StubStudent,
              train_student=stub_finetune)  # fmt: skip
     assert json.loads((tmp_path / "diagnosis_r0.json").read_text()) == []
-    assert [d["acting_on"] for d in _demos(tmp_path)] and acted  # the round still teaches, on today's lessons
+    assert [d["acting_on"] for d in _demos(tmp_path)] and acted  # the round still teaches, on the per-episode lessons
