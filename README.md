@@ -175,7 +175,7 @@ cd docs/live-demo
 **Requirements:** Python 3.12 and [uv](https://docs.astral.sh/uv/). macOS on Apple Silicon runs the simulator, the student, `mom eval`, `mom demo` and the dashboard. **Fine-tuning needs Windows with an NVIDIA GPU** (CUDA 12.8 wheels; we use an RTX 5070 Ti laptop). Linux gets CPU-only PyTorch: the sim and tests run, fine-tuning does not.
 
 ```sh
-git clone -b phase-1 https://github.com/owenbonc/isaac-s-mom.git
+git clone https://github.com/owenbonc/isaac-s-mom.git
 cd isaac-s-mom
 uv sync --frozen
 cp .env.example .env          # then set GEMINI_API_KEY=<your Gemini API key>
