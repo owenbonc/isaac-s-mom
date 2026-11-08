@@ -108,16 +108,28 @@ function renderHeader() {
     : "";
 }
 
+// Where the shown episode sits: among Teaching's episodes in Teaching, among the run's in Now. A seed's episode is
+// placed by its seed and checkpoint instead, so it has none.
+function position(ep) {
+  const s = MomState.shown(view);
+  const among = view.tab === "teaching" ? s.episodes.filter(MomState.teaches) : s.episodes;
+  return view.tab === "results" || !ep ? "" : `Episode ${among.indexOf(ep) + 1} of ${among.length}`;
+}
+
 // Screen readers hear the episode when the view moves to another, who is in control and the verdict when either
-// changes, and a pause or resume; not every step.
+// changes, a move between Results' list and its seeds, and a pause or resume; not every step.
 function announce(text) {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
-  const heard = { text, episode: ep && ep.id, count: s.episodes.length, paused: view.frozen !== null, lost: view.lost };
+  const place = MomState.where(view);
+  const heard = { text, place, seed: view.seed, episode: ep && ep.id, count: s.episodes.length, paused: view.frozen !== null, lost: view.lost };
   const parts = [];
   if (heard.paused !== lastHeard.paused) parts.push(heard.paused ? "Paused." : "Resumed.");
   if (heard.lost !== lastHeard.lost) parts.push(heard.lost ? "Connection to the run lost, retrying." : "Connection restored.");
-  if (ep && (heard.episode !== lastHeard.episode || heard.count !== lastHeard.count)) parts.push(`Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}, ${kindOf(ep)[0].toLowerCase()}.`, text);
+  const row = place === "seed" && MomState.results(s).seeds.find((x) => x.seed === view.seed);
+  if (ep && (heard.episode !== lastHeard.episode || heard.count !== lastHeard.count)) parts.push(`${position(ep) || `Seed ${view.seed}`}, ${kindOf(ep)[0].toLowerCase()}.`, text);
+  else if (place === "list" && heard.place !== lastHeard.place) parts.push(`Results: ${MomState.results(s).seeds.length} held-out seeds.`);
+  else if (row && (heard.place !== lastHeard.place || heard.seed !== lastHeard.seed)) parts.push(`Seed ${row.seed}, ${MARK[row.mark].toLowerCase()}: ${outcomes(row)}.`);
   else if (text !== lastHeard.text) parts.push(text);
   parts.push(news);
   news = "";
@@ -151,7 +163,9 @@ function renderControl() {
       ? '<span class="what">No run yet</span>'
       : s.refused !== null
         ? `<span class="what">Not started</span><span class="note">${esc(s.refused)}</span>`
-        : '<span class="what">Waiting for the run to start</span>';
+        : s.episodes.length
+          ? `<span class="what">No teaching episode yet</span><span class="note">${TEACHING_STARTS}</span>`
+          : '<span class="what">Waiting for the run to start</span>';
     return "";
   }
   const [kind, where] = kindOf(ep);
@@ -189,6 +203,10 @@ function renderControl() {
   const said = step !== null ? `${who} was in control at step ${step}.` : `${who} ${done ? "was" : "is"} in control.`;
   return `${said}${words ? ` Verdict: ${words}.` : ""}`;
 }
+
+// Teaching's first episode follows the first held-out test.
+const TEACHING_STARTS = "The student's trials start once the first held-out test ends.";
+const noEpisode = () => (MomState.shown(view).episodes.length ? slate("No teaching episode yet", TEACHING_STARTS) : slate("No episode yet", "The head camera's frames appear here once the run starts."));
 
 // A frame-sized card on the stage where no head-camera frame can be shown yet.
 const slate = (title, note) => `<div class="frame"><div class="cell"><div class="shot slate"><p class="what">${title}</p><p class="note">${note}</p></div></div></div>`;
@@ -240,7 +258,7 @@ function renderCamera() {
       ? slate("No runs yet", "Tell the robot what to learn in the Teach box to start one.")
       : refused !== null
         ? slate("Not started", esc(refused))
-        : slate("No episode yet", "The head camera's frames appear here once the run starts.");
+        : noEpisode();
     $("stage").innerHTML = (ep ? slate(`${kind} · ${where}`, note) : empty) + foot("", panelChip(ep));
     $("strip").innerHTML = "";
     return;
@@ -339,10 +357,9 @@ const PAUSE = $("b-pause");
 function renderEpisode() {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
-  const at = s.episodes.indexOf(ep);
   // The connection note sits beside the rail, which gives way, so the keys above never wrap.
   const lost = view.lost ? ' <span class="lost">· connection lost, retrying</span>' : "";
-  $("episode-line").innerHTML = (ep ? `Episode ${at + 1} of ${s.episodes.length}` : "") + lost;
+  $("episode-line").innerHTML = position(ep) + lost;
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) === null;
   const steps = STEPS[MomState.where(view)];
   $("b-prev").dataset.tip = `Previous ${steps} · ←`;
