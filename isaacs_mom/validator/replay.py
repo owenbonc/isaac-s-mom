@@ -1,9 +1,10 @@
+from collections.abc import Callable
 from pathlib import Path
 
 import mujoco
 import numpy as np
 
-from isaacs_mom.contracts import EpisodeManifest, ReplayFailure, ReplayReport
+from isaacs_mom.contracts import EpisodeManifest, GroundTruth, ReplayFailure, ReplayReport, Validation
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.validator.recorder import write_atomically, write_manifest
 from isaacs_mom.validator.rules import validate
@@ -23,15 +24,15 @@ REPLAY_ERRORS = (
 )
 
 
-def replay(sim: TruthSim, manifest_path: Path) -> bool:
+def replay(sim: TruthSim, manifest_path: Path, verdict: Callable[[GroundTruth], Validation] = validate) -> bool:
     """SPEC §3.4: re-run the stored skill calls and perturbations from the stored seed; sets `replay_valid`.
 
     True when every recorded perturbation applies again, every step's executed actions, timestamps and outcome match
     the recording and the final verdict matches the stored one, so a rejected episode replays as valid when its
-    failure reproduces.
+    failure reproduces. A generated task's episodes carry its own rule's verdict, so they pass that rule as `verdict`.
     """
     manifest = EpisodeManifest.model_validate_json(manifest_path.read_text())
-    reproduced = _divergence(sim, manifest, manifest_path.parent) is None
+    reproduced = _divergence(sim, manifest, manifest_path.parent, verdict) is None
     manifest.replay_valid = reproduced
     write_manifest(manifest_path, manifest)
     return reproduced
@@ -72,7 +73,12 @@ def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
     return report
 
 
-def _divergence(sim: TruthSim, manifest: EpisodeManifest, episode_dir: Path) -> str | None:
+def _divergence(
+    sim: TruthSim,
+    manifest: EpisodeManifest,
+    episode_dir: Path,
+    verdict: Callable[[GroundTruth], Validation] = validate,
+) -> str | None:
     """Where a re-run first differs from the recording, or None when it reproduces."""
     sim.reset(manifest.seed)
     for i, step in enumerate(manifest.steps):
@@ -91,7 +97,7 @@ def _divergence(sim: TruthSim, manifest: EpisodeManifest, episode_dir: Path) -> 
             return f"step {i}: timestamps differ"
     if not _perturb_before(sim, manifest, len(manifest.steps)):
         return "a recorded perturbation after the last step no longer applies"
-    if validate(sim.ground_truth()) != manifest.validation:
+    if verdict(sim.ground_truth()) != manifest.validation:
         return "final verdict differs"
     return None
 

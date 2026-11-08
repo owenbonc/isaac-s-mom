@@ -25,6 +25,8 @@ from isaacs_mom.sim.mujoco.task import (
     MAX_PLATFORM_BOX_MASS_KG,
     MIN_BIN_DISTANCE_M,
     PLATFORM_TOP_RANGE_M,
+    TWIST_BIN_BEARING_DEG,
+    TWIST_BIN_DISTANCE_M,
 )
 from isaacs_mom.tasks.rules import judge
 from isaacs_mom.tasks.spec import AtRest, Bin, Inside, On, Platform, Refusal, RobotStanding, TaskSpec
@@ -60,7 +62,7 @@ Answer with exactly one JSON object of this shape (an example, not the answer):
                         {{"fact": "at_rest", "object": "box"}}, {{"fact": "robot_standing"}}]}},
  "perturbations": [{{"object": "bin"}}]}}
 
-- name and ids: lowercase letters, digits and underscores, starting with a letter.
+- name and ids: up to 24 lowercase letters, digits and underscores, starting with a letter.
 - box: half_m is half its depth, width and height, within {BOX_HALF_DEPTH_RANGE}, {BOX_HALF_WIDTH_RANGE} and
   {BOX_HALF_HEIGHT_RANGE} m; mass_kg up to {MAX_BOX_MASS_KG}; offset_m, how far off the table's centre line it may
   start, up to {MAX_START_OFFSET_M}.
@@ -72,6 +74,10 @@ Answer with exactly one JSON object of this shape (an example, not the answer):
 - success.all_of: facts that must all hold at the end. "inside" (object, container: a bin), "on" (object, support: a
   shelf or platform), "at_rest" (object), "robot_standing". Say where the box must end up.
 - perturbations: the objects that may be moved mid-run (the box, the destination, or neither).
+- stance: "walking" (the default; leave it out) or "fixed_feet", when the instruction says the robot stays where it is
+  (no walking or stepping). It then twists its waist to a bin beside it: distance_m within {TWIST_BIN_DISTANCE_M[0]} to
+  {TWIST_BIN_DISTANCE_M[1]} m, bearing_deg within {TWIST_BIN_BEARING_DEG[0]:.0f} to {TWIST_BIN_BEARING_DEG[1]:.0f},
+  and only a bin will do.
 - If the instruction needs anything else (another object, a grasp, a pour, a stack), answer {{"refuse": "<why>"}}.
 """
 

@@ -10,6 +10,7 @@ from isaacs_mom.contracts import GroundTruth, Validation
 from isaacs_mom.sim.mujoco.scene import BIN_WALL
 from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF
 from isaacs_mom.tasks.spec import AtRest, Inside, On, Platform, RobotStanding, TaskSpec
+from isaacs_mom.validator.rules import JOINT_LIMIT, PENETRATION, ROBOT_FELL
 
 SEPARATOR = "; "
 
@@ -37,9 +38,9 @@ def judge(spec: TaskSpec, gt: GroundTruth) -> Validation:
     physics = [
         message
         for flagged, message in (
-            (gt.robot_fallen, "robot fell"),
-            (gt.joint_limit_violation, "joint limit violated"),
-            (gt.penetration, "penetration"),
+            (gt.robot_fallen, ROBOT_FELL),
+            (gt.joint_limit_violation, JOINT_LIMIT),
+            (gt.penetration, PENETRATION),
         )
         if flagged
     ]
