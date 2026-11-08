@@ -1,0 +1,223 @@
+{
+  "about": "Every number in the one-page summary, with its n and where it came from. Edit here, then run ./build.sh.",
+  "comparisons": {
+    "about": "Student alone (no teacher takeover) on sealed held-out seeds 1-20 (40 for the two new placements). Each row changes one thing against its control. Successes / (n - errored); 0 errored everywhere.",
+    "groups": [
+      {
+        "title": "One sentence → new skill (56 demos)",
+        "rows": [
+          {
+            "label": "normal task",
+            "control": {
+              "k": 0,
+              "n": 20,
+              "name": "untrained"
+            },
+            "result": {
+              "k": 18,
+              "n": 20,
+              "name": "trained"
+            },
+            "kind": "after",
+            "source": "PR #34 comment 6718403706 (runs/showcase-compare on the RTX 5070 Ti; re-run reproduced seed for seed); exact McNemar 18 vs 0 discordant, p = 7.6e-6"
+          },
+          {
+            "label": "bin moved after lift",
+            "control": {
+              "k": 0,
+              "n": 20,
+              "name": "untrained"
+            },
+            "result": {
+              "k": 17,
+              "n": 20,
+              "name": "trained"
+            },
+            "kind": "moved",
+            "source": "PR #34 comment 6718403706 (move applied 20/20, adapted 17/20; base never lifts); exact McNemar 17 vs 0, p = 1.5e-5"
+          }
+        ]
+      },
+      {
+        "title": "Same student, Mac",
+        "rows": [
+          {
+            "label": "camera vs grey image",
+            "control": {
+              "k": 0,
+              "n": 20,
+              "name": "grey image"
+            },
+            "result": {
+              "k": 19,
+              "n": 20,
+              "name": "camera"
+            },
+            "kind": "after",
+            "source": "PR #22 comment 6719281987; blind/showcase.log in the WS1 session (same checkpoint, seeds and Mac; only the head frame differs); exact McNemar 19 vs 0, p = 3.8e-6"
+          }
+        ]
+      },
+      {
+        "title": "Recovery lessons (v1 → v2)",
+        "rows": [
+          {
+            "label": "box moved at start",
+            "control": {
+              "k": 7,
+              "n": 20,
+              "name": "v1, 52 demos"
+            },
+            "result": {
+              "k": 15,
+              "n": 20,
+              "name": "v2, 117 demos"
+            },
+            "kind": "moved",
+            "source": "PR #22 comment 6717726778 (v2 15/20 vs v1 7/20, move applied 20/20, 0 errored)"
+          },
+          {
+            "label": "new bin placements",
+            "control": {
+              "k": 14,
+              "n": 40,
+              "name": "v1"
+            },
+            "result": {
+              "k": 21,
+              "n": 40,
+              "name": "v2"
+            },
+            "kind": "after",
+            "source": "PR #22 comment 6718403477 (runs/eval-v1v2-20261108-055547; bin further ahead 4/20 -> 14/20, exact McNemar p = 0.006)"
+          }
+        ]
+      }
+    ]
+  },
+  "curve": {
+    "about": "Learning curve on the showcase task: the student trained on the first K accepted demos by seed, from the same 56. Same laptop and fine-tune code; the 56 point is the showcase fine-tune itself (1255.3 s), 14 and 28 were trained separately (runs curve-k14, curve-k28).",
+    "source": "PR #22 comment 6719281987",
+    "n": 20,
+    "points": [
+      {
+        "demos": 14,
+        "examples": 152,
+        "finetune_s": 404,
+        "normal": 0,
+        "moved": 0
+      },
+      {
+        "demos": 28,
+        "examples": 293,
+        "finetune_s": 672,
+        "normal": 0,
+        "moved": 0
+      },
+      {
+        "demos": 56,
+        "examples": 605,
+        "finetune_s": 1255,
+        "normal": 18,
+        "moved": 17
+      }
+    ]
+  },
+  "latency": {
+    "about": "Decision latency, median and p95. Edge budget: 2 s per decision and 3 GB (SPEC section 6.10).",
+    "budget_s": 2.0,
+    "rows": [
+      {
+        "label": "Student, showcase exam",
+        "where": "laptop GPU",
+        "note": "",
+        "median_ms": 312,
+        "p95_ms": 557,
+        "n": 326,
+        "loc": "gpu",
+        "source": "showcase exam on the RTX 5070 Ti (WS1 scratchpad old/exam_events.jsonl + exam_moved_events.jsonl): 326 decisions, median 311.9 ms, p95 556.5 ms (nearest rank), 1 over 2 s, 0 Argon calls; recomputed here"
+      },
+      {
+        "label": "Student, 35-min exam",
+        "where": "laptop GPU",
+        "note": "",
+        "median_ms": 1075,
+        "p95_ms": 1091,
+        "n": 237,
+        "loc": "gpu",
+        "source": "runs/eval-v1v2-20261108-055547 on the idle RTX 5070 Ti, v2 training task (WS1 session latency table 07:05). All six exam rows: medians 1075-1081 ms, p95 1091-1100 ms, 2 of 2,145 decisions over 2 s (the first after loading); peak 2.01 GiB"
+      },
+      {
+        "label": "Teacher",
+        "where": "cloud, teaching only",
+        "note": "",
+        "median_ms": 8066,
+        "p95_ms": 19473,
+        "n": 3551,
+        "loc": "cloud",
+        "source": "argon_call events in walking-trial/*/events.jsonl and the two learn-* batches (3,579 calls, 28 failed)"
+      }
+    ]
+  },
+  "other": {
+    "showcase_batch": {
+      "instruction": "Stay where you are and put the box in the bin beside you, even if someone moves the bin.",
+      "demos": 60,
+      "accepted": 56,
+      "teachers": 8,
+      "minutes": 15.9,
+      "teacher_calls": 587,
+      "spec_calls": 2,
+      "examples": 605,
+      "finetune_min": 21,
+      "source": "PR #34 comment 6718403706; learn-box_to_bin_fixed-57288f663c83-040045 event span",
+      "pipeline_stage_seconds": {
+        "spec": 23.5,
+        "demos": 952.7,
+        "finetune_bracket": 1271.7,
+        "exam": 135.9,
+        "total": 2383.8,
+        "source": "pitch/data/workflow_timeline.csv"
+      }
+    },
+    "student_peak_gib": {
+      "value": 2.01,
+      "source": "runs/eval-v1v2-20261108-055547, 35-min exam (torch peak)"
+    },
+    "finetune_v2": {
+      "seconds": 2170,
+      "peak_gib": 2.03,
+      "examples": 1071,
+      "demos": 117,
+      "source": "PR #22 comment 05:25"
+    },
+    "teacher_acceptance": {
+      "fixed_feet": "52/60",
+      "walking": "69/100",
+      "showcase": "56/60",
+      "source": "PR #22 02:55; walking-trial/batch-walk-0203; PR #34"
+    },
+    "sim_render_ms": {
+      "value": 12.6,
+      "n": 50,
+      "source": "bench on Apple M5, MujocoSim.observe (320x240 + JPEG)"
+    },
+    "walk_policy_ms": {
+      "value": 0.027,
+      "n": 2000,
+      "source": "bench on Apple M5, Walker.act"
+    },
+    "replay": {
+      "value": "56/56 accepted demos reproduce",
+      "source": "PR #34"
+    },
+    "diagnosis_round1": {
+      "value": "10/10 failed trials diagnosed correctly",
+      "source": "PR #10 comment 05:05"
+    },
+    "tests": {
+      "value": "600+ (616 on ws1/teach-run-errors)",
+      "source": "PR #35 comment 05:06"
+    }
+  }
+}

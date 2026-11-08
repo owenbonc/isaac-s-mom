@@ -1,0 +1,44 @@
+W1108 06:49:24.621000 79464 torch/distributed/elastic/multiprocessing/redirects.py:35] NOTE: Redirects are currently not supported in MacOs.
+Loading weights:   0%|          | 0/489 [00:00<?, ?it/s]Loading weights: 100%|██████████| 489/489 [00:00<00:00, 9166.59it/s]
+{"label": "sighted", "seed": 1, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 2, "accepted": true, "skills": "hug lift turn_left45 turn_left45 turn_right45 turn_left45 turn_right45 turn_left45 turn_right45 turn_left45 turn_right45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 3, "accepted": false, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "sighted", "seed": 4, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 5, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 6, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 7, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 8, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 9, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 10, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 11, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 12, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 13, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 14, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 15, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 16, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 17, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 18, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 19, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+{"label": "sighted", "seed": 20, "accepted": true, "skills": "reach_left5 hug lift turn_left45 turn_left45 place reobserve", "reason": "box_to_bin_fixed: every rule holds"}
+SUMMARY sighted: 19/20
+{"label": "blind", "seed": 1, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 2, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 3, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 4, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 5, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 6, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 7, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 8, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 9, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 10, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 11, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 12, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 13, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 14, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 15, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 16, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 17, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 18, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 19, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+{"label": "blind", "seed": 20, "accepted": false, "skills": "reach_left5 hug lift turn_left45 place reobserve", "reason": "box not inside the bin"}
+SUMMARY blind: 0/20
