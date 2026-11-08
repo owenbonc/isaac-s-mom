@@ -2,11 +2,11 @@
 
 # Scaffld
 
-### A robot teacher that finds the gaps in a robot's skills and builds its own lessons.
+### An Argon-powered robot teacher that diagnoses failures in a robot’s skills and builds its own lessons.
 
-## One typed sentence → a new, tested robot skill in 39.7 minutes.
+## One sentence description of a task → a new, tested robot skill in 39.7 minutes.
 
-**No human demonstrations. No labels. The trained student then runs alone on a laptop.**
+**No human demonstrations. No labels. The trained robot student runs alone on a laptop.**
 
 <sub>39.7 min is the wall-clock time of the measured stages (spec, demos, fine-tune, exam); it excludes a 70-minute wait for a busy GPU.</sub>
 
@@ -15,13 +15,13 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 <img src="docs/media/scaffld-video-excerpt.gif" width="100%" alt="The student alone: the simulator moves the bin after the lift, the student still puts the box in, and the validator accepts">
 
-<sub>From our simulation video (<a href="docs/media/scaffld-simulation-video.mp4">full take, 54 s</a>). The student works alone on a scene it has never seen. After the lift, the simulator moves the bin without warning; the student, which sees only its head camera (right), still puts the box in. Shown at 0.5× speed.</sub>
+<sub>From our simulation video (<a href="docs/media/scaffld-simulation-video.mp4">full take, 54 s</a>). The student works alone on a scene it has never seen. After lifting the box, the simulator moves the bin without warning; the student, which sees only from its RGB head camera (right), still puts the box in. Shown at 0.5× speed.</sub>
 
 <br>
 
 | **39.7 min** | **0/20 → 18/20** | **10/20 → 18/20** (untargeted demos: also 18/20) | **19/20 vs 0/20** | **0** |
 |:---:|:---:|:---:|:---:|:---:|
-| to teach the robot **one new skill** from one sentence | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic teaching round** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image** (on a Mac); a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
+| to teach the robot **one new skill** from a one sentence description | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic teaching round** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image** (on a Mac); a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
 
 [Technical summary (PDF)](docs/technical-summary.pdf) · [Pitch deck (PDF)](docs/deck/deck.pdf) · [How it works](#how-it-works) · [Repair loop](#the-repair-loop-test-diagnose-re-teach-until-its-good-enough) · [Results](#results) · [Impact](#impact) · [Videos](#videos) · [Live demo](#live-demo) · [Quickstart](#quickstart)
 
@@ -33,7 +33,7 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 Robots learn new skills from **human demonstrations**, and those are slow and costly: DROID needed 50 collectors for 12 months to record 76k trajectories, and RT-1 13 robots for 17 months for 130k episodes. Every new failure costs more operator hours.
 
-**Scaffld hands that job to an agent.** In teaching, scaffolding is support given exactly where a learner struggles, then taken away. Here a cloud teacher, **Argon**, turns one sentence into a checked task, demonstrates it by driving the robot itself, keeps only what an independent validator accepts, and trains a small student that then **runs on the robot alone**.
+**Scaffld hands that job to an agent.** With human training, support given exactly where the learner struggles, which is then taken away. Here a cloud teacher, **Argon**, turns one sentence into a checked task, and demonstrates it by driving the robot itself. Only successful demos an independent validator accepts is kept, and is used to train a small VLM student that then **runs on the robot alone**.
 
 ## How it works
 
@@ -41,11 +41,11 @@ Robots learn new skills from **human demonstrations**, and those are slow and co
 
 <img src="docs/media/pipeline.png" width="100%" alt="Pipeline: one sentence, Argon writes the spec, Argon teachers demonstrate and a validator keeps what works, LoRA fine-tune, student examined alone; elapsed time to scale">
 
-1. **One sentence.** A person types what the robot should learn. Nothing else is task-specific: no teleoperation, no labels.
+1. **One sentence description.** A person types what the robot should learn. Nothing else is task-specific: no teleoperation, no labels.
 2. **Argon writes the task.** The scene, which objects may move, and a **declarative success rule**, all checked by code before any demo runs.
-3. **Argon teaches; a validator keeps what works.** Eight Argon teachers drive the robot in parallel through **the same head camera and skills the student will have**. An independent validator judges each demo from ground truth, and only accepted steps become training data.
+3. **Argon teaches; a validator keeps what works.** Eight Argon teachers drive the robot in parallel through **the same head camera and skills the student will have**. An independent validator judges each demo from ground truth, and only accepted, successful steps become training data.
 4. **The student learns.** SmolVLM2-500M is fine-tuned with LoRA r16 on a laptop GPU to pick the next skill from the head-camera image.
-5. **The student is examined alone** on 20 **sealed** scenes that no demonstration may use: no teacher, no cloud.
+5. **The student is examined alone** on 20 **sealed** scenes that no demonstration may be used: no teacher, no cloud.
 
 ### The repair loop: test, diagnose, re-teach, until it's good enough
 
@@ -143,6 +143,31 @@ Every result is the **student alone** on sealed held-out scenes, against a contr
 <sub>Teacher and student ran on different seeds and machines by design: the held-out seeds are sealed from the teacher. Argon's token usage is not logged, so cost is given in calls.</sub>
 
 ## Videos
+
+### The whole loop in one minute
+
+<a href="docs/media/scaffld-full-loop.mp4"><img src="docs/media/scaffld-full-loop.gif" width="100%" alt="The dashboard: the sentence is typed into the Teach box, then the loop's first frame grows out of the dashboard's stage"></a>
+
+<sub><b><a href="docs/media/scaffld-full-loop.mp4">Watch the full video (58 s, MP4)</a>.</b> It starts in the dashboard: the sentence is typed into Teach, the loop's first frame appears in the stage, and the stage fills the screen. Then the loop runs round by round under a top bar (Check → Diagnose → Demonstrate → Fine-tune, repeat until the 80% target):</sub>
+
+1. **Check:** the untrained student is stuck (0/20).
+2. **Diagnose:** Argon names the failure from the trials ("stuck calling reach_left past its 12 cm limit instead of hugging").
+3. **Demonstrate:** Argon shows the task through the same camera, and the validator keeps only what works.
+4. **Fine-tune.**
+5. **Check:** the student does it alone (10/20). Argon diagnoses its over-twist and demonstrates turning back and placing.
+6. **Fine-tune again, then check:** **10/20 → 18/20** per seed (p = 0.039). That meets the target, so the loop stops.
+
+**The video joins two runs.** Steps 1–5 (0/20 → 10/20) are the untrained student and the fixed-feet student v2, trained on 117 demos in a separate run ([PR #22 6718403477](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6718403477)), not one loop round. Step 6 is one real loop round, `gate-e-1008` ([6721136914](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721136914)). An untargeted control with the same number of new demos also reached 18/20, so targeting added nothing measurable over the same number of untargeted demos (both 18/20; n = 20, possible ceiling; [6721840949](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721840949)); the video says so on its last card. Footage: students filmed on unseen video seeds, and Argon's demos re-executed from their records; numbers from the round reports ([sources](#where-the-numbers-come-from)).
+
+<table>
+<tr>
+<td width="33%"><a href="docs/media/scaffld-story-take.mp4"><img src="docs/media/scaffld-story-take-poster.jpg" width="100%" alt="One continuous take: the untrained student fails, Argon takes over, the bin is moved and Argon re-aims"></a><br><sub><b>One continuous take (48 s).</b> The untrained student fails, Argon takes over from the same camera, the bin is moved unannounced and Argon re-aims; the validator accepts and the saved trajectory replays to the same verdict. Argon's thinking time is shown faster (labelled).</sub></td>
+<td width="33%"><a href="docs/media/before-after-one-seed.mp4"><img src="docs/media/before-after-one-seed-poster.jpg" width="100%" alt="The same unseen scene, side by side: the untrained student is stuck, the trained student places the box"></a><br><sub><b>Before and after, same scene (28 s).</b> The untrained student is stuck making refused moves; the student trained on 56 demos places the box alone (0/20 → 18/20 on sealed scenes).</sub></td>
+<td width="33%"><a href="docs/media/walking-full-screen.mp4"><img src="docs/media/walking-full-screen-poster.jpg" width="100%" alt="Argon walks the robot across the room with the box and places it in the bin"></a><br><sub><b>The teacher walks (24 s).</b> Argon carries the box across the room and places it, with its reasons; an accepted demo re-executed from its record at 2× speed (69/100 walking demos accepted).</sub></td>
+</tr>
+</table>
+
+### More clips
 
 **The simulation video:** [`scaffld-simulation-video.mp4`](docs/media/scaffld-simulation-video.mp4) (54 s, one continuous take filmed from the simulator; excerpt at the top of this page). The student works alone, the bin is moved after the lift, and the screen shows what the student sees, each decision with its timing, a snapshot of the bin before it moved, and the validator's verdict.
 
