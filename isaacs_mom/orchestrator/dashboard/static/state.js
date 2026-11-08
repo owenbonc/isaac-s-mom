@@ -364,7 +364,7 @@
     const tail = s.episodes.slice(ends.length ? ends[ends.length - 1] : 0).find((e) => e.split === "heldout");
     // shortcut: during a live mom eval, a non-training block reads as the evaluation under way until its result closes it; upgrade by recording the condition on episode_started.
     const kept = s.rounds.flatMap((r, k) => (counted(r) ? [k] : []));
-    const checkpoints = kept.map((k) => s.rounds[k]).map((r) => ({ round: r.round, checkpoint: r.checkpoint, name: roundName(r), done: true }));
+    const checkpoints = kept.map((k) => ({ round: s.rounds[k].round, checkpoint: s.rounds[k].checkpoint, name: roundName(s.rounds[k]), done: true }));
     if (tail || s.crashes.some((c) => c.evaluation === ends.length)) {
       const test = testing(s);
       const checkpoint = test ? test.checkpoint : null;

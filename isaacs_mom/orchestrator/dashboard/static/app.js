@@ -638,7 +638,7 @@ function placeFocus() {
   seedMoved = false;
   if (view.opened !== null) leftEpisode = view.opened;
   // A seed chosen from the strip keeps the focus there, so ← and → go on through its columns.
-  if (!moved || (document.activeElement && document.activeElement.closest && document.activeElement.closest("#columns"))) return;
+  if (!moved || document.activeElement.closest?.("#columns")) return;
   const at = (selector) => $("results").querySelector(selector);
   const to =
     place === "seed"
@@ -794,7 +794,7 @@ function press(e) {
 }
 // ← and → move between the strip's columns while the focus is in it; Enter on one is its button's click.
 function stripKey(e) {
-  const column = e.target && e.target.closest && e.target.closest("[data-column]");
+  const column = e.target.closest?.("[data-column]");
   if (!column || (e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.metaKey || e.ctrlKey || e.altKey) return false;
   const to = MomState.neighbour(MomState.shown(view), Number(column.dataset.column), e.key === "ArrowLeft" ? -1 : 1);
   if (to !== null) {
