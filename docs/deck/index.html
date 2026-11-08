@@ -1,0 +1,980 @@
+<!doctype html><html><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>Scaffld Pitch Deck</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&family=Barlow+Semi+Condensed:wght@500;600&family=JetBrains+Mono:wght@500;600&display=swap">
+<style>
+/* A signed acceptance-test report: one ruled sheet per claim, on a graphite desk; deliberately one light paper world. */
+:root{
+  --paper:#f2f0ea;--desk:#26272a;--desk-ink:#cfccc4;--desk-dim:#9c9990;--mat:#d9d6ce;
+  --ink:#1c1d1f;--grey:#5b5954;--rule:#c9c6bd;--pass:#29704a;--fail:#b83a32;
+  --display:"Barlow Semi Condensed",Bahnschrift,"DIN Alternate","Arial Narrow",sans-serif;
+  --text:"Barlow",Bahnschrift,"DIN Alternate",Arial,sans-serif;
+  --mono:"JetBrains Mono",ui-monospace,Consolas,"SF Mono",Menlo,monospace;
+  /* Reading mode (phones): one column. Present mode and the PDF override these on a 1600 x 900 sheet. */
+  --t-h1:34px;--t-h2:26px;--t-lead:18px;--t-body:16px;--t-small:14px;--t-label:12px;--t-fig:34px;--t-stage:20px;--t-id:14px;--t-stamp:15px;--t-tbv:16px;--t-big:22px;--t-seed:11px;--t-node:17px;
+  --sp-out:10px;--sp-body:20px 16px 24px;--gap:18px;
+  color-scheme:light;
+}
+html.present{--t-h1:80px;--t-h2:50px;--t-lead:25px;--t-body:21px;--t-small:19px;--t-label:16px;--t-fig:58px;--t-stage:29px;--t-id:16px;--t-stamp:19px;--t-tbv:23px;--t-big:30px;--t-seed:14px;--t-node:24px;--sp-out:26px;--sp-body:30px 40px 26px;--gap:28px}
+*{box-sizing:border-box}
+html{scrollbar-color:var(--desk-dim) var(--desk);-webkit-text-size-adjust:100%}
+body{margin:0;background:var(--desk);color:var(--ink);font:400 var(--t-body)/1.4 var(--text);font-variant-numeric:tabular-nums;-webkit-font-smoothing:antialiased}
+::selection{background:var(--ink);color:var(--paper)}
+:focus-visible{outline:2px solid var(--ink);outline-offset:3px}
+.sprite{position:absolute;width:0;height:0;overflow:hidden}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+h1,h2,h3,p,ul{margin:0}
+ul{padding:0;list-style:none}
+h1,h2,h3{font-family:var(--display);font-weight:600;line-height:1.04;letter-spacing:-.01em;text-wrap:balance}
+h1{font-size:var(--t-h1);line-height:1}
+h2{font-size:var(--t-h2)}
+.k{display:block;font:500 var(--t-label)/1.3 var(--mono);color:var(--grey)}
+.k.ink{color:var(--ink)}
+.k b{color:var(--ink);font-weight:600}
+svg.i{width:1em;height:1em;fill:none;stroke:currentColor;stroke-width:2.4;stroke-linecap:round;stroke-linejoin:round;flex:none}
+svg.ar{width:.8em;height:.8em;vertical-align:-.05em;stroke-width:2.6}
+.still{display:none}
+
+/* The deck: a desk with the sheets on it; the gutter keeps them off the screen's edges. */
+.deck{padding-block:16px 24px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.stage{display:grid;grid-template-columns:minmax(0,1fr);gap:18px;max-width:780px;margin:0 auto}
+.stage>.sheet{min-width:0}
+.controls{display:none}
+
+/* A sheet: paper, an inked frame, a title block, the body, a footer with the source. */
+.sheet{background:var(--paper);padding:var(--sp-out);box-shadow:0 12px 32px -14px rgb(0 0 0 / .6)}
+.form{border:2px solid var(--ink);display:grid;grid-template-rows:1fr auto;height:100%;min-width:0}
+.tb{display:grid;grid-template-columns:1fr 1fr;border-bottom:2px solid var(--ink)}
+.tb>div{padding:7px 12px 9px;border-left:1px solid var(--ink);border-top:1px solid var(--ink);min-width:0}
+.tb>div:nth-child(2n+1){border-left:0}
+.tb>div:nth-child(-n+2){border-top:0}
+.tb .v{display:block;font-family:var(--display);font-weight:600;font-size:var(--t-tbv);line-height:1.2;margin-top:2px}
+.tb .pct{font:600 .78em/1 var(--mono);color:var(--grey);margin-left:.2em}
+.tb .sep{color:var(--grey)}
+.sb{padding:var(--sp-body);min-width:0;min-height:0;display:grid;grid-template-columns:minmax(0,1fr);gap:var(--gap);align-content:start}
+.sb>*{min-width:0}
+.sf{display:flex;flex-wrap:wrap;justify-content:space-between;gap:4px 24px;border-top:2px solid var(--ink);padding:8px 14px;font:500 var(--t-label)/1.35 var(--mono);color:var(--grey)}
+.split,.main,.aside{display:grid;gap:var(--gap);align-content:start;min-width:0}
+
+/* Ruled tables. */
+.scroll{overflow-x:auto;min-width:0}
+table{width:100%;border-collapse:collapse;font-size:var(--t-body)}
+th{text-align:left;font:500 var(--t-label)/1.3 var(--mono);color:var(--grey);padding:0 10px 7px;border-bottom:1.5px solid var(--ink);vertical-align:bottom}
+td{padding:11px 10px;border-bottom:1px solid var(--rule);vertical-align:middle}
+td:first-child,th:first-child{padding-left:0}
+td.big{font-family:var(--display);font-weight:600;font-size:var(--t-stage);line-height:1.1}
+
+/* Stamps are the only colour, pressed onto the sheet. */
+.stamp{--rot:-5deg;display:inline-block;padding:2px 10px 1px;border:3px double currentColor;font:600 var(--t-stamp)/1.2 var(--display);letter-spacing:.12em;text-transform:uppercase;white-space:nowrap;transform:rotate(var(--rot));justify-self:start}
+.stamp.pass{color:var(--pass)}
+.stamp.fail{color:var(--fail)}
+.stamp.scope{color:var(--grey)}
+@media (prefers-reduced-motion:no-preference){
+  html.present .sheet.press .stamp{animation:press .42s cubic-bezier(.16,1,.3,1) both;animation-delay:calc(.12s + var(--d,0) * .09s)}
+}
+@keyframes press{from{transform:rotate(var(--rot)) scale(1.32);opacity:.35}}
+
+/* Cells: 20 sealed scenes, 60 demos, months of recording; fill and mark carry the verdict, never colour alone. */
+.cells{display:grid;grid-template-columns:repeat(20,minmax(0,1fr));gap:4px}
+.c{aspect-ratio:1;border:1.5px solid var(--ink);display:grid;place-items:center;color:var(--ink)}
+.c svg{width:62%;height:62%;stroke-width:3}
+.c.p{background:var(--pass);border-color:var(--pass);color:var(--paper)}
+.c.f{border-color:var(--fail);color:var(--fail)}
+.c.a{background:var(--ink)}
+.c.r svg{width:58%;height:58%}
+.cellrow{display:grid;gap:6px}
+.cellrow .k+.cells{margin-bottom:8px}
+.seeds{display:grid;grid-template-columns:repeat(20,minmax(0,1fr));gap:4px;font:500 var(--t-seed)/1 var(--mono);color:var(--grey);text-align:center}
+.grid60{display:grid;grid-template-columns:repeat(10,minmax(0,1fr));gap:5px}
+.legend{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:var(--t-small)}
+.legend span{display:inline-flex;align-items:center;gap:8px}
+.legend i{width:16px;height:16px;border:1.5px solid var(--ink);display:inline-block}
+.legend i.a{background:var(--ink)}
+
+/* Exhibits: simulator frames pinned to the sheet. */
+.exhibit{display:grid;gap:8px;align-content:start;min-width:0}
+.cap{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px 12px;font:500 var(--t-label)/1.3 var(--mono);color:var(--grey)}
+.frame{position:relative;max-width:100%;overflow:hidden;border:1.5px solid var(--ink);background:var(--mat)}
+.frame img{display:block;width:100%;height:100%;object-fit:cover}
+.frame .stamp{position:absolute;right:12px;bottom:12px;background:rgb(242 240 234 / .94)}
+.frame.strip{aspect-ratio:1400/298}
+.frame.hero{aspect-ratio:16/9}
+.frame.pair{aspect-ratio:1840/684}
+.note{font-size:var(--t-small);line-height:1.4;color:var(--grey);max-width:68ch;text-wrap:pretty}
+.note b{color:var(--ink);font-weight:600}
+
+/* Figures: the number set large, its label and n under it. */
+.figs{display:grid;gap:16px;align-content:start}
+.fig{display:grid;gap:4px;padding-bottom:14px;border-bottom:1px solid var(--rule);align-content:start}
+.fig .n{font:600 var(--t-fig)/1 var(--display);letter-spacing:-.02em}
+.fig .n s{text-decoration:none;color:var(--grey);font-weight:500}
+.fig p{font-size:var(--t-small);color:var(--grey);line-height:1.35;text-wrap:pretty}
+.fig .stamp{margin-top:6px}
+
+/* Horizontal bars on one scale: a hatched earlier version, a solid later one. */
+.hb{display:grid;grid-template-columns:2.4em minmax(0,1fr) 4.2em;align-items:center;gap:10px}
+.hb .tag{font:600 var(--t-label)/1 var(--mono);color:var(--grey)}
+.track{height:22px;border:1.5px solid var(--ink);position:relative;background:none}
+.fill{position:absolute;inset:0 auto 0 0;height:100%}
+.fill.v1{background:repeating-linear-gradient(135deg,var(--grey) 0 2px,transparent 2px 8px)}
+.fill.v2{background:var(--ink)}
+.hb .val{font:600 var(--t-small)/1 var(--mono);white-space:nowrap}
+
+/* Sheet 1: cover. */
+.halves{display:grid;grid-template-columns:1fr 1fr;gap:16px;font-size:var(--t-small);color:var(--grey)}
+.halves b{color:var(--ink);font-weight:600}
+
+/* Sheet 2: months of recording against who needs it. */
+.cost{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--rule)}
+.cost .ch{display:flex;flex-direction:column;align-items:flex-start;gap:8px}
+.cost .id{font:600 var(--t-id)/1 var(--mono);min-width:4.4em}
+.cost .n{font:600 var(--t-fig)/1 var(--display);letter-spacing:-.02em}
+.cost p{font-size:var(--t-small);color:var(--grey)}
+.months{display:grid;grid-template-columns:repeat(17,minmax(0,1fr));gap:4px}
+.m{height:22px;background:var(--ink)}
+.who{display:grid;gap:14px;align-content:start}
+.say{font-family:var(--display);font-weight:600;font-size:var(--t-big);line-height:1.15;text-wrap:balance}
+
+/* Sheet 3: the teaching loop. */
+.loop{font:500 var(--t-label)/1.4 var(--mono);color:var(--grey)}
+.st .where{font:500 var(--t-label)/1.35 var(--mono);color:var(--grey)}
+.titles{display:grid;gap:18px}
+.tagline{font:600 var(--t-big)/1.2 var(--display);color:var(--grey)}
+/* (retired) three roles */
+.roles{display:grid;gap:14px;position:relative}
+.role{display:grid;gap:10px;align-content:start;border-top:2px solid var(--ink);padding-top:12px}
+.role h3{font-size:var(--t-stage)}
+.tag{font:500 var(--t-label)/1.3 var(--mono);color:var(--grey)}
+.role li{padding:9px 0;border-bottom:1px solid var(--rule);font-size:var(--t-body);line-height:1.3;text-wrap:pretty}
+.hop{display:none}
+.back{display:none}
+
+/* Sheet 4: five stages, then the time bar to scale. */
+.stages{display:grid;grid-template-columns:1fr;gap:12px;position:relative}
+.st{border:1.5px solid var(--ink);padding:14px 16px 16px;display:grid;gap:8px;align-content:start}
+.st .top{display:flex;justify-content:space-between;align-items:center;gap:8px;font:600 var(--t-label)/1.3 var(--mono)}
+.st .top .t{background:var(--ink);color:var(--paper);padding:3px 8px 2px}
+.st h3{font-size:var(--t-stage)}
+.st p{font-size:var(--t-small);line-height:1.35;color:var(--grey);text-wrap:pretty}
+.st p.q{font-style:italic;color:var(--ink)}
+.st .out{font-weight:600;font-size:var(--t-body);line-height:1.25}
+.arrows{display:none}
+.timebar{display:grid;gap:8px}
+.barhead{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:4px 16px}
+.barhead b{font:600 var(--t-big)/1.1 var(--display)}
+.barhead span{font:500 var(--t-label)/1.3 var(--mono);color:var(--grey)}
+.bar{display:flex;height:30px;border:1.5px solid var(--ink)}
+.bar span{min-width:3px}
+.bar .s1,.bar .s4{background:var(--grey)}
+.bar .s2{background:repeating-linear-gradient(135deg,var(--ink) 0 2px,transparent 2px 9px)}
+.bar .s3{background:var(--ink)}
+.bar span+span{border-left:1.5px solid var(--paper)}
+.barlab .keys{display:flex;flex-wrap:wrap;gap:4px 22px;font:500 var(--t-label)/1.3 var(--mono);color:var(--grey)}
+.sw{display:inline-block;width:14px;height:14px;border:1.5px solid var(--ink);vertical-align:-2px;margin-right:7px}
+.sw.s1,.sw.s4{background:var(--grey)}
+.sw.s2{background:repeating-linear-gradient(135deg,var(--ink) 0 2px,transparent 2px 5px)}
+.sw.s3{background:var(--ink)}
+
+/* Sheet 5: the architecture, drawn to a fixed 1464 px plate; narrow screens scroll it. */
+.archwrap{overflow-x:auto;min-width:0}
+.arch{position:relative;width:1464px;height:352px;font-size:16px}
+.wires{position:absolute;inset:0;width:100%;height:100%;overflow:visible;color:var(--ink)}
+.wires path{fill:none;stroke:var(--ink);stroke-width:2;marker-end:url(#ah)}
+.wires path.truth{stroke-dasharray:7 6}
+.wl{position:absolute;font:500 16px/20px var(--mono);color:var(--grey);background:var(--paper);padding:0 6px;white-space:nowrap}
+.node{position:absolute;width:230px;height:120px;border:1.5px solid var(--ink);background:var(--paper);padding:10px 14px;display:grid;align-content:start;gap:3px}
+.node .tag{font-size:15px}
+.node b{font:600 24px/1.1 var(--display)}
+.node p{font-size:17px;line-height:1.25;color:var(--grey)}
+.a1{left:0;top:46px}.a2{left:308.5px;top:46px}.a3{left:617px;top:46px}.a4{left:925.5px;top:46px}.a5{left:1234px;top:46px}
+.b1{left:0;top:230px}.b2{left:308.5px;top:230px}.b3{left:617px;top:230px}
+.node.cam{padding:0;overflow:hidden}
+.node.cam img{position:absolute;max-width:none;width:715px;left:-488px;top:-52px}
+.node.cam .tag{position:absolute;left:8px;bottom:8px;background:var(--paper);color:var(--ink);border:1px solid var(--ink);padding:1px 7px}
+.archkey{position:absolute;left:925.5px;top:230px;width:538.5px;display:grid;gap:8px;font-size:17px;color:var(--grey);padding-top:4px}
+.archkey b{color:var(--ink);font-weight:600}
+.archkey .dash{display:inline-block;width:34px;height:0;border-top:2px dashed var(--ink);vertical-align:middle;margin-right:10px}
+.figrow{display:grid;gap:16px}
+
+/* Sheet 6: the take, beat by beat. */
+.p6{display:grid;gap:var(--gap)}
+.beats{display:grid;gap:0;align-content:start}
+.beat{display:grid;gap:4px;padding:14px 0;border-bottom:1px solid var(--rule)}
+.beat:first-child{border-top:1.5px solid var(--ink)}
+.beat p{font-size:var(--t-body);line-height:1.35;text-wrap:pretty}
+.beat .stamp{margin-top:6px}
+.beats .fig{border:0;padding-top:16px}
+
+/* Sheet 7: cells, figures, the demos needed. */
+.demos{display:grid;gap:10px}
+
+/* Sheet 8: camera against a grey image. */
+.p8{display:grid;gap:var(--gap)}
+.arm{display:grid;gap:10px;align-content:start}
+.armhead{display:flex;justify-content:space-between;align-items:baseline;gap:12px;border-top:2px solid var(--ink);padding-top:10px}
+.armhead h3{font-size:var(--t-stage)}
+.armhead .n{font:600 var(--t-fig)/1 var(--display);letter-spacing:-.02em}
+.arm p{font-size:var(--t-body);line-height:1.35}
+.control{display:flex;flex-wrap:wrap;align-items:baseline;gap:4px 16px;padding-top:12px;border-top:1.5px solid var(--ink);font-size:var(--t-body)}
+.control b{font-weight:600}
+
+/* Sheet 9: v1 against v2, the caveat, the teacher's acceptance. */
+.vrow{display:grid;gap:8px;padding:12px 0;border-bottom:1px solid var(--rule)}
+.vrow .lab{font:600 var(--t-stage)/1.15 var(--display)}
+.vrow .sub{font-size:var(--t-small);color:var(--grey)}
+.caveat{border:1.5px solid var(--ink);padding:12px 16px 14px;display:grid;gap:6px}
+.caveat p{font-size:var(--t-body);line-height:1.35;text-wrap:pretty}
+.accs{display:grid;gap:14px;align-content:start}
+.arow{display:grid;gap:6px}
+.arow .lab{font-size:var(--t-small);font-weight:600}
+.accs .hb{grid-template-columns:minmax(0,1fr) 4.6em}
+
+/* Sheet 10: the teacher driving against the student alone, mirrored, one scale per row. */
+.mbars{display:grid;gap:14px;align-content:start}
+.mbars .hd{display:grid;grid-template-columns:1fr 1fr;font:500 var(--t-label)/1.3 var(--mono);color:var(--grey)}
+.mbars .hd span:first-child{text-align:right;padding-right:12px}
+.mbars .hd span:last-child{padding-left:12px}
+.mb{display:grid;gap:6px}
+.mb .lab{font-size:var(--t-small);font-weight:600}
+.mb .lab i{font-style:normal;font-weight:400;color:var(--grey)}
+.mb .bars{display:grid;grid-template-columns:1fr 1fr;align-items:center}
+.mb .l{display:flex;justify-content:flex-end;align-items:center;gap:10px;padding-right:12px;border-right:2px solid var(--ink);min-height:30px}
+.mb .r{display:flex;align-items:center;gap:10px;padding-left:12px;min-height:30px}
+.mb .b{height:22px}
+.mb .l .b{background:repeating-linear-gradient(135deg,var(--grey) 0 2px,transparent 2px 8px);border:1.5px solid var(--grey)}
+.mb .r .b{background:var(--ink)}
+.mb .val{font:600 var(--t-small)/1 var(--mono);white-space:nowrap}
+.mb .l .val{color:var(--grey)}
+
+/* Sheet 11: 60 demos in, the validator, 56 out. */
+.flow11{display:grid;gap:var(--gap)}
+.fnode{display:grid;gap:10px;align-content:start}
+.fnode.judge{border:2px solid var(--ink);padding:16px 18px;gap:10px}
+.fnode.judge h3{font-size:var(--t-stage)}
+.fnode.judge p{font-size:var(--t-body);line-height:1.3}
+.fnode.judge li{padding:7px 0;border-top:1px solid var(--rule);font-weight:600;font-size:var(--t-body)}
+.stampline{padding-top:4px}
+.guar{display:grid;gap:12px}
+.guar>div{display:grid;gap:4px;border-top:1.5px solid var(--ink);padding-top:10px}
+.guar b{font:600 var(--t-big)/1.1 var(--display)}
+.guar p{font-size:var(--t-small);color:var(--grey);line-height:1.35}
+
+/* Sheet 13: today against Scaffld on one axis, then the team. */
+.mirror{display:grid}
+.mirror .row{display:grid;grid-template-columns:1fr;gap:6px;padding:14px 0;border-bottom:1px solid var(--rule)}
+.mirror .head{font:500 var(--t-label)/1.3 var(--mono);color:var(--grey);border-bottom:1.5px solid var(--ink);padding-top:0}
+.mirror .axis{font:500 var(--t-label)/1.3 var(--mono);color:var(--grey)}
+.mirror .today,.mirror .req{font-size:var(--t-lead);line-height:1.3}
+.mirror .today{color:var(--grey)}
+.mirror .today b,.mirror .req b{display:block;font:600 var(--t-fig)/1.05 var(--display);letter-spacing:-.02em}
+.mirror .today b{color:var(--grey);font-weight:500}
+.mirror small{display:block;font:500 var(--t-label)/1.4 var(--mono);color:var(--grey);margin-top:6px}
+.close{display:grid;gap:var(--gap)}
+.next p{font:600 var(--t-big)/1.15 var(--display)}
+.team{display:grid;gap:10px}
+.signers{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:12px 20px}
+.signers div{display:grid;gap:18px}
+.signers b{font-weight:600;font-size:var(--t-small)}
+.signers .sig{display:block;height:1px;background:var(--ink)}
+.code{font:500 var(--t-label)/1.4 var(--mono);color:var(--grey)}
+.code a{color:var(--ink);text-underline-offset:3px;text-decoration-thickness:1px}
+
+/* Sheet 2: the loop of driving, failing and recording again. */
+.cycle{display:grid;gap:12px;position:relative}
+.cyc{display:grid;gap:6px;align-content:start;border-top:2px solid var(--ink);padding-top:10px}
+.cyc .cn{font:600 var(--t-id)/1 var(--mono);color:var(--grey)}
+.cyc b{font:600 var(--t-stage)/1.1 var(--display)}
+.cyc p{font-size:var(--t-small);color:var(--grey);line-height:1.35;text-wrap:pretty}
+.carr{display:none}
+.cycback{font:500 var(--t-label)/1.3 var(--mono);color:var(--grey)}
+.months.m12{grid-template-columns:repeat(12,minmax(0,1fr))}
+.answer{border:2px solid var(--ink);padding:12px 16px 14px;display:grid;gap:6px}
+.answer p{font:600 var(--t-big)/1.15 var(--display);text-wrap:balance}
+html.present .cycle{grid-template-columns:minmax(0,1fr) 44px minmax(0,1fr) 44px minmax(0,1fr);gap:0;padding-bottom:60px;margin-top:22px}
+html.present .p2 .today{gap:34px}
+html.present .p2 .who{gap:28px}
+html.present .cyc b{font-size:32px}
+html.present .cyc p{font-size:21px}
+html.present .carr{display:grid;place-items:start center;padding-top:44px;color:var(--ink)}
+html.present .carr svg{width:28px;height:28px}
+html.present .cycback{position:absolute;left:14%;right:14%;bottom:8px;height:34px;border:2px dashed var(--ink);border-top:0}
+html.present .cycback::before{content:"";position:absolute;left:-9px;top:-14px;border:8px solid transparent;border-bottom:12px solid var(--ink);border-top:0}
+html.present .cycback span{position:absolute;left:50%;bottom:-12px;translate:-50% 0;background:var(--paper);padding:0 12px;white-space:nowrap}
+html.present .p2 .cost{border-top:1px solid var(--rule)}
+html.present .p2 .m{height:40px}
+html.present .answer p{font-size:32px}
+/* Sheet 5: the demonstration, read cold. */
+.heads{display:grid;gap:8px}
+.sub2{font-size:var(--t-lead);line-height:1.3;color:var(--grey)}
+.p5{display:grid;gap:var(--gap)}
+.frame.vid{aspect-ratio:456/256}
+.frame.vid img{position:absolute;max-width:none;width:157.9%;height:auto;left:-3.29%;top:-15.6%}
+.frame.vid img.still{top:-15.2%}
+.steps{display:grid;gap:0;align-content:start}
+.step{display:grid;grid-template-columns:150px minmax(0,1fr);gap:16px;align-items:center;padding:12px 0;border-bottom:1px solid var(--rule)}
+.step:first-child{border-top:1.5px solid var(--ink)}
+.step b{display:block;font:600 var(--t-stage)/1.1 var(--display)}
+.step p{font-size:var(--t-body);line-height:1.3}
+.thumb{position:relative;aspect-ratio:456/256;border:1.5px solid var(--ink);overflow:hidden;background:var(--mat)}
+.thumb img{display:block;width:100%;height:100%;object-fit:cover}
+.mark{position:absolute;left:6px;bottom:6px;background:var(--paper);border:2px solid var(--ink);color:var(--ink);font:600 var(--t-label)/1.2 var(--mono);padding:2px 7px;white-space:nowrap}
+.mark.big{left:61%;top:43%;bottom:auto;font-size:20px;padding:4px 10px}
+.mark.big::after{content:"";position:absolute;left:24px;top:100%;width:2px;height:62px;background:var(--ink)}
+.result{display:grid;gap:8px;padding-top:16px}
+.result p{font-size:var(--t-body);line-height:1.35;text-wrap:pretty}
+.result b{font-weight:600}
+html.present .s5{gap:22px}
+html.present .p5{grid-template-columns:940px minmax(0,1fr);gap:0 40px;align-items:start}
+html.present .p5 .steps{border-left:1px solid var(--ink);padding-left:36px;align-self:stretch}
+html.present .step{grid-template-columns:180px minmax(0,1fr);padding:14px 0}
+html.present .step p{font-size:22px}
+html.present .result p{font-size:23px}
+html.present .sub2{font-size:27px}
+/* Present mode: one sheet at a time, a 1600 x 900 sheet scaled to fit the desk. */
+html.present,html.present body{height:100%;overflow:hidden}
+html.present .deck{position:fixed;inset:0;display:grid;grid-template-rows:minmax(0,1fr) auto;gap:10px;padding-block:max(14px,env(safe-area-inset-top,0px)) max(10px,env(safe-area-inset-bottom,0px))}
+html.present .stage{position:relative;display:block;max-width:none;margin:0;min-height:0}
+html.present .sheet{display:none;position:absolute;left:50%;top:50%;width:1600px;height:900px;translate:-50% -50%;scale:var(--k,.5)}
+html.present .sheet.on{display:block}
+html.present .controls{display:flex;align-items:center;justify-content:center;gap:6px;color:var(--desk-ink);font:500 14px/1 var(--mono)}
+.controls button{display:grid;place-items:center;width:40px;height:40px;padding:0;border:0;border-radius:6px;background:none;color:var(--desk-ink);cursor:pointer;transition:background-color .15s,transform .12s cubic-bezier(.23,1,.32,1)}
+.controls button svg{width:20px;height:20px}
+@media (hover:hover){.controls button:hover:not(:disabled){background:rgb(255 255 255 / .09)}}
+.controls button:active:not(:disabled){transform:scale(.94)}
+.controls button:disabled{color:var(--desk-dim);opacity:.5;cursor:default}
+.controls button:focus-visible{outline-color:var(--desk-ink)}
+.controls .where{min-width:16em;text-align:center;letter-spacing:.01em}
+.controls .hint{color:var(--desk-dim);margin-left:14px}
+.controls .full{margin-left:6px}
+@media (max-width:1180px){html.present .controls .hint{display:none}}
+
+html.present .tb{grid-template-columns:1.15fr 1.05fr 2.15fr .55fr}
+html.present .tb.cover{grid-template-columns:1.7fr 1.15fr 1.05fr 1.15fr .55fr}
+html.present .tb>div{border-top:0;border-left:1px solid var(--ink);padding:9px 16px 11px}
+html.present .tb>div:first-child{border-left:0}
+html.present .tb .v.two{font-size:21px}
+html.present .scroll{overflow:visible}
+html.present .split{grid-template-columns:minmax(0,1fr) 480px;gap:0 40px;align-items:start}
+html.present .split>.aside{border-left:1px solid var(--ink);padding-left:36px;align-self:stretch}
+
+html.present .cover-sb{padding:40px 40px 34px;align-content:center;gap:56px}
+html.present .cover-sb h1{font-size:120px}
+html.present .cover-sb h1{max-width:none}
+html.present .halves{grid-template-columns:1fr 1fr;gap:0}
+html.present .halves p{font-size:var(--t-body)}
+html.present .halves p+p{padding-left:16px}
+
+html.present .p2{grid-template-columns:minmax(0,1fr) 500px;margin-top:6px}
+html.present .p2 .cost{padding:26px 0 28px;gap:16px}
+html.present .p2 .m{height:52px}
+html.present .p2 .cost .n,html.present .who .fig .n{font-size:74px}
+html.present .who .say{font-size:34px}
+html.present .p2.solo{grid-template-columns:minmax(0,1fr)}
+html.present .p2 .cost p{font-size:var(--t-body)}
+html.present .who{gap:22px}
+html.present .who .fig{border:0;padding-top:14px}
+
+html.present .roles{grid-template-columns:minmax(0,1fr) 110px minmax(0,1fr) 110px minmax(0,1fr);gap:0;margin-top:24px;padding-bottom:104px}
+html.present .role{gap:12px;padding-top:16px}
+html.present .role h3{font-size:44px}
+html.present .role li{font-size:25px;padding:18px 0}
+html.present .hop{display:grid;justify-items:center;align-content:start;gap:2px;padding-top:24px;font:500 16px/1.2 var(--mono);color:var(--grey)}
+html.present .hop svg{width:34px;height:34px;color:var(--ink)}
+html.present .back{display:block;position:absolute;left:14.2%;right:14.2%;bottom:14px;height:44px;border:2px dashed var(--ink);border-top:0}
+html.present .back::before{content:"";position:absolute;left:-9px;top:-14px;border:8px solid transparent;border-bottom:12px solid var(--ink);border-top:0}
+html.present .back span{position:absolute;left:50%;bottom:-12px;translate:-50% 0;background:var(--paper);padding:0 12px;font:500 16px/1.4 var(--mono);color:var(--grey);white-space:nowrap}
+
+html.present .stages{grid-template-columns:repeat(5,minmax(0,1fr));gap:30px;margin-top:4px}
+html.present .st{padding:16px 20px 20px;gap:10px;min-height:250px}
+html.present .st p{font-size:20px}
+html.present .st .out{font-size:23px}
+html.present .arrows{display:block;position:absolute;inset:0;pointer-events:none}
+html.present .arrows .gap{position:absolute;top:50%;width:30px;translate:-50% -50%;display:grid;place-items:center;color:var(--ink)}
+html.present .arrows .gap svg{width:22px;height:22px}
+html.present #sheet-3 .bar{height:32px}
+html.present .stages.six{grid-template-columns:repeat(6,minmax(0,1fr));gap:26px;margin-top:52px}
+html.present #sheet-3 .sb{gap:24px}
+html.present #sheet-3 .built{font-size:19px;max-width:none}
+html.present .stages.six .st{min-height:0;padding:14px 16px 16px}
+html.present .stages.six .st h3{font-size:27px}
+html.present .stages.six .st p{font-size:19px}
+html.present .stages.six .st .out{font-size:22px}
+html.present .loop{position:absolute;left:41.5%;right:7.6%;top:-46px;height:46px;border:2px dashed var(--ink);border-bottom:0}
+html.present .loop::before{content:"";position:absolute;left:-9px;bottom:-2px;border:8px solid transparent;border-top:12px solid var(--ink);border-bottom:0}
+html.present .loop span{position:absolute;left:50%;top:-12px;translate:-50% 0;background:var(--paper);padding:0 12px;white-space:nowrap;color:var(--ink)}
+html.present .tagline{font-size:40px}
+html.present .built{font-size:var(--t-body);color:var(--ink)}
+
+html.present .figrow{grid-template-columns:repeat(3,minmax(0,1fr));gap:0 40px}
+html.present .figrow .fig{border-bottom:0;border-top:1.5px solid var(--ink);padding-top:12px}
+
+html.present .p6{grid-template-columns:920px minmax(0,1fr);gap:0 40px;align-items:start}
+html.present .p6 .beats{border-left:1px solid var(--ink);padding-left:36px;align-self:stretch}
+
+html.present .p7{grid-template-columns:minmax(0,1fr) 470px}
+html.present .p7 .cellrow{gap:8px;margin-top:10px}
+html.present .p7 .cellrow .k+.cells{margin-bottom:20px}
+html.present .p7 .note{font-size:23px;max-width:none}
+html.present .demos .hb{grid-template-columns:2.2em minmax(0,1fr) 3.6em}
+
+html.present .p8{grid-template-columns:repeat(2,minmax(0,1fr));gap:0 48px;margin-top:20px}
+html.present .p8 .arm{gap:14px}
+html.present .p8 .arm p{font-size:25px}
+html.present .p8 .armhead .n{font-size:72px}
+html.present .p8 .frame .stamp{font-size:22px}
+html.present .control{margin-top:24px;font-size:23px}
+
+html.present .p9{grid-template-columns:minmax(0,1fr) 470px}
+html.present .p9 .vrow{padding:14px 0 18px;gap:10px}
+html.present .p9 .track{height:28px}
+html.present .accs{gap:20px}
+html.present .accs .track{height:24px}
+
+html.present .p10{grid-template-columns:minmax(0,1fr) 500px}
+html.present .p10 .mbars{gap:40px;margin-top:14px}
+html.present .p10 .mb .b{height:40px}
+html.present .p10 .mb .val{font-size:24px}
+html.present .p10 .mb .lab{font-size:24px}
+html.present .p10 .note{font-size:23px;max-width:none;padding-top:10px}
+
+html.present .flow11{grid-template-columns:minmax(0,1fr) 70px minmax(0,1.05fr) 70px minmax(0,1fr);gap:0;align-items:start}
+html.present .flow11 .hop{display:grid;place-items:center;padding-top:150px}
+html.present .flow11 .hop svg{width:34px;height:34px;color:var(--ink)}
+html.present .grid60{gap:5px}
+html.present .guar{grid-template-columns:repeat(4,minmax(0,1fr));gap:0 32px;margin-top:4px}
+
+html.present table.limits{font-size:24px}
+html.present table.limits td{padding:25px 12px}
+html.present table.limits td.big{font-size:32px}
+html.present table.limits td:first-child{width:300px;padding-left:0}
+html.present table.limits td:last-child{width:290px}
+
+html.present .p13{align-content:start}
+html.present .mirror .row{grid-template-columns:1fr 200px 1fr;gap:0;align-items:center;padding:30px 0}
+html.present .mirror .row>:first-child{text-align:right;padding-right:32px}
+html.present .mirror .row>:last-child{padding-left:32px}
+html.present .mirror .axis{text-align:center;align-self:stretch;display:grid;place-items:center;border-left:2px solid var(--ink);border-right:2px solid var(--ink);padding:0 10px}
+html.present .mirror .head .axis{border-color:transparent}
+html.present .mirror .today b,html.present .mirror .req b{font-size:68px;white-space:nowrap}
+html.present .close{grid-template-columns:400px minmax(0,1fr);gap:0 40px;margin-top:22px}
+html.present .next p{font-size:40px}
+html.present .team{border-left:1px solid var(--ink);padding-left:36px}
+html.present .signers{grid-template-columns:repeat(5,minmax(0,1fr))}
+html.present .signers b{font-size:23px}
+html.present .signers div{gap:30px}
+
+/* Reading mode on a wider screen keeps the title block on one row. */
+@media (min-width:700px){
+  html:not(.present) .tb{grid-template-columns:repeat(4,minmax(0,1fr))}
+  html:not(.present) .tb.cover{grid-template-columns:repeat(5,minmax(0,1fr))}
+  html:not(.present) .tb>div{border-top:0;border-left:1px solid var(--ink)}
+  html:not(.present) .tb>div:first-child{border-left:0}
+}
+@media (max-width:699px){
+  html:not(.present) .scroll table,html:not(.present) .scroll tbody,html:not(.present) .scroll tr{display:block}
+  html:not(.present) .scroll thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}
+  html:not(.present) .scroll tr{display:grid;gap:6px;padding:12px 0;border-bottom:1px solid var(--rule)}
+  html:not(.present) .scroll td{display:block;padding:0;border:0}
+}
+@media (prefers-reduced-motion:reduce){*,*::before,*::after{transition:none!important;animation:none!important}}
+
+/* The PDF: every sheet one 1600 x 900 page, stills in place of the recordings. */
+@page{size:1600px 900px;margin:0}
+@media print{
+  html,body{height:auto!important;overflow:visible!important;background:var(--paper)!important}
+  *{-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  .deck{position:static!important;display:block!important;padding:0!important}
+  .stage{display:block!important;max-width:none!important}
+  .controls,.sr{display:none!important}
+  .sheet{display:block!important;position:relative!important;left:auto!important;top:auto!important;translate:none!important;scale:none!important;width:1600px!important;height:900px!important;box-shadow:none!important;break-after:page;overflow:hidden}
+  .sheet:last-child{break-after:auto}
+  .stamp{animation:none!important}
+  .anim{display:none!important}
+  .still{display:block!important}
+}
+</style>
+
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-check" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="i-left" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-right" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-arrow" viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></symbol>
+  <symbol id="i-full" viewBox="0 0 24 24"><path d="M8 3H5a2 2 0 0 0-2 2v3M21 8V5a2 2 0 0 0-2-2h-3M16 21h3a2 2 0 0 0 2-2v-3M3 16v3a2 2 0 0 0 2 2h3"/></symbol>
+</svg>
+
+<div class="deck">
+<main class="stage" id="stage" aria-label="Scaffld pitch, 12 sheets">
+
+<!-- Sheet 1: Cover -->
+<section class="sheet" id="sheet-1" data-title="Cover" aria-label="Sheet 1 of 12: cover">
+<div class="form">
+  <div class="sb cover-sb">
+    <div class="titles"><h1>Scaffld</h1><p class="tagline">Stop driving robots to teach them. An AI teacher drives them instead.</p></div>
+    <div class="exhibit">
+      <div class="cap"><span>Exhibit A</span></div>
+      <div class="frame strip">
+        <img class="anim" src="media/before-after-training.gif" alt="The same unseen scene twice. Before teaching, the model repeats one reach beside the box. After teaching, the student lifts the box and places it in the green bin alone.">
+        <img class="still" src="media/cover-still.png" alt="The same unseen scene twice. Before teaching, the box is still on the table. After teaching, the box is already in the green bin.">
+        <span class="stamp pass" style="--d:1">Succeeded, alone</span>
+      </div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Unitree G1 humanoid · MuJoCo simulation</span></footer>
+</div>
+</section>
+
+<!-- Sheet 2: Problem -->
+<section class="sheet" id="sheet-2" data-title="Problem" aria-label="Sheet 2 of 12: the problem">
+<div class="form">
+
+  <div class="sb">
+    <h2>Training robots require substantial time and human labour</h2>
+    <div class="split p2">
+      <div class="today">
+        <div class="cycle">
+          <div class="cyc"><span class="cn">1</span><b>A person drives it</b><p>by remote control, recording examples for the robot to copy</p></div>
+          <div class="carr" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+          <div class="cyc"><span class="cn">2</span><b>It fails somewhere new</b><p>the bin in a new place, the box at a new angle</p></div>
+          <div class="carr" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+          <div class="cyc"><span class="cn">3</span><b>They record more</b><p>more hours of driving for every new failure</p></div>
+          <div class="cycback" aria-hidden="true"><span>and again, for every task</span></div>
+        </div>
+        <div class="cost">
+          <div class="ch"><span class="id">For DROID, a large robotics research dataset</span><span class="n">50 people × 12 months</span></div>
+          <div class="months m12" role="img" aria-label="12 months"><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i><i class="m"></i></div>
+          <p>to record 76k demonstrations by remote control: what robot skills cost at research scale (one cell, one month)</p>
+        </div>
+      </div>
+      <div class="aside who">
+        <span class="k">Why now</span>
+        <p class="say">Humanoids are entering real warehouses.</p>
+        <div class="fig"><span class="n">100,000+ crates</span><p>moved by Agility's Digit at GXO's Flowery Branch, GA site; two more US GXO sites from early 2027</p></div>
+        <p class="note">Every new job they are given hits this bottleneck.</p>
+        <div class="answer"><span class="k">Scaffld</span><p>For a warehouse team, a new task becomes a sentence, not months of teleoperation</p></div>
+      </div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sources: GXO and Agility, 26 Oct 2026, via DC Velocity; DROID, Khazatsky et al., arXiv:2403.12945 v2</span></footer>
+</div>
+</section>
+
+<!-- Sheet 3: Workflow -->
+<section class="sheet" id="sheet-3" data-title="Workflow" aria-label="Sheet 3 of 12: the workflow">
+<div class="form">
+
+  <div class="sb">
+    <h2>Argon writes the task, teaches it, and a validator decides what the robot learns</h2>
+    <div class="stages six">
+      <div class="loop"><span>Steps 3 to 6 repeat: diagnose, teach, fine-tune, exam again</span></div>
+      <div class="st"><div class="top"><span>1</span><span class="t">0 s</span></div><h3>Sentence in</h3><p class="q">“Stay where you are and put the box in the bin beside you, even if someone moves the bin.”</p><span class="where">Argon writes the task: 24 s</span></div>
+      <div class="st"><div class="top"><span>2</span></div><h3>Student tries first</h3><p>The untrained student attempts the sealed scenes alone</p><span class="out">Untrained: 0/20</span></div>
+      <div class="st"><div class="top"><span>3</span></div><h3>Diagnose</h3><p>Argon reads each failed trial: its frames, skill calls and the validator’s reason</p><span class="out">10/10 failures diagnosed correctly</span></div>
+      <div class="st"><div class="top"><span>4</span><span class="t">15.9 min</span></div><h3>Teach</h3><p>8 Argon teachers demonstrate the fix the diagnosis calls for</p><span class="out">The validator kept 56 of 60</span></div>
+      <div class="st"><div class="top"><span>5</span><span class="t">21.2 min</span></div><h3>Fine-tune</h3><p>SmolVLM2-500M LoRA, on accepted teacher steps only</p><span class="out">605 examples, 2.1 GB peak</span></div>
+      <div class="st"><div class="top"><span>6</span><span class="t">2.3 min</span></div><h3>Exam again</h3><p>The student tries again: 20 sealed scenes, no teacher, 0 cloud calls</p><span class="out">18/20</span></div>
+      <div class="arrows" aria-hidden="true"><span class="gap" style="left:calc(1 * (100% + 26px) / 6 - 13px)"><svg class="i"><use href="#i-arrow"/></svg></span><span class="gap" style="left:calc(2 * (100% + 26px) / 6 - 13px)"><svg class="i"><use href="#i-arrow"/></svg></span><span class="gap" style="left:calc(3 * (100% + 26px) / 6 - 13px)"><svg class="i"><use href="#i-arrow"/></svg></span><span class="gap" style="left:calc(4 * (100% + 26px) / 6 - 13px)"><svg class="i"><use href="#i-arrow"/></svg></span><span class="gap" style="left:calc(5 * (100% + 26px) / 6 - 13px)"><svg class="i"><use href="#i-arrow"/></svg></span></div>
+    </div>
+    <div class="timebar">
+      <div class="barhead"><b>39.7 min measured stage time</b><span>wall clock; excludes a 70-min GPU queue</span></div>
+      <div class="bar" role="img" aria-label="To scale: task 24 seconds, teach 15.9 minutes, fine-tune 21.2 minutes, exam 2.3 minutes">
+        <span class="s1" style="flex:23.5"></span><span class="s2" style="flex:952.7"></span><span class="s3" style="flex:1271.7"></span><span class="s4" style="flex:135.9"></span>
+      </div>
+      <div class="barlab"><span class="keys"><span><i class="sw s1"></i>task 24 s</span><span><i class="sw s2"></i>teach 15.9 min</span><span><i class="sw s3"></i>fine-tune 21.2 min</span><span><i class="sw s4"></i>exam 2.3 min</span></span></div>
+    </div>
+    <p class="note built">One measured pass. The untrained first try (0/20) ran separately on the same seeds; 10/10 is from repair round 1. Built as an open-source Python pipeline, CLI and live dashboard.</p>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sources: the showcase run's event logs, PR #34; the untrained run, showcase-compare; repair round 1, PR #10</span></footer>
+</div>
+</section>
+
+<!-- Sheet 4: Architecture -->
+<section class="sheet" id="sheet-4" data-title="Architecture" aria-label="Sheet 4 of 12: the architecture">
+<div class="form">
+
+  <div class="sb">
+    <h2>Camera in, skills out. Ground truth only for the judge</h2>
+    <div class="archwrap">
+      <div class="arch" role="img" aria-label="Architecture. Deployed loop: MuJoCo renders the head camera frame; the student policy picks a skill; the safety gate allows it; the skill controller moves the robot. Teaching: the validator reads ground truth and reports failures in words to the Argon teacher, whose accepted steps train a LoRA fine-tune that becomes the student's new checkpoint.">
+        <svg class="wires" viewBox="0 0 1464 352" aria-hidden="true">
+          <defs><marker id="ah" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="8" markerHeight="8" markerUnits="userSpaceOnUse" orient="auto-start-reverse"><path d="M1 1 9 5 1 9" fill="none" stroke="currentColor" stroke-width="1.8"/></marker></defs>
+          <path d="M231 106H306"/>
+          <path d="M539.5 106H614.5"/>
+          <path d="M848 106H923"/>
+          <path d="M1156.5 106H1231.5"/>
+          <path d="M1349 46V18H115V44"/>
+          <path d="M115 167V228" class="truth"/>
+          <path d="M231 290H306"/>
+          <path d="M539.5 290H614.5"/>
+          <path d="M732 229V168"/>
+        </svg>
+        <span class="wl" style="left:684px;top:8px">skills out</span>
+        <span class="wl" style="left:858px;top:80px">skill</span>
+        <span class="wl" style="left:1158px;top:80px">allowed</span>
+        <span class="wl" style="left:232px;top:264px">failure</span>
+        <span class="wl" style="left:536px;top:264px">accepted</span>
+        <span class="wl" style="left:124px;top:188px">ground truth, judge only</span>
+        <span class="wl" style="left:741px;top:188px">new checkpoint</span>
+        <div class="node a1"><span class="tag">CPU</span><b>MuJoCo</b><p>Unitree G1, 29 DoF</p></div>
+        <div class="node a2 cam"><img src="media/pair-camera.jpg" alt=""><span class="tag">camera in: head camera</span></div>
+        <div class="node a3"><span class="tag">laptop GPU</span><b>Student policy</b><p>SmolVLM2-500M + LoRA</p></div>
+        <div class="node a4"><span class="tag">CPU</span><b>Safety gate</b><p>whitelist, clamps, refusals</p></div>
+        <div class="node a5"><span class="tag">CPU</span><b>Skill controller</b><p>IK + joint PD; Unitree RL legs</p></div>
+        <div class="node b1"><span class="tag">CPU</span><b>Validator</b><p>ground truth → verdict in words</p></div>
+        <div class="node b2"><span class="tag">cloud, teaching only</span><b>Argon teacher</b><p>writes the task, diagnoses, demonstrates</p></div>
+        <div class="node b3"><span class="tag">laptop GPU</span><b>LoRA fine-tune</b><p>accepted teacher steps only</p></div>
+        <div class="archkey">
+          <p><b>Top row:</b> the deployed loop, on one laptop, 0 cloud calls</p>
+          <p><b>Bottom row:</b> teaching, from one typed sentence</p>
+          <p><i class="dash"></i>ground truth reaches only the validator</p>
+        </div>
+      </div>
+    </div>
+    <div class="figrow">
+      <div class="fig"><span class="n">0.31 s</span><p>per student decision on the laptop GPU, 0 cloud calls (n&nbsp;=&nbsp;326)</p></div>
+      <div class="fig"><span class="n">2.16 GB <s>of 3 GB</s></span><p>peak student memory of a 3 GB edge budget (v1/v2 exam)</p><span class="stamp pass" style="--d:1">Within budget</span></div>
+      <div class="fig"><span class="n">8.1 s</span><p>median per Argon call, cloud, teaching only (n&nbsp;=&nbsp;3,551)</p></div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sources: the repo README and the pitch kit, docs/pitch</span></footer>
+</div>
+</section>
+
+<!-- Sheet 5: Demonstration -->
+<section class="sheet" id="sheet-5" data-title="Demonstration" aria-label="Sheet 5 of 12: the demonstration">
+<div class="form">
+
+  <div class="sb s5">
+    <div class="heads"><h2>Can it still finish when the bin moves?</h2><p class="sub2">The trained student acts alone—without help from the teacher.</p></div>
+    <div class="p5">
+      <div class="frame vid">
+        <img class="anim" src="media/scaffld-video-excerpt.gif" alt="The trained student alone: it lifts the box, the bin is moved, and it turns and puts the box in the bin.">
+        <img class="still" src="media/hero-move.jpg" alt="The moment the bin is moved: the robot holds the box while the bin sits in its new place.">
+        <span class="mark big still">Bin moves here</span>
+      </div>
+      <div class="aside steps">
+        <div class="step s-lift"><div class="thumb"><img src="media/step-lift.png" alt="The robot lifts the box off the table; the bin is in its first place."></div><div><b>Lift</b><p>The robot picks up the box.</p></div></div>
+        <div class="step s-move"><div class="thumb"><img src="media/step-move.png" alt="Just after the lift the bin has moved; an inset shows where it was."><span class="mark">Bin moves here</span></div><div><b>Move</b><p>We move the bin after the lift.</p></div></div>
+        <div class="step s-finish"><div class="thumb"><img src="media/step-finish.png" alt="The box sits in the bin."></div><div><b>Finish</b><p>The robot puts the box in the bin.</p></div></div>
+        <div class="result"><span class="stamp pass" style="--d:1">Succeeds</span><p><b>This example succeeds.</b> Across 20 held-out scenes with the bin moved, the student succeeds in 17.</p></div>
+      </div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sources: the 54 s take; 17 of 20 with the bin moved, PR #34</span></footer>
+</div>
+</section>
+
+<!-- Sheet 6: Results -->
+<section class="sheet" id="sheet-6" data-title="Results" aria-label="Sheet 6 of 12: results">
+<div class="form">
+
+  <div class="sb">
+    <h2>The results before and after training</h2>
+    <div class="split p7">
+      <div class="main">
+        <span class="k ink">Laptop GPU, student alone on 20 sealed, unseen scenes</span>
+        <div class="cellrow">
+          <div class="seeds" aria-hidden="true"><span>1</span><span>2</span><span>3</span><span>4</span><span>5</span><span>6</span><span>7</span><span>8</span><span>9</span><span>10</span><span>11</span><span>12</span><span>13</span><span>14</span><span>15</span><span>16</span><span>17</span><span>18</span><span>19</span><span>20</span></div>
+          <span class="k">Untrained model · <b>0/20</b></span>
+          <div class="cells" role="img" aria-label="Untrained model: all 20 scenes failed"><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i></div>
+          <span class="k">After one sentence of teaching · <b>18/20</b></span>
+          <div class="cells" role="img" aria-label="After teaching: 18 of 20 passed, scenes 3 and 10 failed"><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i></div>
+          <span class="k">Bin moved after the lift · <b>17/20</b></span>
+          <div class="cells" role="img" aria-label="Bin moved after the lift: 17 of 20 passed, scenes 4, 10 and 14 failed"><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c f"><svg class="i"><use href="#i-x"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i><i class="c p"><svg class="i"><use href="#i-check"/></svg></i></div>
+        </div>
+        <p class="note">Failed scenes: <b>3 and 10</b>; with the bin moved, <b>4, 10 and 14</b>. Both: exact McNemar <b>p&nbsp;&lt;&nbsp;0.001</b>, paired by seed; a re-run reproduced every seed.</p>
+      </div>
+      <div class="aside figs">
+        <div class="fig"><span class="n"><s>0/20</s> <svg class="i ar" role="img" aria-label="to"><use href="#i-arrow"/></svg> 18/20</span><p>after one sentence of teaching (untrained model 0/20; n&nbsp;=&nbsp;20)</p></div>
+        <div class="fig"><span class="n">17/20</span><p>with the bin moved after the lift (untrained 0/20)</p><span class="stamp pass" style="--d:1">Copes with the move</span></div>
+        <div class="demos">
+          <span class="k">Trained on 14, 28 or 56 demos</span>
+          <div class="hb"><span class="tag">14</span><span class="track"><span class="fill v2" style="width:0.00%"></span></span><span class="val">0/20</span></div>
+          <div class="hb"><span class="tag">28</span><span class="track"><span class="fill v2" style="width:0.00%"></span></span><span class="val">0/20</span></div>
+          <div class="hb"><span class="tag">56</span><span class="track"><span class="fill v2" style="width:90.00%"></span></span><span class="val">18/20</span></div>
+          <p class="note">so the demos teach it when to stop</p>
+        </div>
+      </div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sources: PR #34 (18/20, 17/20); PR #22 (learning curve); failed seeds from the experiment ledger, docs/pitch</span></footer>
+</div>
+</section>
+
+<!-- Sheet 7: Camera vs grey -->
+<section class="sheet" id="sheet-7" data-title="Camera vs grey" aria-label="Sheet 7 of 12: camera against a grey image">
+<div class="form">
+
+  <div class="sb">
+    <h2>It acts on what it sees</h2>
+    <div class="p8">
+      <div class="arm">
+        <div class="armhead"><h3>Camera</h3><span class="n">19/20</span></div>
+        <div class="frame pair"><img src="media/pair-camera.jpg" alt="With its camera: the box sits in the green bin; the head camera shows the box over the bin and the student decides reobserve."><span class="stamp pass" style="--d:1">Placed</span></div>
+        <p>It twists until the bin is under the box, then places.</p>
+      </div>
+      <div class="arm">
+        <div class="armhead"><h3>Without camera</h3><span class="n">0/20</span></div>
+        <div class="frame pair"><img src="media/pair-grey.jpg" alt="Given a grey image instead of the camera: the box is beside the bin and the validator reports box not inside the bin."><span class="stamp fail" style="--d:2">Missed</span></div>
+        <p>Same scene, same student, one twist and it misses.</p>
+      </div>
+    </div>
+    <p class="control"><span class="k">Control</span><span>Same checkpoint, seeds and machine (<b>Mac</b>); only the image differs; n&nbsp;=&nbsp;20 each.</span></p>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Source: PR #22, camera against a grey image, on a Mac</span></footer>
+</div>
+</section>
+
+<!-- Sheet 8: Adaptation -->
+<section class="sheet" id="sheet-8" data-title="Adaptation" aria-label="Sheet 8 of 12: adaptation, v1 against v2">
+<div class="form">
+
+  <div class="sb">
+    <h2>Lessons aimed at failures raise success when things move</h2>
+    <div class="split p9">
+      <div class="main">
+        <span class="k ink">Fixed-feet student, v1 → v2, same seeds, student alone</span>
+        <div class="vrow">
+          <b class="lab">Box moved at the start</b>
+          <div class="hb"><span class="tag">v1</span><span class="track"><span class="fill v1" style="width:35.00%"></span></span><span class="val">7/20</span></div>
+          <div class="hb"><span class="tag">v2</span><span class="track"><span class="fill v2" style="width:75.00%"></span></span><span class="val">15/20</span></div>
+        </div>
+        <div class="vrow">
+          <b class="lab">Bin placements never seen in training</b>
+          <div class="hb"><span class="tag">v1</span><span class="track"><span class="fill v1" style="width:35.00%"></span></span><span class="val">14/40</span></div>
+          <div class="hb"><span class="tag">v2</span><span class="track"><span class="fill v2" style="width:52.50%"></span></span><span class="val">21/40</span></div>
+          <p class="sub">overall p&nbsp;=&nbsp;0.19; bin further ahead 4/20 → 14/20, p&nbsp;=&nbsp;0.006</p>
+        </div>
+        <div class="caveat"><span class="k">Required caveat</span><p>v2 added recovery and box-moved demos (52 → 117), so targeted lessons and more demos aren't separated.</p></div>
+      </div>
+      <div class="aside accs">
+        <span class="k">Teacher demos the validator accepted</span>
+        <div class="arow"><span class="lab">Fixed feet</span><div class="hb"><span class="track"><span class="fill v2" style="width:86.67%"></span></span><span class="val">52/60</span></div></div>
+        <div class="arow"><span class="lab">Bin moved after the lift</span><div class="hb"><span class="track"><span class="fill v2" style="width:93.33%"></span></span><span class="val">28/30</span></div></div>
+        <div class="arow"><span class="lab">One sentence → new task</span><div class="hb"><span class="track"><span class="fill v2" style="width:93.33%"></span></span><span class="val">56/60</span></div></div>
+        <div class="arow"><span class="lab">Walking</span><div class="hb"><span class="track"><span class="fill v2" style="width:69.00%"></span></span><span class="val">69/100</span></div></div>
+      </div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sources: PR #22 (v1 against v2); teacher acceptance from the pitch kit, docs/pitch</span></footer>
+</div>
+</section>
+
+<!-- Sheet 9: Autonomy -->
+<section class="sheet" id="sheet-9" data-title="Autonomy" aria-label="Sheet 9 of 12: autonomy">
+<div class="form">
+
+  <div class="sb">
+    <h2>No humans in the loop. No cloud calls at run time</h2>
+    <div class="split p10">
+      <div class="main mbars">
+        <div class="hd"><span>Teacher driving the robot</span><span>Student alone</span></div>
+        <div class="mb"><span class="lab">Cloud calls per task <i>(mean)</i></span><div class="bars"><div class="l"><span class="val">9.8</span><span class="b" style="width:72%"></span></div><div class="r"><span class="val">0</span></div></div></div>
+        <div class="mb"><span class="lab">Seconds per decision <i>(median)</i></span><div class="bars"><div class="l"><span class="val">8.3</span><span class="b" style="width:72%"></span></div><div class="r"><span class="b" style="width:calc(72% * .31 / 8.3)"></span><span class="val">0.31</span></div></div></div>
+        <div class="mb"><span class="lab">Seconds per task <i>(median)</i></span><div class="bars"><div class="l"><span class="val">90</span><span class="b" style="width:72%"></span></div><div class="r"><span class="b" style="width:calc(72% * 3.2 / 90)"></span><span class="val">3.2</span></div></div></div>
+        <p class="note">Teacher on 60 demos, development seeds (<b>Mac</b>); student on 40 held-out episodes, 326 decisions (<b>laptop GPU</b>).</p>
+      </div>
+      <div class="aside figs">
+        <div class="fig"><span class="n">1 sentence</span><p>of human input: 0 teleoperated steps (of 584), 0 labels</p></div>
+        <div class="fig"><span class="n">20.9 GPU-min</span><p>of training on one laptop GPU; 605 examples</p></div>
+        <div class="fig"><span class="n">589 Argon calls</span><p>for the whole skill, 0 at deployment</p></div>
+      </div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Source: the pitch kit, docs/pitch/data/notes.md</span></footer>
+</div>
+</section>
+
+<!-- Sheet 10: Validator -->
+<section class="sheet" id="sheet-10" data-title="Validator" aria-label="Sheet 10 of 12: the validator">
+<div class="form">
+
+  <div class="sb">
+    <h2>Bad lessons are rejected, not used for training</h2>
+    <div class="flow11">
+      <div class="fnode">
+        <span class="k">60 teacher demos</span>
+        <div class="grid60" role="img" aria-label="60 teacher demos, not yet judged"><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i><i class="c"></i></div>
+      </div>
+      <div class="hop" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+      <div class="fnode judge">
+        <h3>Validator</h3>
+        <p>Judges every demo from ground truth, in code, and rejects</p>
+        <ul><li>falls</li><li>joint-limit violations</li><li>objects passing through each other</li></ul>
+      </div>
+      <div class="hop" aria-hidden="true"><svg class="i"><use href="#i-arrow"/></svg></div>
+      <div class="fnode">
+        <span class="k">56 accepted for training · 4 rejected</span>
+        <div class="grid60" role="img" aria-label="56 accepted for training, 4 rejected and never trained on"><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c a"></i><i class="c r"><svg class="i"><use href="#i-x"/></svg></i><i class="c r"><svg class="i"><use href="#i-x"/></svg></i><i class="c r"><svg class="i"><use href="#i-x"/></svg></i><i class="c r"><svg class="i"><use href="#i-x"/></svg></i></div>
+        <div class="legend"><span><i class="a"></i>56 accepted for training</span><span><i></i>4 rejected and never trained on</span></div>
+        <p class="stampline"><span class="stamp fail" style="--d:1;--rot:-3deg">Rejected, not used for training</span></p>
+      </div>
+    </div>
+    <div class="guar">
+      <div><b>56/56 accepted demos</b><p>replay exactly</p></div>
+      <div><b>Unsafe moves</b><p>are refused before anything moves</p></div>
+      <div><b>No stale plan</b><p>every skill is chosen from the newest camera frame</p></div>
+      <div><b>600+ tests</b><p>pin these rules</p></div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sealed test seeds the teacher never sees; an 800-call Argon cap per run; keys never logged · Source: PR #34</span></footer>
+</div>
+</section>
+
+<!-- Sheet 11: Limits -->
+<section class="sheet" id="sheet-11" data-title="Limits" aria-label="Sheet 11 of 12: what it cannot do yet">
+<div class="form">
+
+  <div class="sb">
+    <h2>What it can't do yet</h2>
+    <div class="scroll">
+      <table class="limits">
+        <thead><tr><th>Limit</th><th>Detail</th><th>Status</th></tr></thead>
+        <tbody>
+          <tr><td class="big">Simulation only</td><td>MuJoCo so far, a real robot is next.</td><td><span class="stamp scope">Simulation</span></td></tr>
+          <tr><td class="big">One task family</td><td>Box into a bin, learned at the skill level.</td><td><span class="stamp scope" style="--d:1;--rot:-3deg">Scope</span></td></tr>
+          <tr><td class="big">No re-aiming yet</td><td>1/20 with the bin moved beyond its training range (125°, on a Mac); it keeps its learned routine, while the teacher re-aims.</td><td><span class="stamp fail" style="--d:2">Not passed</span></td></tr>
+          <tr><td class="big">Standing for the loop</td><td>The submitted loop runs with fixed feet.</td><td><span class="stamp scope" style="--d:3;--rot:-3deg">Scope</span></td></tr>
+          <tr><td class="big">Walking student</td><td>2/20 vs 0/20 untrained, not yet significant (n&nbsp;=&nbsp;20); the teacher walks, 69/100 demos accepted.</td><td><span class="stamp fail" style="--d:4">Not yet significant</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sources: PR #22 (walking 2/20); the bin at 125° from the pitch kit, on a Mac</span></footer>
+</div>
+</section>
+
+<!-- Sheet 12: Impact -->
+<section class="sheet" id="sheet-12" data-title="Impact" aria-label="Sheet 12 of 12: impact">
+<div class="form">
+
+  <div class="sb p13">
+    <h2>For a warehouse team, a new task becomes a sentence, not months of teleoperation</h2>
+    <div class="mirror">
+      <div class="row head"><span>Today</span><span class="axis"></span><span>With Scaffld</span></div>
+      <div class="row">
+        <span class="today"><b>50 people × 12 months</b> of remote-control demos<small>DROID, 76k trajectories</small></span>
+        <span class="axis">A new task</span>
+        <span class="req"><b>1 sentence</b> and under an hour of compute<small>39.7 min measured, 0 teleoperated steps</small></span>
+      </div>
+    </div>
+    <div class="close">
+      <div class="next"><span class="k">Next</span><p>A real Unitree G1</p></div>
+      <div class="team">
+        <span class="k">Team</span>
+        <div class="signers"><div><b>Owen Yan</b><i class="sig"></i></div><div><b>Isaac</b><i class="sig"></i></div><div><b>Santi</b><i class="sig"></i></div><div><b>Anh</b><i class="sig"></i></div><div><b>Josh Lim</b><i class="sig"></i></div></div>
+        <p class="code"><a href="https://github.com/owenbonc/isaac-s-mom" target="_blank" rel="noopener">github.com/owenbonc/isaac-s-mom</a></p>
+      </div>
+    </div>
+  </div>
+  <footer class="sf"><span>AgentVerse 2026 · Robotics track</span><span>Sources: DROID, arXiv:2403.12945 v2; Scaffld's numbers from saved runs, docs/pitch</span></footer>
+</div>
+</section>
+
+</main>
+<nav class="controls" aria-label="Sheets">
+  <button type="button" id="prev" aria-label="Previous sheet" title="Previous sheet (←)"><svg class="i"><use href="#i-left"/></svg></button>
+  <span class="where" id="where">Sheet 1 of 12 · Cover</span>
+  <button type="button" id="next" aria-label="Next sheet" title="Next sheet (→)"><svg class="i"><use href="#i-right"/></svg></button>
+  <button type="button" class="full" id="full" aria-label="Full screen" title="Full screen (F)"><svg class="i"><use href="#i-full"/></svg></button>
+  <span class="hint">← → to move · F for full screen</span>
+</nav>
+<p class="sr" id="live" aria-live="polite"></p>
+</div>
+
+<script>
+(() => {
+  const root = document.documentElement;
+  const sheets = [...document.querySelectorAll('.sheet')];
+  const N = sheets.length;
+  const stage = document.getElementById('stage');
+  const where = document.getElementById('where');
+  const live = document.getElementById('live');
+  const prevBtn = document.getElementById('prev');
+  const nextBtn = document.getElementById('next');
+  const fullBtn = document.getElementById('full');
+  const wide = matchMedia('(min-width: 900px) and (min-height: 520px)');
+  const printing = matchMedia('print');
+  let cur = 0, ownHash = false;
+
+  const present = () => root.classList.contains('present');
+
+  function fit() {
+    if (!present()) return;
+    const r = stage.getBoundingClientRect();
+    root.style.setProperty('--k', Math.min(r.width / 1600, r.height / 900).toFixed(4));
+  }
+
+  function render(announce) {
+    const s = sheets[cur];
+    sheets.forEach((x, j) => x.classList.toggle('on', j === cur));
+    where.textContent = `Sheet ${cur + 1} of ${N} · ${s.dataset.title}`;
+    prevBtn.disabled = cur === 0;
+    nextBtn.disabled = cur === N - 1;
+    if (announce) live.textContent = where.textContent;
+    if (present()) { s.classList.remove('press'); void s.offsetWidth; s.classList.add('press'); }
+  }
+
+  function go(n) {
+    cur = Math.max(0, Math.min(N - 1, n));
+    const id = 'sheet-' + (cur + 1);
+    if (location.hash !== '#' + id) { ownHash = true; location.hash = id; }
+    render(true);
+  }
+
+  const fromHash = () => { const m = /^#sheet-(\d+)$/.exec(location.hash); return m ? +m[1] - 1 : 0; };
+
+  // The PDF always takes the 1600 x 900 sheet layout, whatever the window was.
+  function setMode() {
+    root.classList.toggle('present', wide.matches || printing.matches);
+    if (present()) { fit(); render(false); } else sheets.forEach(s => s.classList.remove('on', 'press'));
+  }
+
+  addEventListener('hashchange', () => {
+    if (ownHash) { ownHash = false; return; }
+    go(fromHash());
+    if (!present()) document.getElementById('sheet-' + (cur + 1))?.scrollIntoView();
+  });
+
+  addEventListener('keydown', e => {
+    if (!present() || e.altKey || e.ctrlKey || e.metaKey) return;
+    const onButton = e.target instanceof HTMLButtonElement;
+    switch (e.key) {
+      case 'ArrowRight': case 'PageDown': go(cur + 1); break;
+      case ' ': if (onButton) return; go(cur + 1); break;
+      case 'ArrowLeft': case 'PageUp': go(cur - 1); break;
+      case 'Home': go(0); break;
+      case 'End': go(N - 1); break;
+      case 'f': case 'F': toggleFull(); break;
+      default: return;
+    }
+    e.preventDefault();
+  });
+
+  function toggleFull() {
+    try {
+      if (document.fullscreenElement) document.exitFullscreen?.().catch(() => {});
+      else root.requestFullscreen?.().catch(() => {});
+    } catch (_) {}
+  }
+
+  prevBtn.addEventListener('click', () => go(cur - 1));
+  nextBtn.addEventListener('click', () => go(cur + 1));
+  fullBtn.addEventListener('click', toggleFull);
+  if (!document.fullscreenEnabled) fullBtn.hidden = true;
+
+  wide.addEventListener('change', setMode);
+  printing.addEventListener('change', setMode);
+  addEventListener('beforeprint', () => root.classList.add('present'));
+  addEventListener('resize', fit);
+  document.addEventListener('fullscreenchange', fit);
+
+  cur = fromHash();
+  setMode();
+  if (!present() && location.hash) document.getElementById('sheet-' + (cur + 1))?.scrollIntoView();
+})();
+</script>
+
+</body></html>

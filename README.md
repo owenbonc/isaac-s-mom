@@ -23,7 +23,7 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 |:---:|:---:|:---:|:---:|:---:|
 | to teach the robot **one new skill** from a one sentence description | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic, targeted teaching round ** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image (no camera)** on a mac, a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
 
-[Technical summary (PDF)](docs/technical-summary.pdf) · [Pitch deck (PDF)](docs/deck/deck.pdf) · [How it works](#how-it-works) · [Repair loop](#the-repair-loop-test-diagnose-re-teach-until-its-good-enough) · [Results](#results) · [Impact](#impact) · [Videos](#videos) · [Live demo](#live-demo) · [Quickstart](#quickstart)
+[Technical summary (PDF)](docs/technical-summary.pdf) · [Pitch deck](#pitch-deck) · [How it works](#how-it-works) · [Repair loop](#the-repair-loop-test-diagnose-re-teach-until-its-good-enough) · [Results](#results) · [Impact](#impact) · [Videos](#videos) · [Live demo](#live-demo) · [Quickstart](#quickstart)
 
 </div>
 
@@ -142,6 +142,33 @@ Every result is the **student alone** on sealed held-out scenes, against a contr
 | **Speed at deployment** | **0.31 s per decision, 3.2 s per task** (showcase exam, n = 326 decisions, 40 tasks), no cloud | teacher: 8.3 s per decision, 90 s per task (showcase demos, n = 60) |
 
 <sub>Teacher and student ran on different seeds and machines by design: the held-out seeds are sealed from the teacher. Argon's token usage is not logged, so cost is given in calls.</sub>
+
+## Pitch deck
+
+**12 sheets, one claim on each, every number with its n and source.** [Open the PDF](docs/deck/deck.pdf), or present the HTML original: open [`docs/deck/index.html`](docs/deck/index.html) from a clone in a browser (← → to move, F for full screen; the PDF shows stills where the HTML plays clips).
+
+<table>
+<tr>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-01.jpg" width="100%" alt="Sheet 1: Cover: Stop driving robots to teach them. An AI teacher drives them instead."></a></td>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-02.jpg" width="100%" alt="Sheet 2: Training robots require substantial time and human labour"></a></td>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-03.jpg" width="100%" alt="Sheet 3: Argon writes the task, teaches it, and a validator decides what the robot learns"></a></td>
+</tr>
+<tr>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-04.jpg" width="100%" alt="Sheet 4: Camera in, skills out. Ground truth only for the judge"></a></td>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-05.jpg" width="100%" alt="Sheet 5: Can it still finish when the bin moves?"></a></td>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-06.jpg" width="100%" alt="Sheet 6: The results before and after training"></a></td>
+</tr>
+<tr>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-07.jpg" width="100%" alt="Sheet 7: It acts on what it sees"></a></td>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-08.jpg" width="100%" alt="Sheet 8: Lessons aimed at failures raise success when things move"></a></td>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-09.jpg" width="100%" alt="Sheet 9: No humans in the loop. No cloud calls at run time"></a></td>
+</tr>
+<tr>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-10.jpg" width="100%" alt="Sheet 10: Bad lessons are rejected, not used for training"></a></td>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-11.jpg" width="100%" alt="Sheet 11: What it can't do yet"></a></td>
+<td width="33%"><a href="docs/deck/deck.pdf"><img src="docs/deck/thumbs/sheet-12.jpg" width="100%" alt="Sheet 12: For a warehouse team, a new task becomes a sentence, not months of teleoperation"></a></td>
+</tr>
+</table>
 
 ## Videos
 
@@ -339,7 +366,7 @@ scripts/            verify.sh, merge-gate.mjs, agent setup
 tests/              the offline pytest suite (600+ tests)
 docs/
   technical-summary.pdf    the one-page technical summary; its LaTeX and figure scripts in technical-summary/
-  deck/                    the pitch deck (PDF and LaTeX)
+  deck/                    the pitch deck: the PDF, the HTML it is exported from, and its media
   pitch/                   the pitch kit: slide numbers, captions, measured data and the raw logs behind them
   live-demo/               the live-demo and video scripts
   media/                   the images and clips on this page
