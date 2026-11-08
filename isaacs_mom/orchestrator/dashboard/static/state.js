@@ -302,6 +302,9 @@
   const following = (v, now) => running(v.live, v.frozen ? v.frozen.at : now);
 
   const accepted = (ep) => ep.verdict !== null && ep.verdict.task && ep.verdict.physics;
+  const RECORDING_ERROR = "recording error";
+  // Rule 6: a held-out episode the recorder refused is errored, never the student's failure.
+  const errored = (ep) => ep.split === "heldout" && ep.verdict !== null && ep.verdict.reason.startsWith(RECORDING_ERROR);
   // What an episode is: the judged take, a held-out test, a teacher demonstration or a student trial. All but a trial
   // are known from the episode's start; a development episode acting on no diagnosis is null until its first decision.
   function kind(ep) {
@@ -315,6 +318,7 @@
   // rest succeed or fail, and the judged take says whether the student finished it alone. Null before the verdict.
   function verdictWords(ep) {
     if (!ep.verdict) return null;
+    if (errored(ep)) return "Errored, not counted";
     const good = accepted(ep);
     const k = kind(ep);
     if (k === "demonstration") return good ? "Accepted for training" : "Rejected, not used for training";
@@ -334,11 +338,10 @@
 
   // The Results marks (SPEC §3.5) in their sort order: the changes, the unchanged, then errored and pending.
   const MARKS = ["down", "up", "fail", "pass", "error", "pending"];
-  const RECORDING_ERROR = "recording error";
   function outcome(cell, done) {
     if (cell.crashed) return "errored";
     if (!cell.ep || !cell.ep.verdict) return done ? "errored" : "pending";
-    if (cell.ep.verdict.reason.startsWith(RECORDING_ERROR)) return "errored";
+    if (errored(cell.ep)) return "errored";
     return accepted(cell.ep) ? "succeeded" : "failed";
   }
   function mark(outcomes) {
@@ -620,7 +623,7 @@
     return { state: "failed", message };
   }
 
-  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, tooLong, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
+  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, errored, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, tooLong, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

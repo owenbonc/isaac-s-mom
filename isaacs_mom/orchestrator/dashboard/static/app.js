@@ -72,7 +72,12 @@ const kindOf = (ep) => {
   return [name, `${seed} ${esc(ep.seed ?? "")}`];
 };
 const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
-const verdictChip = (ep) => `<span class="verdict ${MomState.accepted(ep) ? "good" : "bad"}">${MomState.accepted(ep) ? CHECK : X}${esc(MomState.verdictWords(ep))}</span>`;
+// An errored held-out test takes Results' yellow ! wherever it shows, never a failure's red ✗ (rule 6).
+const verdictLook = (ep) => (MomState.errored(ep) ? ["warn", markIcon("error")] : MomState.accepted(ep) ? ["good", CHECK] : ["bad", X]);
+const verdictChip = (ep) => {
+  const [look, icon] = verdictLook(ep);
+  return `<span class="verdict ${look}">${icon}${esc(MomState.verdictWords(ep))}</span>`;
+};
 const MOVED = { move_box: "Box moved", move_bin: "Bin moved" };
 // Durations read at a glance from the back of the room: ms under a second, then seconds, then minutes.
 const duration = (v) => (v < 1000 ? `${v >= 100 ? Math.round(v) : v.toFixed(1)} ms` : v < 120000 ? `${(v / 1000).toFixed(1)} s` : `${(v / 60000).toFixed(1)} min`);
@@ -343,9 +348,9 @@ function decisionRow(row, after, done, full) {
 
 function verdictRow(ep) {
   const v = ep.verdict;
-  const good = MomState.accepted(ep);
+  const [look, icon] = verdictLook(ep);
   const reason = v.reason ? `${esc(cap(v.reason))}. ` : "";
-  return `<li class="event ${good ? "good" : "bad"}"><span class="n">${good ? CHECK : X}</span><span>${esc(MomState.verdictWords(ep))}. <span class="d">${reason}Task ${v.task ? "succeeded" : "not met"}, physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
+  return `<li class="event ${look}"><span class="n">${icon}</span><span>${esc(MomState.verdictWords(ep))}. <span class="d">${reason}Task ${v.task ? "succeeded" : "not met"}, physics ${v.physics ? "valid" : "violated"}.</span></span></li>`;
 }
 
 const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m" };

@@ -929,6 +929,9 @@ def test_a_move_before_the_first_decision_names_the_controller_of_the_first_fram
     assert (before["url"], before["controller"], before["checkpoint"]) == ("/f/before.jpg", "teacher", "ckpt-r0")
 
 
+RECORDING_REFUSED = ("validation", {"task_success": False, "physics_valid": True, "reason": "recording error: x"})
+
+
 def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished_it() -> None:
     def kinded(episode_id: str, **data: object) -> tuple[str, dict]:
         return "episode_started", {**started(episode_id)[1], **data}
@@ -939,6 +942,7 @@ def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished
         *demo("demo-bad", "trial", accepted=False),
         *[kinded("heldout-ok", split="heldout"), decision(0), verdict(True)],
         *[kinded("heldout-bad", split="heldout"), decision(0), verdict(False)],
+        *[kinded("heldout-errored", split="heldout"), decision(0), RECORDING_REFUSED],
         *[started("trial-ok"), decision(0), verdict(True)],
         *[started("trial-bad"), decision(0), verdict(False)],
         *[kinded("alone", demo=True), decision(0), verdict(True)],
@@ -959,6 +963,7 @@ def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished
         ["demonstration", "Rejected, not used for training"],
         ["heldout", "Succeeded"],
         ["heldout", "Failed"],
+        ["heldout", "Errored, not counted"],
         ["trial", "Succeeded"],
         ["trial", "Failed"],
         ["take", "Succeeded, by the student alone"],
@@ -2065,3 +2070,18 @@ def test_a_run_file_the_server_says_is_not_written_yet_reads_as_not_in_the_runs_
     out = app(REPLAY + script, stream(started("a"), ("finetune_started", {"round": 1})))
     assert out["asked"] == ["/run-files/r/training_r1.summary.json", "/run-files/r/replay_report.json"]
     assert out["shown"].count("Not in the run's files.") == 2
+
+
+def test_an_errored_held_out_episode_reads_errored_not_counted_in_its_own_view_never_failed() -> None:
+    script = """
+    vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);
+    const last = (id) => writes.filter(([at]) => at === id).pop()[1];
+    return { control: last("control"), log: last("log"), heard: heard.at(-1) };
+    """
+    episode = ("episode_started", {**started("h")[1], "split": "heldout"})
+    out = app(HEARD + REPLAY + script, stream(episode, decision(0), executed(0), RECORDING_REFUSED))
+    for html in (out["control"], out["log"]):
+        assert "Errored, not counted" in html and "#m-error" in html and "Failed" not in html
+    assert 'class="verdict warn"' in out["control"]
+    assert 'class="event warn"' in out["log"]
+    assert out["heard"].endswith("Verdict: Errored, not counted.")
