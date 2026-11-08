@@ -442,6 +442,11 @@ def test_page_and_its_scripts_are_served_without_caching(tmp_path: Path) -> None
     assert client.get("/static/style.css").headers["cache-control"] == "no-cache"
 
 
+def test_the_page_carries_the_projects_name(tmp_path: Path) -> None:
+    page = runs_client(tmp_path).get("/").text
+    assert "<title>Scaffld</title>" in page and "<h1>Scaffld</h1>" in page
+
+
 class SlowSim(FakeSim):
     """A sim whose every skill takes 0.2 s, as a long MuJoCo motion does."""
 

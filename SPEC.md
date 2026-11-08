@@ -1,10 +1,10 @@
-# Isaac's Mom — SPEC
+# Scaffld — SPEC
 
 AgentVerse 2026 (UCL AI Society), Robotics track (NVIDIA-supported). Hacking ends Sun 8 Nov 2026 18:00 London. Source notes: Notion hackathon workspace, "AgentVerse 2026 — UCL" and Resources › "Initial idea".
 
 ## 1. Purpose
 
-Robots learn from demonstrations that humans record by teleoperation or motion capture. Isaac's Mom takes the human out: an **Argon teacher agent** watches a weak robot student fail in simulation, diagnoses why from what the robot's camera saw, demonstrates corrected behaviour by driving the simulated robot itself, keeps only the demonstrations an independent validator accepts, and **fine-tunes the student** on them. The loop repeats until the student succeeds on held-out scenes. The fine-tuned student then runs on its own, locally.
+Robots learn from demonstrations that humans record by teleoperation or motion capture. Scaffld takes the human out: an **Argon teacher agent** watches a weak robot student fail in simulation, diagnoses why from what the robot's camera saw, demonstrates corrected behaviour by driving the simulated robot itself, keeps only the demonstrations an independent validator accepts, and **fine-tunes the student** on them. The loop repeats until the student succeeds on held-out scenes. The fine-tuned student then runs on its own, locally.
 
 Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its own lessons."
 
