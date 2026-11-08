@@ -2,6 +2,7 @@
 server-sent events, its frame JPEGs and its training and replay summaries; the Teach box starts a new run."""
 
 import asyncio
+import logging
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -9,6 +10,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
@@ -19,6 +21,7 @@ from isaacs_mom.orchestrator.runs import Launch, RunSummary, find_run, launch_ru
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK
 from isaacs_mom.teacher.argon import Generate
 
+log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
 POLL_SECONDS = 0.25
 FRAME_SUFFIXES = {".jpg", ".jpeg"}
@@ -50,15 +53,16 @@ def frame_url(frame: object, run_dir: Path) -> str | None:
         return None
     try:
         return f"/frames/{run_dir.name}/" + (run_dir / frame).resolve().relative_to(run_dir.resolve()).as_posix()
-    except ValueError:
+    except (ValueError, OSError, RuntimeError):  # outside the run, a NUL byte, or a symlink loop
         return None
 
 
-def to_sse(line: str, run_dir: Path) -> str | None:
-    """One events.jsonl line as an SSE message with its frame paths turned into URLs; None for a malformed line."""
+def to_sse(line: str, number: int, run_dir: Path) -> str | None:
+    """Line `number` of events.jsonl as an SSE message, its frame paths as URLs; None, logged, if malformed."""
     try:
         event = Event.model_validate_json(line)
-    except ValidationError:
+    except ValidationError as error:
+        log.warning("events.jsonl line %d is not an event, skipped: %s", number, error)
         return None
     for key in FRAME_KEYS & event.data.keys():
         event.data[key] = frame_url(event.data[key], run_dir)
@@ -70,12 +74,15 @@ async def tail_events(
 ) -> AsyncIterator[str]:
     """Every complete event line from the start of events.jsonl, then `REPLAYED`, then new appends until `stopped()`."""
     replayed = False
-    with (run_dir / "events.jsonl").open() as f:
+    # One byte that isn't UTF-8 would otherwise end the stream; its line fails validation and is skipped instead.
+    with (run_dir / "events.jsonl").open(errors="replace") as f:
+        number = 0
         while True:
             position = f.tell()
             line = f.readline()
             if line.endswith("\n"):
-                if message := to_sse(line, run_dir):
+                number += 1
+                if message := to_sse(line, number, run_dir):
                     yield message
                 continue
             f.seek(position)  # a partial line is still being written
@@ -99,6 +106,8 @@ def create_app(
     """`task` is what a Teach-started run trains on; `generate` answers for Argon (None: Gemini) and `launch` starts
     `mom run`."""
     app = FastAPI(title="Isaac's Mom dashboard")
+    # A DNS-rebinding page reaches 127.0.0.1 under its own host name, so only a local name is served.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     own_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
 
     def served(run_id: str) -> Path:
@@ -126,7 +135,10 @@ def create_app(
     @app.get("/frames/{run_id}/{path:path}")
     def frames(run_id: str, path: str) -> FileResponse:
         run_dir = served(run_id).resolve()
-        target = (run_dir / path).resolve()
+        try:
+            target = (run_dir / path).resolve()
+        except (ValueError, OSError, RuntimeError):  # a NUL byte or a symlink loop
+            raise HTTPException(status_code=404) from None
         if not target.is_relative_to(run_dir) or target.suffix not in FRAME_SUFFIXES or not target.is_file():
             raise HTTPException(status_code=404)
         # The recorder writes each frame once under a unique episode id, so a URL's bytes never change.

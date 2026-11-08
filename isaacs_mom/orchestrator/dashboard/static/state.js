@@ -47,6 +47,7 @@
 
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const text = (v) => (typeof v === "string" ? v : "");
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const controllerOf = (v) => (CONTROLLERS.includes(v) ? v : null);
   const current = (s) => s.episodes[s.episodes.length - 1] || null;
 
@@ -155,8 +156,7 @@
       }
       case "evaluation_result":
         // `after` is where the next evaluation's held-out episodes start.
-        // `errored` is null for an evaluation recorded before errored episodes were counted apart.
-        if (num(d.round) !== null && num(d.successes) !== null && num(d.n) !== null) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: num(d.errored), after: s.episodes.length });
+        if ([d.round, d.successes, d.n, d.errored].every((v) => num(v) !== null)) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: d.errored, after: s.episodes.length });
         break;
       case "finetune_started":
         s.finetune.pending = { round: num(d.round), t: event.t };
@@ -319,7 +319,7 @@
     const pair = first === last ? [first] : [first, last];
     // No-break spaces keep each name on one line when the pair wraps.
     const name = (r) => (r.round === 0 ? "before\u00a0fine-tuning" : `after\u00a0round\u00a0${r.round}`);
-    const scored = (r) => r.n - (r.errored ?? 0);
+    const scored = (r) => r.n - r.errored;
     // Whole percentages of the scored episodes; the change is taken between the rates as shown, so the figures agree.
     const rate = (r) => (scored(r) > 0 ? Math.round((100 * r.successes) / scored(r)) : null);
     const rates = pair.map(rate);
@@ -339,7 +339,7 @@
       counts: pair.map((r) => (scored(r) > 0 ? `${r.successes}/${scored(r)}` : "none")).join(" → "),
       spoken: change + pair.map(said).join(", then "),
       sample: same ? `n=${first.n}${pair.length > 1 ? " each" : ""}` : pair.map((r) => (r.n ? `n=${r.n}` : "no held-out episode ran")).join(" and "),
-      errored: pair.every((r) => r.errored !== null) ? `${pair.map((r) => r.errored).join(" → ")} errored` : null,
+      errored: `${pair.map((r) => r.errored).join(" → ")} errored`,
       names: pair.map(name).join(" → "),
       ids: pair.map((r) => r.checkpoint).join(" → "),
     };
@@ -519,7 +519,7 @@
     return { state: "failed", message };
   }
 
-  const api = { initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

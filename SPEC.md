@@ -68,8 +68,8 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
   - An instruction for the task the loop trains on (the box inside the bin) starts that run with the instruction, as `mom run` would (MuJoCo, the loop's task, `fixed_feet` for now (§8), the Argon teacher, up to 3 rounds), on the machine serving the dashboard, and the view opens it. Any number of runs may run at once.
   - A refusal shows its reasons, and a valid task the loop doesn't train on says "Not yet: the loop teaches one task"; either way nothing starts, and the run is listed as not started, with why.
   - A run is taught, trialled and held-out tested on its own instruction (the same sealed seeds), and its rates are shown with that instruction. Typed text is shown escaped.
-- `uv run mom demo --ckpt <id> --seed <s> --perturb-at <step>` runs the judged single take: student on an unseen scene, a perturbation mid-run, re-observe, finish.
-- Perturbations (`move_box`, `move_bin`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame. Only an applied perturbation is recorded and emitted as a `perturbation` event; a refused one is an `error` event.
+- `uv run mom demo --ckpt <id> --seed <s> --perturb-at <step>` runs the judged single take: student on an unseen scene (a seed ≥ 900000, outside the development and held-out seeds), a perturbation mid-run, re-observe, finish. It records into a run directory of its own (an existing one is refused), so the take never enters a training set. Its captions name a move only from the step where a recorded perturbation applied.
+- Perturbations (`move_box`, `move_bin`) go through `TruthSim.perturb` and reach the agents only as a changed camera frame. Only an applied perturbation is recorded and emitted as a `perturbation` event; a refused one is an `error` event. The lift-triggered `move_bin` (§6 criterion 10) also runs in a stated share of teacher demonstrations, so accepted demonstrations show the bin found again and the plan changed after it moves; the trigger reads ground truth on the orchestrator side only (rule 1).
 
 ### 3.6 The teach → fine-tune loop
 1. Evaluate the current student checkpoint on the 20 held-out seeds (success rate, n=20).
@@ -80,6 +80,8 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 6. Replay every accepted episode of the run (`replay_accepted`) after the loop's results are saved.
 7. If time allows, B1: the same budget of randomly chosen seeds demonstrated by the teacher, fine-tuned and evaluated the same way.
 
+Demonstrations may also be collected in a parallel batch: several Argon teachers at once, each within its own `ARGON_CALL_BUDGET` (rule 5), on development seeds, then one fine-tune on everything the validator accepted (rules 2 and 3). A batch skips step 3's diagnosis and scene choice, so its results are reported as batch-taught, apart from the loop's rounds.
+
 ### 3.7 Task generator (workstream 1, extension)
 The vision: a person types what the robot should learn, and an agent generates the success rule and the scene assets the student trains on, so the teacher can demonstrate it and the validator can judge it. For the hackathon the loop teaches one task; this is a prototype off the critical path.
 - `generate_task(instruction) -> TaskSpec | Refusal` in `isaacs_mom/tasks/`. `TaskSpec{name, instruction, scene, success, perturbations}` covers a narrow, physically checked set of objects and placements: boxes the hug can hold, and a bin, shelf or platform the existing `place` can reach. Each spec is checked against what the G1 can reach and lift with the existing skills, as `TaskConfig` does.
@@ -87,7 +89,8 @@ The vision: a person types what the robot should learn, and an agent generates t
 - Argon proposes the spec as JSON, parsed at the boundary. Anything outside the schema, an unsupported object, a setting past the robot's limits, a start where objects overlap or are unstable, or a rule already true at reset is refused with a reason.
 - Rule 1: scene and rule data reach only the validator and orchestrator side. The generator's Argon call is separate from the teacher's, its output never enters the teacher's or the student's prompts, and its calls count against `ARGON_CALL_BUDGET` (rule 5).
 - A hash of the spec is part of `sim_version`, so a replay runs on exactly the same task.
-- The default task, `validate()` and `contracts.py` stay unchanged until one example works end to end: instruction → validated spec → runnable scene → correct verdicts on a scripted success and a scripted failure → a reproducible replay. Joining generated rules to `validate()` is then agreed with workstream 3. Scanned meshes, arbitrary objects and new motion parameters are later (§9).
+- One example works end to end: instruction → validated spec → runnable scene → correct verdicts on a scripted success and a scripted failure → a reproducible replay. The default task, `validate()` and `contracts.py` stay unchanged, and joining generated rules to `validate()` stays with workstream 3 for later. Scanned meshes, arbitrary objects and new motion parameters are later (§9).
+- A generated task can be taught end to end: `uv run python -m isaacs_mom.tasks.learn "<instruction>" --demos N --workers K` generates the spec or refuses with reasons, collects demonstrations on development seeds of that task in a parallel batch (§3.6), judges each by the spec's own declarative rule (`tasks.judge`), trains only on the accepted ones, fine-tunes once, evaluates the fine-tuned student on the held-out seeds of that task by the same rule (successes out of n − errored), and reports the spec and its fingerprint, demonstrations accepted out of n, the example count, the fine-tune's metrics and the held-out result. `validate()`, `contracts.py`, the default task and `mom run` are unchanged.
 
 ## 4. Contracts
 
@@ -134,7 +137,7 @@ isaacs_mom/teacher/          Argon teacher (WS2)
 isaacs_mom/validator/        validator, recorder, training sets, replay (WS3)
 isaacs_mom/student/          SmolVLM2 inference and fine-tuning (WS4)
 isaacs_mom/orchestrator/     loop, CLI, demo, dashboard (WS5)
-isaacs_mom/tasks/            task generator (WS1, extension, §3.7)
+isaacs_mom/tasks/            task generator and end-to-end teaching of a generated task (WS1, extension, §3.7)
 configs/                     heldout_seeds.json, instructions
 docs/                        one-page summary, pitch
 ```
@@ -150,7 +153,7 @@ docs/                        one-page summary, pitch
 7. **Rules.** Tests prove rules 1, 2, 3 and 7; the Argon budget stops calls at the cap.
 8. **Deliverables.** A continuous ≤ 1-minute video from the simulator showing perception next to actions and one unscripted change; the one-page PDF (user and problem, features, architecture, where each model runs with hardware and latency, limits, critical failure mode, safety); the 5-minute pitch. The critical failure mode is a bad demonstration (the box dropped, the robot fell): the validator rejects it on screen, worded "rejected, not used for training", so it never trains the student.
 9. `scripts/verify.sh` prints READY on `phase-1` and CI is green.
-10. **Evaluation report.** `uv run mom eval` runs the base (`ckpt-r0`) and the fine-tuned checkpoint, student only (no teacher takeover), on the sealed held-out seeds in three conditions: `across_room` (the training distribution); the same seeds on `near_bin` and `far_bin` (bin distances the training task never uses); and `across_room` with `move_bin` right after the student's first successful `lift` (read from ground truth on the orchestrator side, rule 1). Each condition reports successes out of (n − errored). A refused move ("not applied") and an episode that never lifts ("trigger not reached") are shown apart and don't count as adaptation tests. Each episode saves its checkpoint, task, `sim_version`, seed, frames, skill calls, decision latency with its device, perturbations and verdict, and latency is compared against the edge-device budget: the student decides within 2 s per step and fits in 3 GB of memory on a laptop (revisited once the first GPU measurements land, before the feature freeze). Reported only: the loop's stop rule (§3.6) stays on the held-out seeds of the task the loop trains on (`fixed_feet` for now, §8).
+10. **Evaluation report.** `uv run mom eval` runs the base (`ckpt-r0`) and the fine-tuned checkpoint, student only (no teacher takeover), on the sealed held-out seeds in three conditions: `across_room` (the training distribution); the same seeds on `near_bin` and `far_bin` (bin distances the training task never uses); and `across_room` with `move_bin` right after the student's first successful `lift` (read from ground truth on the orchestrator side, rule 1; the same trigger runs in teacher demonstrations, §3.5). Each condition reports successes out of (n − errored). A refused move ("not applied") and an episode that never lifts ("trigger not reached") are shown apart and don't count as adaptation tests. Each episode saves its checkpoint, task, `sim_version`, seed, frames, skill calls, decision latency with its device, perturbations and verdict, and latency is compared against the edge-device budget: the student decides within 2 s per step and fits in 3 GB of memory on a laptop (revisited once the first GPU measurements land, before the feature freeze). Reported only: the loop's stop rule (§3.6) stays on the held-out seeds of the task the loop trains on (`fixed_feet` for now, §8).
 
 ## 7. Timeline (London)
 

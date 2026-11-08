@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import re
 import sys
 import threading
@@ -22,7 +23,7 @@ from isaacs_mom.contracts import (
     TrainingSetSummary,
 )
 from isaacs_mom.orchestrator.dashboard.server import REPLAYED, create_app, tail_events
-from isaacs_mom.orchestrator.episode import run_episode
+from isaacs_mom.orchestrator.episode import heartbeat, run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.orchestrator.runs import launch_run
@@ -45,8 +46,21 @@ def make_run(tmp_path: Path, run_id: str = "r1") -> Path:
     return run_dir
 
 
-def runs_client(tmp_path: Path) -> TestClient:
-    return TestClient(create_app(tmp_path / "runs"))
+LOCAL = "http://127.0.0.1:8200"  # the address the dashboard serves on, which its host check lets through
+
+
+def runs_client(tmp_path: Path, raise_server_exceptions: bool = True) -> TestClient:
+    return TestClient(create_app(tmp_path / "runs"), base_url=LOCAL, raise_server_exceptions=raise_server_exceptions)
+
+
+def test_a_request_naming_another_host_is_refused_so_a_rebinding_page_reads_nothing(tmp_path: Path) -> None:
+    make_run(tmp_path)
+    client = TestClient(create_app(tmp_path / "runs"))
+    frame = "/frames/r1/episodes/ep-1/frames/0000.jpg"
+    for host in ["127.0.0.1:8200", "localhost:8200"]:
+        assert [client.get(path, headers={"Host": host}).status_code for path in ["/", "/runs", frame]] == [200] * 3
+    for path in ["/", "/runs", frame, "/events?run=r1"]:  # the event stream last: let through, it never ends
+        assert client.get(path, headers={"Host": "evil.example"}).status_code == 400
 
 
 def test_frames_are_served_from_inside_their_run_directory(tmp_path: Path) -> None:
@@ -209,6 +223,14 @@ def test_run_files_are_only_the_summaries_and_the_replay_report_and_only_when_th
         assert client.get(f"/run-files/{path}").status_code == 404, path
 
 
+def test_frames_that_cannot_resolve_are_not_found(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    (run_dir / "episodes" / "ep-1" / "frames" / "loop.jpg").symlink_to("loop.jpg")
+    client = runs_client(tmp_path, raise_server_exceptions=False)
+    for path in ["r1/episodes/ep-1/frames/loop.jpg", "r1/episodes/ep-1/frames/0000%00.jpg", "r1/%00", "%00/x.jpg"]:
+        assert client.get(f"/frames/{path}").status_code == 404, path
+
+
 def stream_of(run_dir: Path, appended: list[str] | None = None) -> list[str]:
     """Every SSE message, appending `appended` one line at a time once the existing lines have been read, then stop."""
     seen: list[str] = []
@@ -222,11 +244,14 @@ def stream_of(run_dir: Path, appended: list[str] | None = None) -> list[str]:
         return True
 
     async def read() -> None:
-        async for message in tail_events(run_dir, stopped, poll=0):
-            assert message.endswith("\n\n")
-            seen.append(message)
+        try:
+            async for message in tail_events(run_dir, stopped, poll=0):
+                seen.append(message)
+        except Exception as error:  # a raise ends the response: the client sees the stream stop and reconnects
+            seen.append(f"stream died: {error!r}")
 
     asyncio.run(read())
+    assert all(message.endswith("\n\n") for message in seen), seen
     return seen
 
 
@@ -262,11 +287,37 @@ def test_stream_waits_for_a_partial_line_to_complete(tmp_path: Path) -> None:
     assert collect(run_dir, [line[20:], "\n"]) == [json.loads(line)]
 
 
-def test_stream_skips_malformed_lines(tmp_path: Path) -> None:
+def test_stream_skips_a_line_that_is_not_an_event_and_logs_its_line_number(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     run_dir = make_run(tmp_path)
-    (run_dir / "events.jsonl").write_text("not json\n")
-    EventLog(run_dir, "r1").emit("error", message="boom")
-    assert [e["type"] for e in collect(run_dir)] == ["error"]
+    log = EventLog(run_dir, "r1")
+    log.emit("episode_started", seed=1)
+    with (run_dir / "events.jsonl").open("a") as f:
+        f.write("not json\n")
+    log.emit("error", message="boom")
+    with caplog.at_level(logging.WARNING, logger="isaacs_mom.orchestrator.dashboard.server"):
+        assert [e["type"] for e in collect(run_dir)] == ["episode_started", "error"]
+    assert [r.getMessage().split(":")[0] for r in caplog.records] == ["events.jsonl line 2 is not an event, skipped"]
+
+
+def test_stream_goes_on_past_a_line_that_is_not_utf8(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    first, last = (Event(t=t, run_id="r1", type="error", data={}).model_dump_json() for t in (1.0, 2.0))
+    torn = b'{"t": 1.5, "data": "\xff\xfe"}\n'
+    (run_dir / "events.jsonl").write_bytes(f"{first}\n".encode() + torn + f"{last}\n".encode())
+    messages = stream_of(run_dir)
+    assert [m if m == REPLAYED else json.loads(m.removeprefix("data: "))["t"] for m in messages] == [1.0, 2.0, REPLAYED]
+
+
+def test_frame_paths_that_cannot_resolve_are_hidden_and_the_stream_goes_on(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    (run_dir / "episodes" / "ep-1" / "frames" / "loop.jpg").symlink_to("loop.jpg")
+    log = EventLog(run_dir, "r1")
+    log.emit("action_executed", frame="episodes/ep-1/frames/loop.jpg")
+    log.emit("action_executed", frame="episodes/ep-1/frames/0000\x00.jpg")
+    log.emit("action_executed", frame="episodes/ep-1/frames/0000.jpg")
+    assert [e["data"]["frame"] for e in collect(run_dir)] == [None, None, "/frames/r1/episodes/ep-1/frames/0000.jpg"]
 
 
 def test_stream_turns_frame_paths_into_their_runs_urls_and_hides_outside_paths(tmp_path: Path) -> None:
@@ -309,7 +360,7 @@ def test_frame_paths_find_the_same_file_whatever_directory_the_dashboard_starts_
     monkeypatch.chdir(tmp_path / "elsewhere")
     served = tmp_path / "loop" / "runs" / "r1"
     urls = [e["data"]["frame"] for e in collect(served) if e["type"] == "action_executed"]
-    client = TestClient(create_app(served.parent))
+    client = TestClient(create_app(served.parent), base_url=LOCAL)
     assert urls and all(
         client.get(url).content == (served / url.removeprefix("/frames/r1/")).read_bytes() for url in urls
     )
@@ -417,6 +468,20 @@ def test_a_slow_decision_or_skill_sends_heartbeats_while_it_runs_and_none_after(
     assert {e["data"]["episode_id"] for e in logged(tmp_path) if e["type"] == "heartbeat"} == {manifest.episode_id}
 
 
+def test_no_heartbeat_lands_after_its_block_ends(tmp_path: Path) -> None:
+    class SlowLog(EventLog):
+        def emit(self, type_: EventType, **data: object) -> None:
+            time.sleep(0.2)  # a beat still writing when the block ends
+            super().emit(type_, **data)
+
+    events = SlowLog(tmp_path, "r1")
+    with heartbeat(events, "e1", 0.01):
+        time.sleep(0.05)
+    written = events.path.read_text()
+    time.sleep(0.3)
+    assert written.count("heartbeat") == 1 and events.path.read_text() == written
+
+
 def test_heartbeats_stop_when_a_decision_raises(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="Argon unreachable"):
         run_episode(
@@ -518,7 +583,7 @@ def teach_client(
         launched.append((args, log))
 
     app = create_app(tmp_path / "runs", port=8200, task="fixed_feet", generate=generate, launch=launch)
-    return TestClient(app, client=(host, 50000)), launched
+    return TestClient(app, base_url=LOCAL, client=(host, 50000)), launched
 
 
 def teach(client: TestClient, instruction: object, origin: str | None = ORIGIN) -> Response:

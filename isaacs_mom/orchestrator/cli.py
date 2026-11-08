@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 
 from isaacs_mom.orchestrator.events import EventLog, read_events
-from isaacs_mom.orchestrator.loop import INSTRUCTION, instruction_text, run_loop
+from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, INSTRUCTION, instruction_text, run_loop
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -34,6 +34,13 @@ def instruction(text: str) -> str:
         raise argparse.ArgumentTypeError(str(error)) from None
 
 
+def at_least_one(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{value}: must be at least 1")
+    return value
+
+
 def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
     if name == "fake":
         from isaacs_mom.sim.fake import FakeSim
@@ -50,6 +57,8 @@ def main() -> None:
     run = commands.add_parser("run", help="the teach -> fine-tune loop (SPEC §3.6)")
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--rounds", type=int, default=3)
+    run.add_argument("--demos", type=at_least_one, default=DEMOS_PER_ROUND, help="teacher demonstrations per round")
+    run.add_argument("--dev-trials", type=at_least_one, default=DEV_TRIALS, help="student trials the teacher diagnoses")
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     run.add_argument(
         "--instruction", type=instruction, default=INSTRUCTION, help="what the robot learns; held-out tests use it too"
@@ -93,18 +102,23 @@ def main() -> None:
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
     run_dir = args.runs / args.run_id
-    events = EventLog(run_dir, args.run_id)
-    earlier = read_events(run_dir)  # a Teach-started run already holds its instruction and the task generator's calls
-    if args.command == "run" and not any(e.type == "instruction" for e in earlier):
-        events.emit("instruction", text=args.instruction, source="cli")
-    # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
-    argon = Argon(events, generate=stub_generate if teacher == "stub" else None)
-    argon.calls = sum(e.type == "argon_call" for e in earlier)
-    if teacher == "argon":
-        argon.check()  # the stub has no key or model to check, so it spends nothing
-    if args.command == "demo":
-        from isaacs_mom.orchestrator.demo import run_demo
 
+    def checked_argon(events: EventLog) -> Argon:
+        # One budget for the whole run (SPEC §2 rule 5), the task generator's calls on a Teach-started run included;
+        # checked before any episode, so a bad key stops it in seconds.
+        argon = Argon(events, generate=stub_generate if teacher == "stub" else None)
+        argon.calls = sum(e.type == "argon_call" for e in read_events(run_dir))
+        if teacher == "argon":
+            argon.check()
+        return argon
+
+    if args.command == "demo":
+        from isaacs_mom.orchestrator.demo import refuse_seen_take, run_demo
+
+        try:
+            refuse_seen_take(args.seed, run_dir)
+        except ValueError as refused:
+            demo.error(str(refused))
         manifest = run_demo(
             make_sim(args.sim, args.task),
             ckpt=args.ckpt,
@@ -113,17 +127,23 @@ def main() -> None:
             out=args.out,
             run_dir=run_dir,
             run_id=args.run_id,
-            argon=argon,
+            make_argon=checked_argon,
             make_student=make_student,
         )
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
+    events = EventLog(run_dir, args.run_id)
+    if not any(e.type == "instruction" for e in read_events(run_dir)):  # a Teach-started run already holds its own
+        events.emit("instruction", text=args.instruction, source="cli")
+    argon = checked_argon(events)
     results = run_loop(
         make_sim(args.sim, args.task),
         run_dir,
         args.run_id,
         max_rounds=args.rounds,
+        demos=args.demos,
+        dev_trials=args.dev_trials,
         argon=argon,
         make_student=make_student,
         train_student=train_student,
