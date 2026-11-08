@@ -76,6 +76,16 @@ def _captions(manifest: EpisodeManifest) -> list[str]:
     return captions
 
 
+def refuse_seen_take(seed: int, run_dir: Path) -> None:
+    """The judged take needs a scene no episode has seen, and a run directory of its own so it never enters a loop
+    run's training set (SPEC §3.5)."""
+    assert_not_heldout(seed)
+    if seed < DEMO_SEED_START:
+        raise ValueError(f"seed {seed} is below {DEMO_SEED_START}: the judged take needs a scene no episode has seen")
+    if run_dir.exists():
+        raise ValueError(f"{run_dir} exists: the judged take records into a run directory of its own")
+
+
 def run_demo(
     sim: TruthSim,
     *,
@@ -89,16 +99,15 @@ def run_demo(
     make_argon: Callable[[EventLog], Argon],
     make_student: StudentFactory = StudentPolicy,
 ) -> EpisodeManifest:
-    """Refuses a seen scene or an existing run directory before it writes anything or builds its teacher."""
-    assert_not_heldout(seed)
-    if seed < DEMO_SEED_START:
-        raise ValueError(f"seed {seed} is below {DEMO_SEED_START}: the judged take needs a scene no episode has seen")
-    run_dir.mkdir(parents=True)  # a run directory of its own, so the take never enters a loop run's training set
+    """Refuses a seen scene or an existing run directory before it writes anything or builds its student or teacher."""
+    refuse_seen_take(seed, run_dir)
+    student = make_student(ckpt)
+    run_dir.mkdir(parents=True)
     capture = _ThirdPersonCapture(sim)
     events = EventLog(run_dir, run_id)
     manifest = run_episode(
         capture,
-        make_student(ckpt),
+        student,
         run_dir=run_dir,
         events=events,
         seed=seed,

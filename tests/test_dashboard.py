@@ -8,9 +8,9 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
-from isaacs_mom.contracts import Controller, Event, ExecResult, Observation, SkillCall
+from isaacs_mom.contracts import Controller, Event, EventType, ExecResult, Observation, SkillCall
 from isaacs_mom.orchestrator.dashboard.server import REPLAYED, create_app, tail_events
-from isaacs_mom.orchestrator.episode import run_episode
+from isaacs_mom.orchestrator.episode import heartbeat, run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.fake import FakeSim
@@ -149,7 +149,7 @@ def test_stream_skips_a_line_that_is_not_an_event_and_logs_its_line_number(
 def test_stream_goes_on_past_a_line_that_is_not_utf8(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     first, last = (Event(t=t, run_id="r1", type="error", data={}).model_dump_json() for t in (1.0, 2.0))
-    torn = b'{"t": 1.5, "data": "\xff\xfe"}\n'  # a crash mid-write
+    torn = b'{"t": 1.5, "data": "\xff\xfe"}\n'
     (run_dir / "events.jsonl").write_bytes(f"{first}\n".encode() + torn + f"{last}\n".encode())
     messages = stream_of(run_dir)
     assert [m if m == REPLAYED else json.loads(m.removeprefix("data: "))["t"] for m in messages] == [1.0, 2.0, REPLAYED]
@@ -309,6 +309,20 @@ def test_a_slow_decision_or_skill_sends_heartbeats_while_it_runs_and_none_after(
     assert types[first:executed].count("heartbeat") >= 2  # while the skill executes
     assert "heartbeat" not in types[types.index("decision", executed) :]
     assert {e["data"]["episode_id"] for e in logged(tmp_path) if e["type"] == "heartbeat"} == {manifest.episode_id}
+
+
+def test_no_heartbeat_lands_after_its_block_ends(tmp_path: Path) -> None:
+    class SlowLog(EventLog):
+        def emit(self, type_: EventType, **data: object) -> None:
+            time.sleep(0.2)  # a beat still writing when the block ends
+            super().emit(type_, **data)
+
+    events = SlowLog(tmp_path, "r1")
+    with heartbeat(events, "e1", 0.01):
+        time.sleep(0.05)
+    written = events.path.read_text()
+    time.sleep(0.3)
+    assert written.count("heartbeat") == 1 and events.path.read_text() == written
 
 
 def test_heartbeats_stop_when_a_decision_raises(tmp_path: Path) -> None:

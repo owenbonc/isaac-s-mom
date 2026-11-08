@@ -1,4 +1,3 @@
-import contextlib
 import io
 from collections.abc import Callable
 from pathlib import Path
@@ -29,7 +28,7 @@ def frame_count(path: Path) -> int:
 
 
 def stub_argon(events: EventLog) -> Argon:
-    return Argon(events, generate=stub_generate)  # no network in tests
+    return Argon(events, generate=stub_generate)
 
 
 def unbuilt(events: EventLog) -> Argon:
@@ -120,8 +119,7 @@ def test_demo_refuses_a_seed_below_the_unseen_range_before_writing_anything(tmp_
         with pytest.raises(ValueError, match="900000"):
             take(run_dir, seed=seed, make_argon=unbuilt)
     assert not run_dir.exists() and not run_dir.with_suffix(".mp4").exists()
-    with contextlib.suppress(ValueError):
-        take(run_dir, seed=900_000)
+    take(run_dir, seed=900_000)
     assert (run_dir / "episodes").is_dir()  # the range's first seed records
 
 
@@ -129,7 +127,7 @@ def test_demo_refuses_a_run_directory_that_already_exists(tmp_path: Path) -> Non
     run_dir = tmp_path / "runs" / "loop"
     EventLog(run_dir, "loop").emit("episode_started", seed=DEV_SEED_START)  # a loop run's, whose demos train
     written = (run_dir / "events.jsonl").read_text()
-    with pytest.raises(FileExistsError):
+    with pytest.raises(ValueError, match="exists"):
         take(run_dir, make_argon=unbuilt)
     assert list(run_dir.iterdir()) == [run_dir / "events.jsonl"] and (run_dir / "events.jsonl").read_text() == written
     assert not run_dir.with_suffix(".mp4").exists()

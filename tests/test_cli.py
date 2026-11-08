@@ -45,15 +45,10 @@ TAKE = ["mom", "demo", "--sim", "fake", "--student", "stub", "--ckpt", "ckpt-r0"
 
 
 @pytest.mark.parametrize(
-    ("seed", "run_id", "refusal"),
-    [
-        (DEV_SEED_START, "take", ValueError),  # a scene the loop trains on
-        (min(heldout_seeds()), "take", ValueError),
-        (900_005, "loop", FileExistsError),  # a loop run's directory
-    ],
+    ("seed", "run_id"), [(DEV_SEED_START, "take"), (min(heldout_seeds()), "take"), (900_005, "loop")]
 )
 def test_a_refused_take_checks_no_teacher_and_writes_nothing(
-    seed: int, run_id: str, refusal: type[Exception], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+    seed: int, run_id: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
     loop = EventLog(tmp_path / "runs" / "loop", "loop")
@@ -61,8 +56,9 @@ def test_a_refused_take_checks_no_teacher_and_writes_nothing(
     written = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")), loop.path.read_text()
     monkeypatch.setattr(cli, "Argon", UncheckedArgon)
     monkeypatch.setattr(sys, "argv", [*TAKE, "--teacher", "argon", "--seed", str(seed), "--run-id", run_id])
-    with pytest.raises(refusal):
+    with pytest.raises(SystemExit) as exit_:
         cli.main()
+    assert exit_.value.code == 2
     assert (sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")), loop.path.read_text()) == written
 
 

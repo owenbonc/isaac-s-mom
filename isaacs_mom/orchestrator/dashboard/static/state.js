@@ -42,7 +42,6 @@
 
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const text = (v) => (typeof v === "string" ? v : "");
-  // Every value from an event reaches the page's innerHTML through this, as inert text.
   const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const controllerOf = (v) => (CONTROLLERS.includes(v) ? v : null);
   const current = (s) => s.episodes[s.episodes.length - 1] || null;

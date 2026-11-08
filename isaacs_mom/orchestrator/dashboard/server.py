@@ -66,7 +66,7 @@ async def tail_events(
         if await stopped():
             return
         await asyncio.sleep(poll)
-    # A line torn by a crash mid-write decodes with replacement characters, fails validation and is skipped.
+    # One byte that isn't UTF-8 would otherwise end the stream; its line fails validation and is skipped instead.
     with path.open(errors="replace") as f:
         number = 0
         while True:

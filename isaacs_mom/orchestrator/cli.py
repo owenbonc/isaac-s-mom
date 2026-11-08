@@ -84,12 +84,16 @@ def main() -> None:
         # One budget for the whole run (SPEC §2 rule 5); checked before any episode, so a bad key stops it in seconds.
         argon = Argon(events, generate=stub_generate if teacher == "stub" else None)
         if teacher == "argon":
-            argon.check()  # the stub has no key or model to check, so it spends nothing
+            argon.check()
         return argon
 
     if args.command == "demo":
-        from isaacs_mom.orchestrator.demo import run_demo
+        from isaacs_mom.orchestrator.demo import refuse_seen_take, run_demo
 
+        try:
+            refuse_seen_take(args.seed, run_dir)
+        except ValueError as refused:
+            demo.error(str(refused))
         manifest = run_demo(
             make_sim(args.sim, args.task),
             ckpt=args.ckpt,
@@ -98,7 +102,7 @@ def main() -> None:
             out=args.out,
             run_dir=run_dir,
             run_id=args.run_id,
-            make_argon=checked_argon,  # after the take's refusals, so a refused take calls nothing
+            make_argon=checked_argon,
             make_student=make_student,
         )
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
