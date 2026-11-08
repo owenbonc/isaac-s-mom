@@ -458,9 +458,10 @@ const SIDES = { before: "Before: the seed's first checkpoint", both: "Both: ever
 const FRAME_MIN = 280;
 let chosen = false;
 const stageWidth = () => $("results").clientWidth || document.querySelector(".camera").clientWidth;
+// Settled only while no seed is open, so a new checkpoint or a resize never changes what an open seed shows.
 function defaultSide() {
   const count = MomState.results(MomState.shown(view)).checkpoints.length || 1;
-  if (!chosen) view.side = stageWidth() / count >= FRAME_MIN ? "both" : "after";
+  if (!chosen && view.seed === null) view.side = stageWidth() / count >= FRAME_MIN ? "both" : "after";
 }
 function cardVerdict(e, ep) {
   if (e.outcome === "pending") return `<span class="note">${ep ? "Running" : "Not run yet"}</span>`;

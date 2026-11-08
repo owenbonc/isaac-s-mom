@@ -1494,6 +1494,25 @@ def test_the_switch_is_dimmed_until_a_seed_is_chosen() -> None:
     assert out["open"][2][2] == "After: the seed's latest checkpoint"
 
 
+def test_the_switch_keeps_its_side_while_a_seed_is_open_when_another_checkpoint_starts() -> None:
+    third = held_out(2, 1, None)
+    script = f"""
+    // wide enough for two checkpoints side by side, not three
+    doc.querySelector(".camera").clientWidth = 620;
+    const later = events.splice(events.length - {len(third)});
+    {REPLAY}
+    const at = () => vm.runInContext("[view.side, MomState.where(view)]", context);
+    const idle = at();
+    vm.runInContext("MomState.visit(view, MomState.showSeed(view, 1)); render();", context);
+    const open = at();
+    for (const e of later) sources[0].onmessage({{ data: JSON.stringify(e) }});
+    flush();
+    return {{ idle, open, later: at() }};
+    """
+    out = app(script, stream(*TWO_EVALUATIONS, *third))
+    assert out == {"idle": ["both", "run"], "open": ["both", "seed"], "later": ["both", "seed"]}
+
+
 def conditioned(round_: int, condition: str, *outcomes: tuple[object, str | None]) -> list[tuple[str, dict]]:
     *episodes, (kind, result) = evaluated(round_, *outcomes)
     return [*episodes, (kind, {**result, "condition": condition})]
@@ -2222,8 +2241,9 @@ def test_an_errored_held_out_episode_reads_errored_not_counted_in_its_own_view_n
 
 
 def test_a_fine_tuned_checkpoint_shows_by_its_short_id_and_the_names_tooltip_keeps_the_full_ids() -> None:
+    # wide enough for every checkpoint side by side before the seed opens
+    wide = 'doc.getElementById("results").clientWidth = 1280;'
     script = """
-    doc.getElementById("results").clientWidth = 1280;
     vm.runInContext(`
       MomState.visit(view, { seed: 1 }); render();
       MomState.visit(view, { seed: null, selected: MomState.current(MomState.shown(view)).id }); render();
@@ -2234,7 +2254,7 @@ def test_a_fine_tuned_checkpoint_shows_by_its_short_id_and_the_names_tooltip_kee
     return { shown, rounds: last("p-rounds"), seed: last("results"), control: last("control") };
     """
     events = [*evaluated(0, (1, "failed")), started("trial"), *evaluated(1, (1, "succeeded")), *held_out(2, 1, None)]
-    out = app(REPLAY + script, stream(*events, executed(0)))
+    out = app(wide + REPLAY + script, stream(*events, executed(0)))
     assert out["shown"] == []
     assert 'title="ckpt-r0 → r/ckpt-r1"' in out["rounds"]
     assert 'Testing <span class="mono">ckpt-r2</span>' in out["rounds"]
