@@ -149,6 +149,7 @@ def _run_one(
             sim, student, run_dir=run_dir, events=events, seed=seed, split="heldout", round_=0, instruction=INSTRUCTION
         )
     except Exception as error:  # an errored episode is reported apart, not as the student's failure (§3.5)
+        events.emit("error", seed=seed, split="heldout", round=0, error=f"{type(error).__name__}: {error}")
         episode_id, outcome, reason = (
             _started_episode(events.path, start),
             "errored",

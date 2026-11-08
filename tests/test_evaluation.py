@@ -86,6 +86,8 @@ def test_each_condition_scores_successes_out_of_n_minus_errored(tmp_path: Path) 
     crashed = json.loads((tmp_path / "evaluation.jsonl").read_text().splitlines()[2])
     assert crashed["seed"] == 3 and crashed["outcome"] == "errored" and crashed["episode_id"].startswith("ep-3-")
     assert (tmp_path / "episodes" / crashed["episode_id"] / "manifest.json").exists()  # its partial recording
+    errors = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    assert [e["data"]["seed"] for e in errors if e["type"] == "error"] == [3, 3]  # as the loop logs it (#24), per ckpt
     assert first.score() == "2/3"
     layout = next(r for r in reports if r.checkpoint == "ckpt-r0" and r.condition == "new_layout")
     assert (layout.n, layout.errored, layout.successes) == (8, 2, 4)  # near_bin and far_bin, 4 seeds each
