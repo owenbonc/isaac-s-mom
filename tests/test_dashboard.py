@@ -217,7 +217,6 @@ def test_run_files_are_only_the_summaries_and_the_replay_report_and_only_when_th
         "r1/training_r1.summary.json",
         "r1/training_r2.summary.json",
         "r1/replay_report.json",
-        "r1/training_r9.summary.json",
         "r1/training_r1.jsonl",
         "r1/training_r.summary.json",
         "r1/training_r3.summary.json.bak",
@@ -230,6 +229,15 @@ def test_run_files_are_only_the_summaries_and_the_replay_report_and_only_when_th
         "no-events/training_r1.summary.json",
     ]:
         assert client.get(f"/run-files/{path}").status_code == 404, path
+
+
+def test_a_run_file_not_written_yet_is_no_content_not_an_error(tmp_path: Path) -> None:
+    make_run(tmp_path)
+    client = runs_client(tmp_path)
+    for name in ["replay_report.json", "training_r9.summary.json"]:
+        response = client.get(f"/run-files/r1/{name}")
+        assert (response.status_code, response.content) == (204, b""), name
+    assert client.get("/run-files/r9/replay_report.json").status_code == 404  # not a run
 
 
 def test_frames_that_cannot_resolve_are_not_found(tmp_path: Path) -> None:

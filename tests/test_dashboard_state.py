@@ -1680,7 +1680,8 @@ def test_a_runs_instruction_and_why_it_did_not_start_are_read_from_its_events() 
 APP_JS = STATE_JS.parent / "app.js"
 # app.js under a minimal DOM: every element is a stub that records the HTML written to it, EventSource is a stub the
 # test drives, and frames run only when the test flushes them. `script` runs once app.js has loaded and asked for
-# its runs; it sees `sources`, `writes`, `frames`, `flush`, `settled`, `doc`, and app.js's own globals.
+# its runs; it sees `sources`, `writes`, `frames`, `flush`, `doc`, the URLs fetched, the intervals set (by function
+# name), and app.js's own globals.
 APP_DRIVER = r"""
 const vm = require("vm");
 const fs = require("fs");
@@ -1743,13 +1744,21 @@ class EventSource {
   addEventListener(type, fn) { this.listeners[type] = fn; }
 }
 const frames = [];
+const fetched = [];
+const intervals = [];
+// The server's answers: the runs list, a Teach the generator refused, and a run file not written yet (204, no body).
+const answer = (status, body) => ({ ok: status < 300, status, json: async () => body ?? JSON.parse("") });
+const refused = { run_id: "t", started: false, reasons: ["Not yet"] };
 const context = vm.createContext({
   document: doc, Element: FakeElement, EventSource, console, structuredClone, URLSearchParams,
   location: { search: "?run=r", replace() {}, assign() {} },
   history: { replaceState() {} },
-  fetch: async (url) => (url === "/runs" ? { ok: true, json: async () => runs } : { ok: false }),
+  fetch: async (url) => {
+    fetched.push(url);
+    return url === "/runs" ? answer(200, runs) : url === "/teach" ? answer(200, refused) : answer(204);
+  },
   requestAnimationFrame: (fn) => frames.push(fn),
-  setInterval: () => 0,
+  setInterval: (fn, ms) => intervals.push([fn.name, ms]),
   addEventListener() {},
   innerWidth: 1280,
   CSS: { escape: (s) => s },
@@ -1760,8 +1769,10 @@ const flush = () => { while (frames.length) frames.shift()(); };
 const settled = () => new Promise((resolve) => setImmediate(resolve));
 (async () => {
   for (let i = 0; i < 5; i++) await settled();
-  const out = await new Function("vm", "context", "sources", "writes", "frames", "flush", "doc", "events", script)(
-    vm, context, sources, writes, frames, flush, doc, events);
+  const AsyncFunction = (async () => {}).constructor;
+  const names = ["vm", "context", "sources", "writes", "frames", "flush", "doc", "events", "fetched", "intervals"];
+  const run = new AsyncFunction(...names, script);
+  const out = await run(vm, context, sources, writes, frames, flush, doc, events, fetched, intervals);
   console.log(JSON.stringify(out));
 })();
 """
@@ -2036,3 +2047,28 @@ def test_the_run_picker_closes_when_the_focus_moves_past_it_or_on_escape_and_not
 def test_a_panel_reads_back_the_html_written_to_it() -> None:
     script = 'return doc.getElementById("p-rounds").innerHTML;'
     assert "Held-out success" in app(REPLAY + script, stream(started("a")))
+
+
+def test_the_runs_list_is_asked_for_every_3_s_and_again_right_after_a_teach() -> None:
+    script = """
+    const every = intervals.filter(([name]) => name === "loadRuns").map(([, ms]) => ms);
+    const field = doc.getElementById("instruction");
+    field.value = "juggle three boxes";
+    const asked = fetched.length;
+    doc.getElementById("teach").listeners.submit[0]({ preventDefault() {} });
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+    return { every, after: fetched.slice(asked) };
+    """
+    assert app(REPLAY + script, stream(started("a"))) == {"every": [3000], "after": ["/teach", "/runs"]}
+
+
+def test_a_run_file_the_server_says_is_not_written_yet_reads_as_not_in_the_runs_files() -> None:
+    script = """
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+    flush();
+    const shown = writes.filter(([id]) => id === "p-training").pop()[1];
+    return { asked: fetched.filter((url) => url.startsWith("/run-files/")), shown };
+    """
+    out = app(REPLAY + script, stream(started("a"), ("finetune_started", {"round": 1})))
+    assert out["asked"] == ["/run-files/r/training_r1.summary.json", "/run-files/r/replay_report.json"]
+    assert out["shown"].count("Not in the run's files.") == 2

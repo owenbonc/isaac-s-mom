@@ -12,7 +12,7 @@ from pathlib import Path
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.trustedhost import TrustedHostMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import FileResponse, JSONResponse, Response, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ValidationError
 
@@ -152,8 +152,8 @@ def create_app(
             target, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"}
         )
 
-    @app.get("/run-files/{run_id}/{name}")
-    def run_files(run_id: str, name: str) -> TrainingSetSummary | ReplayReport:
+    @app.get("/run-files/{run_id}/{name}", response_model=None)
+    def run_files(run_id: str, name: str) -> TrainingSetSummary | ReplayReport | Response:
         if name == "replay_report.json":
             model = ReplayReport
         elif TRAINING_SUMMARY.fullmatch(name):
@@ -162,6 +162,8 @@ def create_app(
             raise HTTPException(status_code=404)
         try:
             return model.model_validate_json((served(run_id) / name).read_bytes())
+        except FileNotFoundError:  # not written yet, which is no error: the page says so in words
+            return Response(status_code=204)
         except (OSError, ValidationError):
             raise HTTPException(status_code=404) from None
 
