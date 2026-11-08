@@ -107,8 +107,9 @@ def test_demo_records_every_step_and_the_perturbation(tmp_path: Path) -> None:
 
 def test_demo_refuses_a_heldout_seed(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "demo"
-    with pytest.raises(SealedSeedError):
+    with pytest.raises(ValueError) as refused:
         take(run_dir, seed=next(iter(heldout_seeds())), make_argon=unbuilt)
+    assert refused.type is SealedSeedError  # the held-out guard's refusal, though the seed is below 900000 too
     assert not run_dir.exists() and not run_dir.with_suffix(".mp4").exists()
 
 
