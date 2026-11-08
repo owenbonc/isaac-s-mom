@@ -19,7 +19,7 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 <br>
 
-| **39.7 min** | **0/20 → 18/20** | **10/20 → 18/20** | **19/20 vs 0/20** | **0** |
+| **39.7 min** | **0/20 → 18/20** | **10/20 → 18/20** (untargeted demos: also 18/20) | **19/20 vs 0/20** | **0** |
 |:---:|:---:|:---:|:---:|:---:|
 | to teach the robot **one new skill** from one sentence | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic teaching round** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image** (on a Mac); a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
 
@@ -87,28 +87,28 @@ Every result is the **student alone** on sealed held-out scenes, against a contr
 
 | Claim | Result | Control (same seeds) | Source |
 |---|---|---|---|
-| **One sentence → a new skill** | **18/20** | untrained model: 0/20 | [PR #34](https://github.com/owenbonc/isaac-s-mom/pull/34#issuecomment-6718403706) |
-| ...with the **bin moved after the lift** | **17/20** | untrained model: 0/20 | the showcase run's `report.json`, [PR #34](https://github.com/owenbonc/isaac-s-mom/pull/34#issuecomment-6718403706) |
-| **The student acts on what it sees** (on a Mac) | **19/20** with its camera | 0/20 with a grey image | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6719281987) |
-| **Demos teach the decision to stop** | 56 demos: **18/20** | 14 or 28 demos: 0/20 | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6719281987) |
-| **Accepted demos replay exactly** (on the machine that recorded them) | **56/56** | — | [PR #34](https://github.com/owenbonc/isaac-s-mom/pull/34#issuecomment-6718403706) |
+| **One sentence → a new skill** | **18/20** | untrained model: 0/20 | [PR #34](https://github.com/owenbonc/scaffld/pull/34#issuecomment-6718403706) |
+| ...with the **bin moved after the lift** | **17/20** | untrained model: 0/20 | the showcase run's `report.json`, [PR #34](https://github.com/owenbonc/scaffld/pull/34#issuecomment-6718403706) |
+| **The student acts on what it sees** (on a Mac) | **19/20** with its camera | 0/20 with a grey image | [PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6719281987) |
+| **Demos teach the decision to stop** | 56 demos: **18/20** | 14 or 28 demos: 0/20 | [PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6719281987) |
+| **Accepted demos replay exactly** (on the machine that recorded them) | **56/56** | — | [PR #34](https://github.com/owenbonc/scaffld/pull/34#issuecomment-6718403706) |
 
 **Recovery lessons on the fixed-feet student** (v1, 52 demos → v2, 117 demos with recovery and box-moved demos):
 
 | Claim | v2 | v1 (same seeds) | Source |
 |---|---|---|---|
-| **Box moved at the start** | **15/20** | 7/20 (an earlier, separate run) | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6717726778) |
-| **Bin placements never seen in training** | **21/40** | 14/40; exact McNemar p = 0.19 overall. Bin further ahead: 4/20 → **14/20**, p = 0.006; further away: 10/20 → 7/20 | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6718403477) |
+| **Box moved at the start** | **15/20** | 7/20 (an earlier, separate run) | [PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6717726778) |
+| **Bin placements never seen in training** | **21/40** | 14/40; exact McNemar p = 0.19 overall. Bin further ahead: 4/20 → **14/20**, p = 0.006; further away: 10/20 → 7/20 | [PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6718403477) |
 
 **One automatic teaching round** (`mom run --from-run`, on the fixed-feet student v2, 117 demos):
 
 | Claim | Result | Control (same seeds) | Source |
 |---|---|---|---|
-| **One round lifts the student** | round 1: **18/20** | round 0, v2 re-examined in the same run: 10/20. 10 seeds fail → pass, 2 pass → fail; exact McNemar p = 0.039 | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721136914) |
-| **It acts on what it sees** (laptop GPU) | **18/20** with its camera | 0/20 with a grey image | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721243829) |
-| **What the gain comes from** | 17 diagnosed, targeted demos: 18/20 | 17 untargeted demos, no diagnosis: **18/20**; the two differ on no seed | [PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721840949) |
+| **One round lifts the student** | round 1: **18/20** | round 0, v2 re-examined in the same run: 10/20. 10 seeds fail → pass, 2 pass → fail; exact McNemar p = 0.039 | [PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721136914) |
+| **It acts on what it sees** (laptop GPU) | **18/20** with its camera | 0/20 with a grey image | [PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721243829) |
+| **What the gain comes from** | 17 diagnosed, targeted demos: 18/20 | 17 untargeted demos, no diagnosis: **18/20**; the two differ on no seed | [PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721840949) |
 
-- **The round's gain comes from its 17 new accepted demos and the retraining, not from targeting them:** the untargeted control reached the same 18/20. With its camera the round-1 student stops at 90° on 17/20 seeds and never over-twists (v2 over-twisted on 6); given a grey image it twists once and misses on all 20.
+- **The round's gain comes from its 17 new accepted demos and the retraining; targeting added nothing measurable over the same number of untargeted demos** (both 18/20; n = 20, possible ceiling). With its camera the round-1 student stops at 90° on 17/20 seeds and never over-twists (v2 over-twisted on 6); given a grey image it twists once and misses on all 20.
 - **18/20 and 17/20 against 0/20:** every success is a seed the untrained model failed, so the exact McNemar p is 2 × 0.5¹⁸ = 7.6 × 10⁻⁶ and 2 × 0.5¹⁷ = 1.5 × 10⁻⁵. A re-run reproduced every seed's outcome.
 - **Its decision to stop comes from the image.** With its camera the student ends 90° round (two 45° twists) on all 20 seeds; given a grey image it twists once on all 20 and misses ([per-seed log](docs/pitch/data/sources/vision-control-showcase-mac.log)). With 14 or 28 demos it never learns when to stop; with 56 it does.
 
@@ -181,7 +181,7 @@ cd docs/live-demo
 - **What it shows:** the student changes its action because of what it sees. With its camera it delivers; given a grey image, the same student on the same scene twists once and misses.
 - **Repeatable:** each demo scene was re-run 2 to 6 times in separate processes and gave identical steps every time.
 - **How the takes are made:** `docs/live-demo/sim_video2.py` runs the showcase student with the spec's own bin move after the lift. It needs the showcase checkpoint copied to `docs/live-demo/runs/` (gitignored); see [`docs/live-demo/README.md`](docs/live-demo/README.md). The repo's own judged-take command, `mom demo`, moves the **box** instead and can hand over to the teacher.
-- **Walking:** the teacher completes walking demos (69/100 accepted); the walking student has its first successes, **2/20** sealed scenes against 0/20 untrained ([PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6716999200)).
+- **Walking:** the teacher completes walking demos (69/100 accepted); the walking student has its first successes, **2/20** sealed scenes against 0/20 untrained ([PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6716999200)).
 
 ## Safety and limits
 
@@ -196,8 +196,8 @@ cd docs/live-demo
 **Requirements:** Python 3.12 and [uv](https://docs.astral.sh/uv/). macOS on Apple Silicon runs the simulator, the student, `mom eval`, `mom demo` and the dashboard. **Fine-tuning needs Windows with an NVIDIA GPU** (CUDA 12.8 wheels; we use an RTX 5070 Ti laptop). Linux gets CPU-only PyTorch: the sim and tests run, fine-tuning does not.
 
 ```sh
-git clone https://github.com/owenbonc/isaac-s-mom.git
-cd isaac-s-mom
+git clone https://github.com/owenbonc/scaffld.git
+cd scaffld
 uv sync --frozen
 cp .env.example .env          # then set GEMINI_API_KEY=<your Gemini API key>
 ```
@@ -341,21 +341,21 @@ docs/
 <details>
 <summary><b>Every number on this page: its run, what was counted, and n</b></summary>
 
-- **Student results.** [PR #34 comment 6718403706](https://github.com/owenbonc/isaac-s-mom/pull/34#issuecomment-6718403706): showcase run `learn-box_to_bin_fixed-57288f663c83-040045`, the exam's `report.json` (18/20; bin moved 17/20, move applied 20/20) and the untrained baseline from `showcase-compare`. [PR #22 6719281987](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6719281987): the learning curve and the camera vs grey-image control. [6718403477](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6718403477): v1 vs v2 (`runs/eval-v1v2-20261108-055547`). [6717726778](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6717726778): box moved at the start. [6716999200](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6716999200): the walking student, 2/20.
+- **Student results.** [PR #34 comment 6718403706](https://github.com/owenbonc/scaffld/pull/34#issuecomment-6718403706): showcase run `learn-box_to_bin_fixed-57288f663c83-040045`, the exam's `report.json` (18/20; bin moved 17/20, move applied 20/20) and the untrained baseline from `showcase-compare`. [PR #22 6719281987](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6719281987): the learning curve and the camera vs grey-image control. [6718403477](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6718403477): v1 vs v2 (`runs/eval-v1v2-20261108-055547`). [6717726778](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6717726778): box moved at the start. [6716999200](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6716999200): the walking student, 2/20.
 - **Stage times (39.7 min).** The showcase run's event logs: spec 23.5 s (`learn-generator` events), demos 952.7 s (first `episode_started` to last `validation` across 8 workers), fine-tune 1,271.7 s (resume launch to the first exam event; 1,255.3 s of training in `checkpoints/ckpt-r1/metrics.json`), exam 135.9 s. Sum 2,383.8 s. [`docs/pitch/data/workflow_timeline.csv`](docs/pitch/data/workflow_timeline.csv).
 - **Showcase exam latency (0.31 s median, 0.56 s p95, n = 326, 1 over 2 s, 0 Argon calls).** `decision` events with `latency_ms` in the exam's two event logs ([`docs/pitch/data/sources/`](docs/pitch/data/sources/)).
 - **35-minute exam (1.08 s, n = 237; 2 of 2,145 over 2 s).** `runs/eval-v1v2-20261108-055547` on the RTX 5070 Ti: `decision` events per student and condition (v2 training task n = 237; all six rows 237 + 461 + 245 + 287 + 637 + 278 = 2,145); peak 2.01 GiB from that exam.
 - **Fine-tune memory (2.0 GiB).** `checkpoints/ckpt-r1/metrics.json`, `peak_gpu_memory_gb`, of the showcase run.
 - **Argon latency (8.1 s median, 19.5 s p95, n = 3,551).** Every `argon_call` event with purpose `act` and `ok = true` in `walking-trial/*/events.jsonl` (29 files) and the two `learn-*` batches' worker logs (14 files): 3,579 calls, 28 failed. Script and output: [`docs/pitch/data/evidence/`](docs/pitch/data/evidence/).
 - **Walking policy (0.03 ms per tick, n = 2,000) and MuJoCo (13 ms per camera frame, n = 50).** `bench_sim.py` on an Apple M5; output in [`docs/pitch/data/evidence/sim-and-walking-bench.txt`](docs/pitch/data/evidence/sim-and-walking-bench.txt).
-- **Teacher acceptance.** 56/60: the showcase manifests (bin moved 28/30). 52/60: [PR #22 comment](https://github.com/owenbonc/isaac-s-mom/pull/22) at 02:55 (10 parallel teachers, seeds 3000–3059). 69/100: `walking-trial/batch-walk-0203/c*/results.json` (10 parallel teachers, seeds 2000–2099).
+- **Teacher acceptance.** 56/60: the showcase manifests (bin moved 28/30). 52/60: [PR #22 comment](https://github.com/owenbonc/scaffld/pull/22) at 02:55 (10 parallel teachers, seeds 3000–3059). 69/100: `walking-trial/batch-walk-0203/c*/results.json` (10 parallel teachers, seeds 2000–2099).
 - **Teacher at deployment (9.8 calls, 8.3 s per decision, 90 s per task).** The showcase demos' worker logs: `argon_call` per episode (mean 9.78, median 8, n = 60), `decision.latency_ms` (median 8.29 s, n = 584), `episode_started` to `validation` (median 89.6 s, n = 60).
 - **Human involvement.** Every executed demo step has `controller = teacher` (584 steps) and every exam decision `controller = student` (326); all 60 demo and 40 exam verdicts come from the spec's rule in code.
 - **Bin moved to 125° (1/20) and the 30-scene scan (25/30; in one miss the bin never moved).** Mac float32 runs of the showcase student: [`docs/pitch/data/sources/`](docs/pitch/data/sources/).
 - **One teaching round.** On the RTX 5070 Ti, code at phase-1 `03321aa`, both runs started by `mom run --task fixed_feet --from-run runs/fixed-v2 --rounds 1`:
-  - `runs/gate-e-1008`: `evaluation_result` round 0 (10/20) and round 1 (18/20); 20 teacher demos, 17 accepted, 1,212 training examples. This round ran before the round-level comparison in step 3 of the repair loop merged (#37), so it diagnosed each failure on its own; the comparison was checked once on real Argon on this round's 10 trials ([PR #22](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721243829)).
+  - `runs/gate-e-1008`: `evaluation_result` round 0 (10/20) and round 1 (18/20); 20 teacher demos, 17 accepted, 1,212 training examples. This round ran before the round-level comparison in step 3 of the repair loop merged (#37), so it diagnosed each failure on its own; the comparison was checked once on real Argon on this round's 10 trials ([PR #22](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721243829)).
   - `runs/gate-e-control-1130`: the same command run through [`control_untargeted.py`](docs/pitch/data/evidence/control_untargeted.py), which removes the diagnosis and the targeting (fresh dev seeds 1520–1539, no lesson); round 0 10/20, round 1 18/20, 17/20 demos accepted.
   - The grey-image control on `gate-e-1008/ckpt-r1`, run by [`blind_vs_sighted.py`](docs/pitch/data/evidence/blind_vs_sighted.py) (the script behind the Mac controls too): 18/20 vs 0/20 over held-out seeds 1–20, per seed in [`docs/pitch/data/sources/vision-control-gate-e-5070.log`](docs/pitch/data/sources/vision-control-gate-e-5070.log).
-  - Per-seed outcomes: [PR #22 6721136914](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721136914), [6721243829](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721243829) and [6721840949](https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6721840949).
+  - Per-seed outcomes: [PR #22 6721136914](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721136914), [6721243829](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721243829) and [6721840949](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721840949).
 - **DROID.** Khazatsky et al., arXiv:2403.12945 (v2): "76k demonstration trajectories or 350 hours of interaction data ... by 50 data collectors ... over the course of 12 months". A reference point, not a matched baseline.
 </details>
