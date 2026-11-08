@@ -238,7 +238,7 @@ function renderCamera() {
     const next = first ? ` First decision after the move: <span class="mono">${skillText(first)}</span>.${first.reason ? ` ${esc(first.reason)}` : ""}` : "";
     caption = `<p class="caption moved clamped"${first && first.reason ? ` title="${esc(first.reason)}"` : ""}>${what} between these frames, before step ${esc(move.step)}.${next}</p>`;
   } else {
-    // The move stays marked for the rest of its episode, with Move's icon, so the presenter can show it after the moment has passed.
+    // The move stays marked, with Move's icon, for the rest of its episode, so it can be shown after the moment passed.
     const mark = last.after ? `<span class="tag ink">${what} at step ${esc(move.step)}${MOVE}</span>` : "";
     frame = cell(last, tag(last.controller, last.checkpoint), skillRow(ep, last), last.moved, mark);
     caption = last.moved
@@ -386,7 +386,7 @@ function renderRounds() {
   const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;
   // A run is taught and tested on its own instruction, so its rates carry it (SPEC §3.5).
   const said = s.instruction && s.instruction.text;
-  const taught = said ? `<p class="taught clamped" title="${esc(said)}">Tested on <q>${esc(said)}</q></p>` : "";
+  const taught = said ? `<p class="taught clamped" title="${esc(said)}">${c ? "Tested on" : "Instruction"} <q dir="auto">${esc(said)}</q></p>` : "";
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}${taught}</div>`;
 }
 
@@ -400,7 +400,7 @@ function renderModels() {
   const a = MomState.argon(shown);
   const item = (who, where, measured) => `<span class="item"><b>${who}</b> ${where} <span class="v">${stat(measured)}</span></span>`;
   const calls = a
-    ? `${a.used}${a.budget === null ? "" : ` of ${a.budget}`} <span class="v">· answers ${stat(a.answer)} · ${a.failed} failed</span>`
+    ? `${a.used}${a.budget === null ? "" : ` of ${a.budget}`} <span class="v">· ${stat(a.answer)} · ${a.failed} failed</span>`
     : '<span class="ph-text">none in the events</span>';
   $("models").innerHTML =
     // The item names say what the row is; the heading stays for screen readers so the row fits 1280 px.
@@ -538,14 +538,16 @@ const RUN_STATUS = { live: ["live", "Live"], recorded: ["recorded", "Recorded"],
 function renderRuns() {
   $("runs").hidden = false;
   $("run-name").textContent = runId || "No runs yet";
+  $("run-name").title = runId || "";
   $("run-list").innerHTML = runs.length
     ? runs
         .map((r) => {
           const [kind, word] = RUN_STATUS[r.status];
-          const what = r.instruction ? esc(r.instruction) : '<span class="ph-text">No instruction recorded</span>';
-          const why = r.status === "not_started" && r.reason ? `<span class="run-why">${esc(r.reason)}</span>` : "";
+          // Typed and generated text is clamped to two lines here, whole in its title, in its own direction.
+          const what = r.instruction ? `<span class="run-what clamped two" dir="auto" title="${esc(r.instruction)}">${esc(r.instruction)}</span>` : '<span class="run-what ph-text">No instruction recorded</span>';
+          const why = r.status === "not_started" && r.reason ? `<span class="run-why clamped two" title="${esc(r.reason)}">${esc(r.reason)}</span>` : "";
           const here = r.run_id === runId ? ' aria-current="page"' : "";
-          return `<li><a href="?run=${esc(encodeURIComponent(r.run_id))}"${here}><span class="chip ${kind}">${word}</span><span class="run-what">${what}</span><span class="run-id mono">${esc(r.run_id)}</span>${why}</a></li>`;
+          return `<li><a href="?run=${esc(encodeURIComponent(r.run_id))}"${here}><span class="chip ${kind}">${word}</span>${what}<span class="run-id mono">${esc(r.run_id)}</span>${why}</a></li>`;
         })
         .join("")
     : '<li class="ph-text">No runs yet. Tell the robot what to learn in the Teach box to start one.</li>';
@@ -574,7 +576,7 @@ function renderTeach() {
   TEACH.setAttribute("aria-busy", String(checking));
   const said =
     teaching.state === "refused"
-      ? `<p class="what">Not started</p><ul>${teaching.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul><p class="note">The run is listed as not started, with why.</p>`
+      ? `<p class="what">Not started</p><ul>${teaching.reasons.map((r) => `<li dir="auto">${esc(r)}</li>`).join("")}</ul><p class="note">The run is listed as not started, with why.</p>`
       : teaching.state === "failed"
         ? `<p class="what">Not sent</p><p>${esc(teaching.message)}</p>`
         : teaching.state === "started"
@@ -582,7 +584,7 @@ function renderTeach() {
           : "";
   $("teach-said").innerHTML = said;
   $("teach-said").hidden = !said;
-  $("teach-status").textContent = checking ? "Checking the instruction." : $("teach-said").textContent;
+  $("teach-status").textContent = checking ? "Checking the instruction." : $("teach-said").innerText;
 }
 
 TEACH.addEventListener("submit", async (e) => {
@@ -674,7 +676,10 @@ function follow() {
   });
   source.onmessage = (message) => {
     try {
-      MomState.receive(view, JSON.parse(message.data), now());
+      const event = JSON.parse(message.data);
+      MomState.receive(view, event, now());
+      // A round's training-set summary is written just before its fine-tune starts.
+      if (event.type === "finetune_started" && !view.settling) readRunFiles();
     } catch (error) {
       console.error("bad event", error);
     }

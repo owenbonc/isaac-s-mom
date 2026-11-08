@@ -68,12 +68,12 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 /* The popover materialises from its trigger. */
 @media (prefers-reduced-motion:no-preference){
   .pop{transition:opacity .16s var(--ease-out),transform .16s var(--ease-out)}
-  @starting-style{details[open] .pop,.said{opacity:0;transform:scale(.97) translateY(-4px)}}
+  @starting-style{details[open] .pop,.answer{opacity:0;transform:scale(.97) translateY(-4px)}}
 }
 
 /* The run picker: the shown run's id as a capsule; its popover lists every run. */
 .runs{position:relative;min-width:0;flex:0 1 auto}
-.runs summary{list-style:none;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.1rem .35rem .1rem .6rem;border-radius:999px;font:500 var(--t-label)/1.35 var(--mono);background:var(--glass);box-shadow:inset 0 0 0 1px var(--edge-strong)}
+.runs summary{max-width:17rem;list-style:none;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.1rem .35rem .1rem .6rem;border-radius:999px;font:500 var(--t-label)/1.35 var(--mono);background:var(--glass);box-shadow:inset 0 0 0 1px var(--edge-strong)}
 .runs summary::-webkit-details-marker{display:none}
 .runs[open] summary{background:var(--glass-2)}
 @media (hover:hover){.runs summary:hover{background:var(--glass-2)}}
@@ -151,7 +151,7 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .teach{position:relative;flex:none;display:flex;align-items:center;gap:.3rem}
 .teach .field{position:relative;display:flex}
 .teach input{font:inherit;color:var(--ink);width:16rem;height:2.05rem;padding:0 .7rem;border-radius:8px;border:1px solid var(--edge-strong);background:rgb(0 0 0 / .35);caret-color:var(--accent)}
-.teach .field:has(.count:not(:empty)) input{padding-right:4rem}
+.teach .field:has(.count:not(:empty)) input{padding-right:4.8rem}
 .teach input::placeholder{color:var(--muted)}
 .teach input:focus-visible{outline-offset:1px}
 .teach input:read-only{color:var(--muted)}
@@ -162,10 +162,10 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .teach button:disabled{cursor:progress}
 .teach .i{width:1rem;height:1rem}
 /* What came back from a Teach, dropped from the box over the panels' top, never over the frame. */
-.said{right:0;width:min(26rem,calc(100vw - 1.5rem));transform-origin:top right}
-.said p{margin:0}
-.said .what{font-weight:600;margin-bottom:.2rem}
-.said ul{margin:0 0 .3rem;padding-left:1.1rem;overflow-wrap:anywhere}
+.answer{right:0;width:min(26rem,calc(100vw - 1.5rem));transform-origin:top right}
+.answer p{margin:0}
+.answer .what{font-weight:600;margin-bottom:.2rem}
+.answer ul{margin:0 0 .3rem;padding-left:1.1rem;overflow-wrap:anywhere}
 .taught{margin:0;color:var(--muted)}
 .taught q{color:var(--ink)}
 
@@ -272,7 +272,7 @@ footer.models .v{color:var(--muted)}
    episode keys show their icons alone (their names stay for screen readers and in their tooltips). */
 @media (min-width:1001px) and (max-width:1279px){
   .side{grid-template-columns:minmax(0,1fr);grid-template-areas:"rounds" "diag" "train"}
-  .teach input{width:11rem}
+  .teach input{width:13.5rem}
   .presenter .name{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .presenter button:has(.name){width:1.95rem;padding:0;justify-content:center}
 }
@@ -298,6 +298,7 @@ ol.log li.teacher .skill{color:var(--teacher)}
 ol.log .reason{grid-column:2;text-wrap:pretty;overflow-wrap:anywhere}
 .clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
 .clamped.four{-webkit-line-clamp:4}
+.clamped.two{-webkit-line-clamp:2}
 ol.log .right{display:flex;gap:.6rem;align-items:baseline;white-space:nowrap;font-size:var(--t-label)}
 ol.log .ok{color:var(--ok);display:inline-flex}
 ol.log .ok svg{width:1em;height:1em}

@@ -90,11 +90,11 @@
   <!-- The Teach box (SPEC §3.5): the server takes it only from this page; the task generator judges it. -->
   <form class="teach" id="teach" novalidate>
     <span class="field">
-      <input id="instruction" name="instruction" type="text" maxlength="200" autocomplete="off" placeholder="Tell the robot what to learn" aria-label="Tell the robot what to learn" aria-describedby="teach-count">
+      <input id="instruction" name="instruction" type="text" maxlength="200" autocomplete="off" dir="auto" placeholder="Tell the robot what to learn" aria-label="Tell the robot what to learn" aria-describedby="teach-count">
       <span class="count" id="teach-count"></span>
     </span>
     <button type="submit" id="teach-go"><svg class="i" aria-hidden="true"><use href="#i-enter"/></svg><span>Teach</span></button>
-    <div class="pop said" id="teach-said" aria-hidden="true" hidden></div>
+    <div class="pop answer" id="teach-said" aria-hidden="true" hidden></div>
   </form>
 </div>
 <p class="sr" id="teach-status" role="status"></p>
