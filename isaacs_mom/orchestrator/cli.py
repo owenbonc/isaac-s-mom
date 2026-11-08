@@ -1,6 +1,7 @@
 import argparse
 import json
 import time
+from functools import partial
 from pathlib import Path
 
 from isaacs_mom.orchestrator import evaluation
@@ -26,7 +27,11 @@ from isaacs_mom.student import (
     stub_finetune,
     valid_run_id,
 )
-from isaacs_mom.teacher.argon import Argon, stub_generate
+from isaacs_mom.tasks.rules import judge
+from isaacs_mom.tasks.spec import TaskSpec
+from isaacs_mom.teacher.argon import Argon, hide_key, stub_generate
+from isaacs_mom.validator.recorder import write_atomically
+from isaacs_mom.validator.rules import validate
 
 
 def run_id(text: str) -> str:
@@ -40,9 +45,12 @@ def run_id(text: str) -> str:
 
 def instruction(text: str) -> str:
     try:
-        return instruction_text(text)
+        text = instruction_text(text)
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from None
+    if hide_key(text) != text:  # a run writes its instruction to events and manifests, and sends it to Argon
+        raise argparse.ArgumentTypeError("the instruction holds GEMINI_API_KEY, so it is refused: never stored or sent")
+    return text
 
 
 def share(text: str) -> float:
@@ -69,6 +77,28 @@ def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
     return MujocoSim(TASKS[task])
 
 
+def spec_sim(spec: TaskSpec) -> TruthSim:
+    from isaacs_mom.sim.mujoco import MujocoSim
+
+    return MujocoSim(spec.task_config())
+
+
+def task_spec(parser: argparse.ArgumentParser, args: argparse.Namespace) -> TaskSpec:
+    """The generated task `--spec` names, refused before anything is written if it can't be the run's task."""
+    if args.sim == "fake":
+        parser.error("--spec needs --sim mujoco: the fake sim plays only the default task")
+    if args.task != DEFAULT_TASK.name:
+        parser.error("give --task or --spec, not both")
+    try:
+        spec = TaskSpec.model_validate_json(args.spec.read_text())
+        spec.task_config()  # a scene the robot can't play is refused here too, not as a traceback
+    except (OSError, ValueError) as error:
+        parser.error(f"--spec: {args.spec} is not a task spec: {error}")
+    if args.instruction not in (INSTRUCTION, spec.instruction):
+        parser.error("--spec: the instruction is the spec's own words, so drop --instruction")
+    return spec
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(prog="mom")
     commands = parser.add_subparsers(dest="command", required=True)
@@ -85,6 +115,11 @@ def main() -> None:
         "--from-run",
         type=Path,
         help="start from an earlier run in the same runs dir: its development episodes and its last checkpoint",
+    )
+    run.add_argument(
+        "--spec",
+        type=Path,
+        help="a generated task, e.g. a tasks.learn run's spec.json: its scene, its words and its own success rule",
     )
     run.add_argument(
         "--move-bin-share",
@@ -166,16 +201,20 @@ def main() -> None:
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
-    sim = None
+    spec = task_spec(run, args) if args.spec is not None else None
+    sim = spec_sim(spec) if spec is not None else None
     if args.from_run is not None:
-        sim = make_sim(args.sim, args.task)
+        sim = sim or make_sim(args.sim, args.task)
         try:  # before anything is written, so a refused source leaves no run behind
             check_carry_over(args.from_run, run_dir, sim.sim_version)
         except ValueError as refused:
             run.error(f"--from-run: {refused}")
+    words = spec.instruction if spec is not None else args.instruction
     events = EventLog(run_dir, args.run_id)
+    if spec is not None:  # what the run was taught, kept beside it (rule 6)
+        write_atomically(run_dir / "spec.json", spec.model_dump_json(indent=2))
     if not any(e.type == "instruction" for e in read_events(run_dir)):  # a Teach-started run already holds its own
-        events.emit("instruction", text=args.instruction, source="cli")
+        events.emit("instruction", text=words, source="cli")
     argon = checked_argon(events)
     results = run_loop(
         sim or make_sim(args.sim, args.task),
@@ -187,9 +226,10 @@ def main() -> None:
         argon=argon,
         make_student=make_student,
         train_student=train_student,
-        instruction=args.instruction,
-        move_bin_share=args.move_bin_share,
+        instruction=words,
+        move_bin_share=args.move_bin_share if spec is None or "move_bin" in spec.perturbation_kinds() else 0.0,
         from_run=args.from_run,
+        verdict=partial(judge, spec) if spec is not None else validate,
     )
     if args.from_run is not None:
         record = json.loads((run_dir / "from_run.json").read_text())

@@ -38,7 +38,9 @@ def replay(sim: TruthSim, manifest_path: Path, verdict: Callable[[GroundTruth], 
     return reproduced
 
 
-def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
+def replay_accepted(
+    sim: TruthSim, run_dir: Path, verdict: Callable[[GroundTruth], Validation] = validate
+) -> ReplayReport:
     """Replay every accepted episode in a run (the ones that can become lessons); writes `replay_report.json`.
 
     An episode that can't be read, re-run (any of `REPLAY_ERRORS`) or saved is recorded as a failed replay with a
@@ -57,7 +59,7 @@ def replay_accepted(sim: TruthSim, run_dir: Path) -> ReplayReport:
             continue
         replayed += 1
         try:
-            reason = _divergence(sim, manifest, manifest_path.parent)
+            reason = _divergence(sim, manifest, manifest_path.parent, verdict)
         except REPLAY_ERRORS as error:
             reason = f"replay raised {type(error).__name__}: {error}"
         manifest.replay_valid = reason is None

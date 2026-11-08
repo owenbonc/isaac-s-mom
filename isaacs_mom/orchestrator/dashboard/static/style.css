@@ -125,8 +125,8 @@ button.back::after{left:0;--tx:0%}
 .verdict.good{color:var(--ok)}
 .verdict svg{width:.9em;height:.9em}
 
-.controlbar{flex:none;display:flex;align-items:center;gap:.4rem .9rem;margin:.1rem .75rem 0;padding:.3rem .4rem .3rem .85rem;min-height:2.65rem;border-radius:var(--r);background:var(--panel);border:1px solid var(--edge)}
-.control{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .7rem}
+.controlbar{flex:none;display:flex;align-items:center;gap:.4rem .9rem;margin:.1rem .75rem 0;padding:.25rem .25rem .25rem .85rem;border-radius:var(--r);background:var(--panel);border:1px solid var(--edge)}
+.control{flex:0 1 auto;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .7rem}
 .control .kind{display:flex;align-items:baseline;gap:.5rem;flex:none}
 .control .what{font-weight:600}
 .control .kind .note{font-size:var(--t-label)}
@@ -134,16 +134,16 @@ button.back::after{left:0;--tx:0%}
 .control>.note{flex:1 1 0;min-width:5rem;text-wrap:pretty;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .control .verdict{margin-left:auto;flex:none}
 /* The page's one capsule; its button stays quiet until there is text, so the stage keeps the brightest pixels. */
-.teach{position:relative;flex:none;display:flex;align-items:center;gap:.2rem;padding:2px;border-radius:999px;border:1px solid var(--edge-strong);background:var(--well)}
+.teach{--h:2.6rem;position:relative;flex:1 0 22rem;display:flex;align-items:center;gap:.2rem;padding:2px;border-radius:999px;border:1px solid var(--edge-strong);background:var(--well)}
 .teach:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
-.teach .field{position:relative;display:flex}
-.teach input{font:inherit;color:var(--ink);width:16rem;height:2.3rem;padding:0 .4rem 0 .75rem;border:0;background:none;caret-color:var(--accent);outline:none}
+.teach .field{position:relative;flex:1;min-width:0;display:flex}
+.teach input{font:inherit;color:var(--ink);width:100%;height:var(--h);padding:0 .4rem 0 .95rem;border:0;background:none;caret-color:var(--accent);outline:none}
 .teach .field:has(.count:not(:empty)) input{padding-right:4.8rem}
 .teach input::placeholder{color:var(--muted)}
 .teach input:read-only{color:var(--muted)}
 .teach .count{position:absolute;right:.6rem;top:50%;translate:0 -50%;font-size:var(--t-label);color:var(--muted);pointer-events:none}
 .teach input[aria-invalid="true"]~.count{color:var(--bad)}
-.teach button{position:relative;flex:none;width:2.3rem;height:2.3rem;padding:0;border:0;border-radius:50%;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;transition:transform .12s var(--ease-out)}
+.teach button{position:relative;flex:none;width:var(--h);height:var(--h);padding:0;border:0;border-radius:50%;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;transition:transform .12s var(--ease-out)}
 .teach .wait,.teach[aria-busy="true"] .go{display:none}
 .teach[aria-busy="true"] .wait{display:block}
 @media (prefers-reduced-motion:no-preference){.teach .wait{animation:spin .8s linear infinite}}
@@ -152,7 +152,7 @@ button.back::after{left:0;--tx:0%}
 .teach:has(input:placeholder-shown) button,.teach button:disabled{background:var(--raised);color:var(--ink)}
 .teach button:disabled{cursor:default}
 .teach[aria-busy="true"] button{cursor:progress}
-.teach .i{width:1.1rem;height:1.1rem}
+.teach .i{width:calc(var(--h) * .48);height:calc(var(--h) * .48)}
 .answer{right:0;width:min(26rem,calc(100vw - 1.5rem));transform-origin:top right}
 .answer p{margin:0}
 .answer .what{font-weight:600;margin-bottom:.2rem}
@@ -257,6 +257,15 @@ footer.models .v{color:var(--muted)}
 .sheet li{position:relative;overflow:hidden;background:var(--well)}
 .sheet img{display:block;width:100%;height:100%;object-fit:cover}
 
+.progress{flex:none;display:flex;align-items:center;gap:.75rem;padding-inline:.1rem}
+.progress .track{flex:1;height:.375rem;border-radius:999px;background:var(--raised);overflow:hidden}
+.progress .fill{display:block;height:100%;border-radius:inherit;background:var(--ink);transform-origin:left;transform:scaleX(var(--p))}
+.progress .pct{min-width:4ch;font-weight:600;text-align:right}
+.progress:not([aria-valuenow]) .pct{color:var(--muted)}
+.progress:not([aria-valuenow]) .fill{transform:none;opacity:.3}
+@media (prefers-reduced-motion:no-preference){.progress:not([aria-valuenow]) .fill{width:30%;opacity:.7;animation:sweep 1.8s ease-in-out infinite}}
+@keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+
 /* As many 4:3 thumbnails as fill the strip's height, 6 down to 3, earliest dropped first: n need an aspect ratio of n × 4/3. */
 .strip{--g:.4rem;list-style:none;margin:0;padding:.1rem .6rem .6rem;display:flex;align-items:flex-end;gap:var(--g);flex:1 1 0;min-height:0;container-type:size}
 /* Move's pair is the peak, so no thumbnail competes with it at any size. */
@@ -319,8 +328,7 @@ footer.models .v{color:var(--muted)}
   .side .cited-row{grid-template-columns:minmax(0,4.5rem) minmax(0,1fr)}
   /* The control bar keeps one row: the episode's kind stands over its seed, and the Teach box narrows. */
   .control .kind{flex-direction:column;align-items:flex-start;gap:0;line-height:1.25}
-  .teach input{width:12.5rem}
-  .teach input::placeholder{font-size:var(--t-label)}
+  .teach{flex-basis:18rem}
 }
 .shot.moved{outline:2px solid var(--accent);outline-offset:3px}
 /* Rare and aimed at the back of the room, so longer than UI feedback; a ring only, so it covers none of the frame. */
@@ -376,6 +384,15 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 .cited{position:relative;aspect-ratio:4/3;background:var(--well);border-radius:var(--r-sm);overflow:hidden;box-shadow:0 0 0 1px var(--edge)}
 .cited img{display:block;width:100%;height:100%;object-fit:cover}
 
+.skel{display:block;position:relative;overflow:hidden;height:.85em;border-radius:4px;background:var(--raised)}
+.skel::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgb(255 255 255 / .05),transparent);transform:translateX(-100%)}
+@media (prefers-reduced-motion:no-preference){.skel::after{animation:shimmer 2.4s ease-in-out infinite}}
+@keyframes shimmer{to{transform:translateX(100%)}}
+.shot>.skel{height:100%;border-radius:0;background:var(--panel)}
+.skel-col{flex:1;display:grid;grid-template-rows:var(--top) var(--line) var(--line);place-items:center}
+.skel-col>.skel{width:.7rem;height:.7rem;border-radius:50%}
+.skel-col>.skel:first-child{width:1.1rem;height:1.1rem}
+
 /* Reduced motion keeps a log row's fade, which carries no movement, and drops every slide, scale and flash. */
 @media (prefers-reduced-motion:reduce){
   ol.log li.fresh{animation-name:fade}
@@ -386,7 +403,6 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 @media (max-width:1000px){
   body{height:auto;overflow:auto}
   .controlbar{flex-wrap:wrap}
-  .teach,.teach .field,.teach input{flex:1;width:auto}
   main{grid-template-columns:minmax(0,1fr)}
   .col{overflow:visible}
   .cell{container-type:normal}
