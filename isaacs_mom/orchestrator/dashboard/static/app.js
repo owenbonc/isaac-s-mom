@@ -828,17 +828,21 @@ document.addEventListener(
   true,
 );
 
-// Presenter controls (SPEC §3.5): the same actions from the keyboard, whatever has focus, and from the buttons that label them.
+// Presenter controls (SPEC §3.5): the same actions from the keyboard, whatever has focus, and from the buttons that label
+// them; in Results an arrow takes the focus to the seed it moved to. True when the key is the dashboard's.
+function press(e) {
+  const place = MomState.where(view);
+  if (!MomState.keydown(view, e, now())) return false;
+  seedMoved = (place === "list" || place === "seed") && e.key.startsWith("Arrow");
+  schedule();
+  return true;
+}
 document.addEventListener("keydown", (e) => {
   if (e.key === "Escape") {
     dismissTeach();
     if (closePopover()) return;
   }
-  const place = MomState.where(view);
-  if (!MomState.keydown(view, e, now())) return;
-  e.preventDefault(); // also keeps a focused button from taking Space as a click
-  seedMoved = (place === "list" || place === "seed") && e.key.startsWith("Arrow");
-  schedule();
+  if (press(e)) e.preventDefault(); // also keeps a focused button from taking Space as a click
 });
 // Some browsers click a focused button on Space's keyup; the keydown above already acted.
 document.addEventListener("keyup", (e) => e.key === " " && e.preventDefault());
@@ -870,9 +874,7 @@ $("control").addEventListener("click", (e) => {
 addEventListener("resize", schedule);
 document.querySelector(".presenter").addEventListener("click", (e) => {
   const button = e.target.closest("button[data-key]");
-  if (!button) return;
-  MomState.keydown(view, { key: button.dataset.key }, now());
-  schedule();
+  if (button) press({ key: button.dataset.key });
 });
 
 // The shown run's events (SPEC §3.5).

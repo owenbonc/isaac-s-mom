@@ -212,7 +212,8 @@ main:is([data-view="list"],[data-view="seed"]){display:flex;flex-direction:colum
 .seeds li{break-inside:avoid}
 .seed{display:flex;align-items:center;gap:.6rem;width:100%;min-height:2.3rem;padding:.3rem .55rem;border:0;border-radius:7px;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:background-color .15s}
 @media (hover:hover){.seed:hover{background:var(--row)}}
-.seed:focus-visible{background:var(--raised);outline-offset:-2px}
+/* Any focus shows, not only the keyboard's: a click on ‹ or › moves it here too. */
+.seed:focus{background:var(--raised);outline:2px solid var(--focus);outline-offset:-2px}
 .seed .n{flex:none;font-weight:600;min-width:4.6em}
 .seed .was{min-width:0;color:var(--muted);overflow-wrap:anywhere}
 /* One seed: back, its number and mark, its verdicts; the switch opposite; then a card per checkpoint shown. */

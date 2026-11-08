@@ -1695,12 +1695,12 @@ class FakeElement {
   removeAttribute() {}
   toggleAttribute() {}
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
-  querySelector() { return new FakeElement(); }
+  querySelector(selector) { return Object.assign(new FakeElement(), { selector }); }
   querySelectorAll() { return []; }
   getBoundingClientRect() { return { top: 0 }; }
   checkVisibility() { return true; }
   contains() { return false; }
-  focus() {}
+  focus() { doc.activeElement = this; }
 }
 Object.defineProperty(FakeElement.prototype, "innerHTML", {
   get() { return ""; },
@@ -1719,7 +1719,12 @@ const doc = {
   listeners: {},
   getElementById: (id) => elements.get(id) || null,
   querySelectorAll: (selector) => (selector === "[id]" ? [...elements.values()] : []),
-  querySelector: () => new FakeElement(),
+  // One element per selector, so a listener app.js adds to it can be driven.
+  found: new Map(),
+  querySelector(selector) {
+    if (!this.found.has(selector)) this.found.set(selector, Object.assign(new FakeElement(), { selector }));
+    return this.found.get(selector);
+  },
   addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
   getAnimations: () => [],
 };
@@ -1918,3 +1923,20 @@ def test_the_now_tabs_dot_shows_only_while_the_run_is_live_never_recorded_paused
     assert live == {"live": False, "now": False, "paused": True, "resumed": False, "lost": True}
     recorded = app(REPLAY + script, stream(started("a"), decision(0)))
     assert set(recorded.values()) == {True}
+
+
+def test_a_click_on_previous_or_next_in_results_takes_the_focus_to_the_seed_as_the_arrow_key_does() -> None:
+    script = """
+    const button = (key) => ({ closest: () => ({ dataset: { key } }) });
+    const click = (key) => () => doc.querySelector(".presenter").listeners.click[0]({ target: button(key) });
+    const key = (k) => () => doc.listeners.keydown[0]({ key: k, target: doc.body, preventDefault() {} });
+    const seen = [];
+    for (const act of [click("ArrowRight"), click("ArrowRight"), key("ArrowRight"), click("ArrowLeft")]) {
+      act();
+      flush();
+      seen.push(doc.activeElement.selector || null);
+    }
+    return seen;
+    """
+    # sorted ↓ 2, ↑ 1, ✗ 3
+    assert app(REPLAY + script, stream(*TWO_EVALUATIONS)) == [f'.seeds [data-seed="{n}"]' for n in [2, 1, 3, 1]]
