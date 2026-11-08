@@ -30,7 +30,7 @@ from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.student.checkpoints import ADAPTER_FILES
-from isaacs_mom.teacher import choose_scenes
+from isaacs_mom.teacher import FailureMode, choose_scenes
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 from isaacs_mom.validator import replay, validate
 from isaacs_mom.validator.rules import recording_error_verdict
@@ -672,23 +672,40 @@ def test_the_run_reports_the_bin_moves_that_happened_not_the_share_asked_for(tmp
     assert loop.bin_moves(tmp_path / "missing.jsonl").startswith("the bin moved right after the lift in 0 of 0")
 
 
-def _mode(name: str, ids: list[str]) -> Diagnosis:
-    return Diagnosis(hypothesis=name, evidence=f"seen Explains: {', '.join(ids)}.", confidence=0.8, lesson=name)
+def _lesson(name: str) -> Diagnosis:
+    return Diagnosis(hypothesis=name, evidence="seen", confidence=0.8, lesson=name)
 
 
-def test_demonstrations_are_shared_among_the_modes_by_the_failures_each_explains() -> None:
+def _mode(name: str, ids: list[str]) -> FailureMode:
+    return FailureMode(diagnosis=_lesson(name), explains=ids)
+
+
+def test_each_failure_is_replayed_first_then_the_modes_share_the_rest_by_the_failures_each_explains() -> None:
     far, short = [f"ep-{i}-aa" for i in range(6)], [f"ep-{i}-bb" for i in range(6, 10)]
-    plan = lesson_plan(20, [_mode("far", far), _mode("short", short)], [])
-    taught = [diagnosis.hypothesis for _, diagnosis in plan if diagnosis]
-    assert taught.count("far") == 12 and taught.count("short") == 8  # 6:4 of 20
-    assert {"far", "short"} <= set(taught[:3])  # spread through the round, not one mode then the other
-    for acting_on, diagnosis in plan:
+    failures = [f for pair in zip(far, short, strict=False) for f in pair] + far[4:]  # the two modes interleaved
+    plan = lesson_plan(20, [_mode("far", far), _mode("short", short)], [(f, _lesson(f"own {f}")) for f in failures])
+    taught = [d.hypothesis for _, d in plan if d]
+    assert [acting_on for acting_on, _ in plan[:10]] == failures  # demo i replays failure i, on its own scene
+    assert taught[:10] == ["far" if f in far else "short" for f in failures]  # with its own mode's lesson
+    assert taught.count("far") == 12 and taught.count("short") == 8  # 6:4 of 20, the replays counted in
+    assert {"far", "short"} <= set(taught[10:13])  # the rest spread through the round, not one mode then the other
+    for acting_on, diagnosis in plan[10:]:
         assert diagnosis is not None and acting_on in (far if diagnosis.hypothesis == "far" else short)
-    assert {acting_on for acting_on, d in plan if d and d.hypothesis == "far"} == set(far)  # every failure re-taught
+
+
+def test_a_failure_goes_to_the_first_mode_that_explains_it_and_one_no_mode_explains_keeps_its_own_lesson() -> None:
+    own = [(f"ep-{i}-aa", _lesson(f"own {i}")) for i in (1, 2, 3)]
+    plan = lesson_plan(4, [_mode("a", ["ep-1-aa"]), _mode("b", ["ep-1-aa", "ep-2-aa"])], own)
+    assert [(acting_on, d.hypothesis if d else None) for acting_on, d in plan] == [
+        ("ep-1-aa", "a"),
+        ("ep-2-aa", "b"),
+        ("ep-3-aa", "own 3"),
+        ("ep-2-aa", "b"),  # furthest behind its share: b explains two failures and has taught one
+    ]
 
 
 def test_without_modes_the_per_episode_lessons_take_turns() -> None:
-    diagnosed = [("ep-1-aa", _mode("one", [])), ("ep-2-aa", _mode("two", []))]
+    diagnosed = [("ep-1-aa", _lesson("one")), ("ep-2-aa", _lesson("two"))]
     assert lesson_plan(3, [], diagnosed) == [diagnosed[0], diagnosed[1], diagnosed[0]]
     assert lesson_plan(2, [], []) == [(None, None), (None, None)]
 
@@ -713,28 +730,116 @@ def _demos(run_dir: Path) -> list[dict[str, Any]]:
     return [e["data"] for e in logged if e["type"] == "episode_started" and e["data"].get("acting_on")]
 
 
+def _logged(run_dir: Path, kind: str) -> list[dict[str, Any]]:
+    logged = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    return [e["data"] for e in logged if e["type"] == kind]
+
+
 def test_a_round_teaches_by_its_failure_modes_and_records_them(tmp_path: Path) -> None:
     def one_mode(failed: list[str]) -> str:
-        mode = {"hypothesis": "twists too far", "evidence": "every failure", "confidence": 0.9,
-                "lesson": "stop twisting once the bin is ahead", "explains": failed}  # fmt: skip
+        mode = {
+            "hypothesis": "twists too far",
+            "evidence": "every failure",
+            "confidence": 0.9,
+            "lesson": "stop twisting once the bin is ahead",
+            "explains": failed,
+        }
         return json.dumps({"modes": [mode]})
 
     argon, acted = _round_argon(tmp_path, one_mode)
-    run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=3, dev_trials=2, argon=argon, make_student=StubStudent,
-             train_student=stub_finetune)  # fmt: skip
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=3,
+        dev_trials=2,
+        argon=argon,
+        make_student=StubStudent,
+        train_student=stub_finetune,
+    )
     (record,) = json.loads((tmp_path / "diagnosis_r0.json").read_text())
-    failed = [e["episode_id"] for e in map(json.loads, (tmp_path / "events.jsonl").read_text().splitlines())
-              if e["type"] == "diagnosis" for e in [e["data"]]]  # fmt: skip
-    assert record["hypothesis"] == "twists too far" and len(record["demo_seeds"]) == 3
+    failed = [d["episode_id"] for d in _logged(tmp_path, "diagnosis")]
+    assert record["diagnosis"]["hypothesis"] == "twists too far" and len(record["demo_seeds"]) == 3
     assert {d["acting_on"] for d in _demos(tmp_path)} <= set(failed)  # a failed episode its mode names
     assert acted and all("stop twisting once the bin is ahead" in prompt for prompt in acted)
     assert len(failed) == 2  # the per-episode diagnoses still run, one per failed trial
 
 
+def test_with_two_modes_each_rejected_scene_gets_its_own_failures_lesson_and_the_record_says_which(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    def two_modes(failed: list[str]) -> str:
+        return json.dumps(
+            {
+                "modes": [
+                    {
+                        "hypothesis": "a",
+                        "evidence": "e",
+                        "confidence": 0.9,
+                        "lesson": "lesson a",
+                        "explains": failed[1:],
+                    },
+                    {
+                        "hypothesis": "b",
+                        "evidence": "e",
+                        "confidence": 0.9,
+                        "lesson": "lesson b",
+                        "explains": failed[:1],
+                    },
+                ]
+            }
+        )
+
+    lessons: list[str | None] = []
+    teacher = loop.ArgonPolicy
+
+    def policy(diagnosis: Diagnosis | None, argon: Argon) -> Any:
+        lessons.append(diagnosis.lesson if diagnosis else None)
+        return teacher(diagnosis, argon)
+
+    monkeypatch.setattr(loop, "ArgonPolicy", policy)
+    argon, _ = _round_argon(tmp_path, two_modes)
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=3,
+        dev_trials=2,
+        argon=argon,
+        make_student=StubStudent,
+        train_student=stub_finetune,
+    )
+    seed_of = {d["episode_id"]: d["seed"] for d in _logged(tmp_path, "episode_started")}
+    failed = [d["episode_id"] for d in _logged(tmp_path, "diagnosis")]
+    demos = _demos(tmp_path)
+    assert len(failed) == 2 and [d["acting_on"] for d in demos[:2]] == failed  # demo i replays failure i
+    assert all(d["seed"] == seed_of[d["acting_on"]] for d in demos[:2])  # on that failure's own scene
+    assert lessons == ["lesson b", "lesson a", "lesson a"]  # with the lesson of the mode that explains it
+    taught = {
+        lesson: [d["seed"] for d, given in zip(demos, lessons, strict=True) if given == lesson] for lesson in lessons
+    }
+    record = json.loads((tmp_path / "diagnosis_r0.json").read_text())
+    assert [(r["diagnosis"]["lesson"], r["explains"], r["demo_seeds"]) for r in record] == [
+        ("lesson a", failed[1:], taught["lesson a"]),
+        ("lesson b", failed[:1], taught["lesson b"]),
+    ]  # rule 6: each mode, and the seeds that got its lesson
+
+
 def test_an_unusable_round_diagnosis_leaves_the_per_episode_lessons(tmp_path: Path) -> None:
     argon, acted = _round_argon(tmp_path, lambda failed: "not json")
-    run_loop(FakeSim(), tmp_path, "t", max_rounds=1, demos=2, dev_trials=2, argon=argon, make_student=StubStudent,
-             train_student=stub_finetune)  # fmt: skip
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=2,
+        dev_trials=2,
+        argon=argon,
+        make_student=StubStudent,
+        train_student=stub_finetune,
+    )
     assert json.loads((tmp_path / "diagnosis_r0.json").read_text()) == []
     assert [d["acting_on"] for d in _demos(tmp_path)] and acted  # the round still teaches, on the per-episode lessons
 

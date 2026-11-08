@@ -30,10 +30,9 @@ from isaacs_mom.teacher.argon import Argon, Part, Purpose
 ATTEMPTS = 3  # per step, on the same frame, waiting between them (SPEC §3.3); then the demo ends
 DIAGNOSIS_FRAMES = 4  # the first frame and the last three: the start and how it went wrong, at a bounded cost
 RAW_LOG_CHARS = 500
-ROUND_FRAMES = 8  # decision points across a whole round, at a bounded cost
+ROUND_FRAMES = 8  # decision points across a whole round
 ROUND_MODES = 3
 EPISODE_ID = re.compile(r"ep-\d+-[0-9a-f]+")
-EXPLAINS = re.compile(r".* Explains: (ep-[^.]+)\.$", re.DOTALL)  # the last one: Argon's own evidence may say it too
 
 SKILL_SCHEMA = json.dumps(SkillCall.model_json_schema())
 
@@ -169,10 +168,11 @@ class _Modes(BaseModel):
     modes: list[_Mode] = Field(min_length=1, max_length=ROUND_MODES)
 
 
-def explained_by(mode: Diagnosis) -> list[str]:
-    """The failed trials a failure mode from `diagnose_round` names, read back from the end of its evidence."""
-    match = EXPLAINS.search(mode.evidence)
-    return match.group(1).split(", ") if match else []
+class FailureMode(BaseModel):
+    """One cause shared by some of a round's failed trials: the lesson for it, and the failed trials it explains."""
+
+    diagnosis: Diagnosis
+    explains: list[str]
 
 
 def _accepted(episode: EpisodeManifest) -> bool:
@@ -180,15 +180,15 @@ def _accepted(episode: EpisodeManifest) -> bool:
 
 
 def _decision_frames(trials: list[tuple[EpisodeManifest, list[bytes]]]) -> list[Part]:
-    """Up to ROUND_FRAMES labelled frames where a trial decided (before its first refused call, and before `place`),
-    failed trials first, one frame per trial in turn."""
+    """Up to ROUND_FRAMES labelled frames where a trial decided (before its first refused call, and before `place`;
+    else before its last call), failed trials first, one frame per trial in turn."""
     queues = []
     for episode, frames in sorted(trials, key=lambda trial: _accepted(trial[0])):
         points, refused = [], False
         for step, frame in zip(episode.steps, frames, strict=True):
             first_refusal = not step.ok and not refused
             refused = refused or not step.ok
-            if first_refusal or step.skill_call.skill == "place":
+            if first_refusal or step.skill_call.skill == "place" or (not points and step is episode.steps[-1]):
                 outcome = "ok" if step.ok else "refused"
                 label = f"trial {episode.episode_id}, step {step.step}, before {step.skill_call.skill} ({outcome}):"
                 points.append((label, frame))
@@ -202,7 +202,7 @@ def _decision_frames(trials: list[tuple[EpisodeManifest, list[bytes]]]) -> list[
     return parts
 
 
-def _round_modes(answer: str, trial_ids: set[str], failed_ids: set[str]) -> list[Diagnosis] | None:
+def _round_modes(answer: str, trial_ids: set[str], failed_ids: set[str]) -> list[FailureMode] | None:
     parsed = _strict(_Modes, answer)
     if not isinstance(parsed, _Modes):
         return None
@@ -212,13 +212,12 @@ def _round_modes(answer: str, trial_ids: set[str], failed_ids: set[str]) -> list
         cited = set(EPISODE_ID.findall(f"{mode.hypothesis} {mode.evidence} {mode.lesson}"))
         if not set(explains) <= failed_ids or not cited <= trial_ids:  # only this round's trials, only its failures
             return None
-        evidence = f"{mode.evidence} Explains: {', '.join(explains)}."
-        modes.append(Diagnosis(hypothesis=mode.hypothesis, evidence=evidence, confidence=mode.confidence,
-                               lesson=mode.lesson))  # fmt: skip
+        diagnosis = Diagnosis(**mode.model_dump(exclude={"explains"}))
+        modes.append(FailureMode(diagnosis=diagnosis, explains=explains))
     return modes
 
 
-def diagnose_round(trials: list[tuple[EpisodeManifest, list[bytes]]], argon: Argon) -> list[Diagnosis]:
+def diagnose_round(trials: list[tuple[EpisodeManifest, list[bytes]]], argon: Argon) -> list[FailureMode]:
     """The round's failure modes, from every student trial of it, failed and successful, in one Argon call: each
     mode names the failed trials it explains. Empty when Argon is unreachable, over budget or unusable, so the
     per-episode lessons stand."""
