@@ -21,5 +21,5 @@ class StubStudent:
 
 
 def stub_finetune(training_set: Path, previous_checkpoint: str, round_: int, progress: Progress) -> str:
-    """No training, so the student keeps its checkpoint and reports no progress."""
+    """No training, so the student keeps its checkpoint."""
     return previous_checkpoint

@@ -688,7 +688,7 @@ def test_finetune_progress_is_reported_at_most_once_a_second_and_always_at_the_l
     now = 0.0
     report = loop.finetune_progress(EventLog(tmp_path, "r"), 2, clock=lambda: now)
     for step in range(1, 201):
-        now = {100: 1.5, 200: 1.9}.get(step, now + 0.001)  # 99 steps in 0.1 s, a gap over a second, 100 in 0.4 s
+        now = {100: 1.5, 200: 1.9}.get(step, now + 0.001)
         report(step, 200)
     progress = [e.data for e in read_events(tmp_path) if e.type == "finetune_progress"]
     assert progress == [{"round": 2, "step": step, "total": 200} for step in (1, 100, 200)]

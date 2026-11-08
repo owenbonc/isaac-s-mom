@@ -235,7 +235,7 @@ function fineTuneStage(seconds) {
   const caption = shown.length
     ? `<p class="caption wrap" title="The last frame of each accepted teacher demonstration in this run${latest}.">Learning from ${total} accepted teacher demonstration${total === 1 ? "" : "s"}${from} (${here}) · ${clock}</p>`
     : "";
-  // The trainer's own steps, or Starting until its first report; a lost stream shows no bar, since nothing reads as running.
+  // A lost stream shows no bar, since nothing reads as still running.
   const percent = MomState.shown(view).finetune.pending.progress;
   const value = percent === null ? 'aria-valuetext="Starting"' : `aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"`;
   const bar = view.lost

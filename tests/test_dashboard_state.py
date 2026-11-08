@@ -2422,18 +2422,16 @@ def tick(round_: object, step: object, total: object) -> tuple[str, dict]:
 
 
 def progress(*events: tuple[str, dict]) -> object:
-    """The fine-tune's progress in whole percent after round 1's fine-tune starts and `events` follow."""
     return fold(("finetune_started", {"round": 1}), *events)["state"]["finetune"]["pending"]["progress"]
 
 
 def test_the_finetune_progress_is_the_latest_report_of_the_round_under_way_in_whole_percent() -> None:
-    assert progress() is None  # no report yet, so the bar says it is starting
+    assert progress() is None
     assert progress(tick(1, 0, 300)) == 0
     assert progress(tick(1, 29, 100)) == 29  # whole steps, never a float that rounds 29 down to 28
     assert progress(tick(1, 100, 300)) == 33
     assert progress(tick(1, 300, 300)) == 100
     assert progress(tick(1, 30, 300), tick(1, 150, 300)) == 50
-    # another round's report is not this fine-tune's
     assert progress(tick(1, 150, 300), tick(0, 299, 300), tick(2, 1, 300), ("finetune_progress", {})) == 50
 
 
@@ -2464,8 +2462,6 @@ LOADING = ("control", "columns", "stage", "p-rounds", "p-diagnosis", "p-training
 
 
 class Skeleton(HTMLParser):
-    """index.html's skeleton blocks as (container id, hidden from assistive tech), and the text it speaks as Loading."""
-
     VOID = {"meta", "link", "input", "br", "img"}
 
     def __init__(self) -> None:
@@ -2508,7 +2504,6 @@ def test_a_run_shows_hidden_skeletons_and_says_loading_once_until_its_replay_set
     return { replaying, after: Object.fromEntries(writes) };
     """
     out = app(script, stream(started("a"), decision(0), executed(0)))
-    # the skeleton stays until the replay settles, then every container shows the run, no block left
     assert not set(out["replaying"]) & set(LOADING)
     for id_ in LOADING:
         assert id_ in out["after"] and not re.search(r'class="[^"]*\bskel', out["after"][id_]), id_

@@ -133,8 +133,7 @@ button.back::after{left:0;--tx:0%}
 /* The sentence gives way first, to two lines, so the kind, the controller and the verdict stay on one row. */
 .control>.note{flex:1 1 0;min-width:5rem;text-wrap:pretty;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .control .verdict{margin-left:auto;flex:none}
-/* The page's one capsule and the bar's most prominent control: it takes the width the episode's sentence leaves; its
-   button stays quiet until there is text, so the stage keeps the brightest pixels. */
+/* The page's one capsule; its button stays quiet until there is text, so the stage keeps the brightest pixels. */
 .teach{--h:2.6rem;position:relative;flex:1 0 22rem;display:flex;align-items:center;gap:.2rem;padding:2px;border-radius:999px;border:1px solid var(--edge-strong);background:var(--well)}
 .teach:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .teach .field{position:relative;flex:1;min-width:0;display:flex}
@@ -258,7 +257,6 @@ footer.models .v{color:var(--muted)}
 .sheet li{position:relative;overflow:hidden;background:var(--well)}
 .sheet img{display:block;width:100%;height:100%;object-fit:cover}
 
-/* The fine-tune's progress in the trainer's own steps; until its first report the bar is indeterminate and says Starting. */
 .progress{flex:none;display:flex;align-items:center;gap:.75rem;padding-inline:.1rem}
 .progress .track{flex:1;height:.375rem;border-radius:999px;background:var(--raised);overflow:hidden}
 .progress .fill{display:block;height:100%;border-radius:inherit;background:var(--ink);transform-origin:left;transform:scaleX(var(--p))}
@@ -386,7 +384,6 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 .cited{position:relative;aspect-ratio:4/3;background:var(--well);border-radius:var(--r-sm);overflow:hidden;box-shadow:0 0 0 1px var(--edge)}
 .cited img{display:block;width:100%;height:100%;object-fit:cover}
 
-/* A run being opened shows its panels' shapes until its replay settles: quiet blocks, never empty frames or zeros. */
 .skel{display:block;position:relative;overflow:hidden;height:.85em;border-radius:4px;background:var(--raised)}
 .skel::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgb(255 255 255 / .05),transparent);transform:translateX(-100%)}
 @media (prefers-reduced-motion:no-preference){.skel::after{animation:shimmer 2.4s ease-in-out infinite}}

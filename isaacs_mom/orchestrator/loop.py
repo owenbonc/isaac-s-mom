@@ -40,7 +40,7 @@ StudentTrainer = Callable[[Path, str, int, Progress], str]
 
 
 def finetune_progress(events: EventLog, round_: int, clock: Callable[[], float] = time.monotonic) -> Progress:
-    """Emits the trainer's steps at most once a second, and always its last, so a finished fine-tune reads 100%."""
+    """A reporter that emits at most once a second and always at the last step, so a finished fine-tune reads 100%."""
     last = -math.inf
 
     def report(step: int, total: int) -> None:

@@ -169,7 +169,7 @@
         if (num(d.round) !== null && !s.trained.includes(d.round)) s.trained.push(d.round);
         break;
       case "finetune_progress": {
-        // The trainer's latest report for the fine-tune under way; a malformed one reads as starting, never a guess.
+        // A malformed report reads as Starting, never a guess.
         const p = s.finetune.pending;
         if (!p || p.round === null || d.round !== p.round) break;
         const whole = Number.isInteger(d.step) && Number.isInteger(d.total) && d.total > 0 && d.step >= 0 && d.step <= d.total;

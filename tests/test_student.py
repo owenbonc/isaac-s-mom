@@ -378,8 +378,6 @@ def test_nested_trainer_file_name_is_rejected_before_anything_is_written(tmp_pat
 
 
 class TinyProcessor:
-    """Each word of the chat text is one token, so the reply's labels follow the prompt's."""
-
     def apply_chat_template(self, messages: list[dict], add_generation_prompt: bool = False) -> str:
         return "prompt" if add_generation_prompt else "prompt reply"
 
@@ -412,7 +410,7 @@ def test_lora_training_reports_each_optimizer_step_out_of_every_epochs_steps(mon
     examples = [{"image": "0.jpg", "instruction": "hug", "feedback": "start", "target": "{}"}] * 5
     reported: list[tuple[int, int]] = []
     files = lora.lora_train(examples, {"0.jpg": b"jpeg"}, "cpu", lambda step, total: reported.append((step, total)))
-    assert reported == [(step, 6) for step in range(1, 7)]  # 5 examples in groups of 4: 2 optimizer steps an epoch
+    assert reported == [(step, 6) for step in range(1, 7)]
     assert set(ADAPTER_FILES) <= set(files)
 
 
