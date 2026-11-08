@@ -1,17 +1,28 @@
-"""The runs directory the dashboard serves (SPEC §3.5 "Teach and runs"): which runs it holds and what each is doing."""
+"""The runs directory the dashboard serves (SPEC §3.5 "Teach and runs"): which runs it holds, what each is doing, and
+a new run for each instruction typed into the Teach box."""
 
+import secrets
+import subprocess
+import sys
+import time
+from collections.abc import Callable
 from pathlib import Path
 from typing import Literal
 
 from pydantic import BaseModel
 
 from isaacs_mom.contracts import Event
-from isaacs_mom.orchestrator.events import read_events
+from isaacs_mom.orchestrator.events import EventLog, read_events
 from isaacs_mom.student import valid_run_id
+from isaacs_mom.tasks import Refusal, TaskSpec, argon_proposer, generate_task
+from isaacs_mom.tasks.spec import Bin, Inside
+from isaacs_mom.teacher.argon import Argon, Generate
 
 FRESH_SECONDS = 20.0
 FINETUNE_SECONDS = 30 * 60.0
-NOT_STARTED = "not started: "  # the error a Teach the task generator refused leaves as its run's last word
+NOT_STARTED = "not started: "  # the error a Teach that started nothing leaves as its run's last word
+NOT_YET = "Not yet: the loop teaches one task"
+Launch = Callable[[list[str], Path], None]  # a command, and the log its output goes to
 
 
 class RunSummary(BaseModel):
@@ -58,3 +69,60 @@ def list_runs(runs_dir: Path, now: float) -> list[RunSummary]:
     found = [(child.name, read_events(child)) for child in runs_dir.iterdir() if find_run(runs_dir, child.name)]
     runs = [summarize(run_id, events, now) for run_id, events in found if events]
     return sorted(runs, key=lambda run: (run.status != "live", -run.started_t))
+
+
+def launch_run(command: list[str], log: Path) -> None:
+    """Starts the command in its own session, so a run outlives the dashboard and a Ctrl-C there never reaches it."""
+    with log.open("ab") as out:
+        subprocess.Popen(
+            command, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True
+        )
+
+
+def is_the_loops_task(spec: TaskSpec) -> bool:
+    """The loop teaches one task: the box inside the bin (SPEC §3.5)."""
+    return isinstance(spec.scene.destination, Bin) and any(isinstance(fact, Inside) for fact in spec.success.all_of)
+
+
+def teach(
+    runs_dir: Path, instruction: str, *, task: str, generate: Generate | None, launch: Launch
+) -> tuple[str, list[str]]:
+    """A new run whose first event is the instruction. The task generator judges it, its Argon call counted in the
+    run's own budget (rule 5), and `mom run` starts there when it asks for the loop's task. Returns the run id and why
+    nothing started, empty when the run did."""
+    run_id, run_dir = _new_run(runs_dir)
+    events = EventLog(run_dir, run_id)
+    events.emit("instruction", text=instruction, source="teach")
+    reasons = _judge(instruction, events, generate)
+    if not reasons:
+        # One argument whatever the text holds, even a leading "-" that would read as an option.
+        cli = [sys.executable, "-m", "isaacs_mom.orchestrator.cli", "run", "--runs", str(runs_dir.resolve())]
+        try:
+            launch([*cli, "--run-id", run_id, f"--instruction={instruction}", "--task", task], run_dir / "run.log")
+        except OSError as error:
+            reasons = [f"mom run could not start: {error}"]
+    if reasons:
+        events.emit("error", error=NOT_STARTED + "; ".join(reasons))
+    return run_id, reasons
+
+
+def _new_run(runs_dir: Path) -> tuple[str, Path]:
+    """A fresh run directory, made exclusively, so two Teaches in the same second never share one."""
+    while True:
+        run_id = f"{time.strftime('teach-%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
+        try:
+            (runs_dir / run_id).mkdir(parents=True)
+        except FileExistsError:
+            continue
+        return run_id, runs_dir / run_id
+
+
+def _judge(instruction: str, events: EventLog, generate: Generate | None) -> list[str]:
+    """Why the instruction can't start the loop; empty when it asks for the loop's task."""
+    try:
+        task = generate_task(instruction, argon_proposer(Argon(events, generate=generate)))
+    except Exception as error:  # a missing key or a fatal Argon error refuses this Teach, and its run says why
+        return [f"task generator failed: {type(error).__name__}: {error}"]
+    if isinstance(task, Refusal):
+        return task.reasons
+    return [] if is_the_loops_task(task) else [NOT_YET]

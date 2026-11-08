@@ -1,11 +1,14 @@
 import asyncio
 import json
+import re
+import sys
 import threading
 import time
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx2 import Response
 
 from isaacs_mom.contracts import (
     Controller,
@@ -22,8 +25,10 @@ from isaacs_mom.orchestrator.dashboard.server import REPLAYED, create_app, tail_
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
+from isaacs_mom.orchestrator.runs import launch_run
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import BASE_CHECKPOINT, StubStudent, stub_finetune
+from isaacs_mom.tasks.example import OFFLINE_PROPOSAL
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 
 JPEG = b"\xff\xd8\xff\xd9"
@@ -63,7 +68,7 @@ def test_frames_are_cached_for_good_because_a_recorded_frame_never_changes(tmp_p
 def test_frames_reject_traversal_non_frames_and_anything_but_a_run(tmp_path: Path) -> None:
     make_run(tmp_path)
     make_run(tmp_path, "r2")
-    (tmp_path / "runs" / ".hidden" / "episodes").mkdir(parents=True)  # a run's shape, but not a valid run id
+    (tmp_path / "runs" / ".hidden").mkdir()  # a run's shape, but not a valid run id
     (tmp_path / "runs" / ".hidden" / "events.jsonl").touch()
     (tmp_path / "runs" / ".hidden" / "x.jpg").write_bytes(JPEG)
     (tmp_path / "runs" / "no-events").mkdir()  # not a run: no events file
@@ -474,3 +479,173 @@ def test_a_slow_diagnosis_sends_heartbeats_for_the_episode_it_diagnoses(
     at = next(i for i, e in enumerate(events) if e["type"] == "diagnosis")
     beats = [e["data"]["episode_id"] for e in events[:at] if e["type"] == "heartbeat"]
     assert len(beats) >= 2 and set(beats) == {events[at]["data"]["episode_id"]}
+
+
+# The Teach box (SPEC §3.5): a POST from the dashboard's own page starts a run judged by the task generator.
+ORIGIN = "http://127.0.0.1:8200"
+REFUSES = {"refuse": "it can only move boxes"}
+BOX_IN_BIN = {
+    **OFFLINE_PROPOSAL,
+    "name": "box_in_bin",
+    "scene": {
+        **OFFLINE_PROPOSAL["scene"],
+        "destination": {"kind": "bin", "id": "bin", "distance_m": [1.0, 1.4], "bearing_deg": [75, 285]},
+    },
+    "success": {"all_of": [{"fact": "inside", "object": "box", "container": "bin"}, {"fact": "robot_standing"}]},
+    "perturbations": [{"object": "bin"}],
+}
+Launched = list[tuple[list[str], Path]]
+
+
+def teach_client(
+    tmp_path: Path, answer: dict | Exception | None = None, host: str = "127.0.0.1", launch_error: bool = False
+) -> tuple[TestClient, Launched]:
+    """A dashboard on port 8200 whose Argon answers `answer` (None: the test fails if it's asked) and whose launcher
+    records what it would start instead of starting it."""
+    launched: Launched = []
+
+    def generate(purpose: Purpose, parts: list[Part]) -> str:
+        if answer is None:
+            pytest.fail("the task generator ran")
+        if isinstance(answer, Exception):
+            raise answer
+        assert purpose == "task"
+        return json.dumps(answer)
+
+    def launch(args: list[str], log: Path) -> None:
+        if launch_error:
+            raise OSError("no such interpreter")
+        launched.append((args, log))
+
+    app = create_app(tmp_path / "runs", port=8200, task="fixed_feet", generate=generate, launch=launch)
+    return TestClient(app, client=(host, 50000)), launched
+
+
+def teach(client: TestClient, instruction: object, origin: str | None = ORIGIN) -> Response:
+    return client.post("/teach", json={"instruction": instruction}, headers={"Origin": origin} if origin else {})
+
+
+def run_events(tmp_path: Path, run_id: str) -> list[tuple[str, dict]]:
+    return [(e["type"], e["data"]) for e in logged(tmp_path / "runs" / run_id)]
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        None,
+        "null",
+        "http://evil.example",
+        "http://127.0.0.1:8201",
+        "https://127.0.0.1:8200",
+        "http://127.0.0.1:8200/",
+        "http://localhost:8200.evil.example",
+        "http://127.0.0.1",
+    ],
+)
+def test_teach_refuses_every_origin_but_the_dashboards_own_and_writes_nothing(tmp_path: Path, origin: str) -> None:
+    client, launched = teach_client(tmp_path)
+    response = teach(client, "put the box in the bin", origin)
+    assert response.status_code == 403
+    assert not (tmp_path / "runs").exists() and launched == []
+
+
+def test_teach_refuses_a_client_on_another_machine_whatever_its_origin(tmp_path: Path) -> None:
+    client, launched = teach_client(tmp_path, host="192.168.1.20")
+    assert teach(client, "put the box in the bin").status_code == 403
+    assert not (tmp_path / "runs").exists() and launched == []
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"instruction": ""},
+        {"instruction": "  \n\t "},
+        {"instruction": "x" * 201},
+        {"instruction": " put\0it in "},
+        {"instruction": 5},
+        {"text": "put the box in the bin"},
+        "put the box in the bin",
+    ],
+)
+def test_teach_takes_one_to_200_characters_of_text_and_writes_nothing_otherwise(tmp_path: Path, body: object) -> None:
+    client, launched = teach_client(tmp_path)
+    assert client.post("/teach", json=body, headers={"Origin": ORIGIN}).status_code == 400
+    assert client.post("/teach", content=b"{not json", headers={"Origin": ORIGIN}).status_code == 400
+    assert not (tmp_path / "runs").exists() and launched == []
+
+
+@pytest.mark.parametrize("origin", [ORIGIN, "http://localhost:8200"])
+def test_a_refused_instruction_starts_nothing_and_is_listed_as_not_started_with_its_reasons(
+    tmp_path: Path, origin: str
+) -> None:
+    client, launched = teach_client(tmp_path, REFUSES)
+    text = "x" * 199 + "!"
+    response = teach(client, f"  {text}\n", origin)
+    assert response.status_code == 200
+    run_id = response.json()["run_id"]
+    assert re.fullmatch(r"teach-[0-9]{8}-[0-9]{6}-[0-9a-f]{4}", run_id)
+    reasons = ["Argon declined: it can only move boxes"]
+    assert response.json() == {"run_id": run_id, "started": False, "reasons": reasons}
+    events = run_events(tmp_path, run_id)
+    assert events[0] == ("instruction", {"text": text, "source": "teach"})
+    assert [(kind, data.get("purpose"), data.get("call")) for kind, data in events[1:-1]] == [("argon_call", "task", 1)]
+    assert events[-1] == ("error", {"error": "not started: Argon declined: it can only move boxes"})
+    [listed] = client.get("/runs").json()
+    assert (listed["run_id"], listed["instruction"], listed["status"]) == (run_id, text, "not_started")
+    assert listed["reason"] == "Argon declined: it can only move boxes"
+    assert launched == []
+
+
+def test_a_task_generator_that_fails_leaves_the_run_not_started_with_why(tmp_path: Path) -> None:
+    client, launched = teach_client(tmp_path, RuntimeError("400 API key not valid"))
+    response = teach(client, "put the box in the bin")
+    assert (response.status_code, response.json()["started"]) == (200, False)
+    assert response.json()["reasons"] == ["task generator failed: RuntimeError: 400 API key not valid"]
+    calls = [data for kind, data in run_events(tmp_path, response.json()["run_id"]) if kind == "argon_call"]
+    assert [(c["purpose"], c["ok"]) for c in calls] == [("task", False)]  # counted against the run's budget
+    assert launched == []
+
+
+def test_a_valid_task_the_loop_does_not_train_on_is_not_yet(tmp_path: Path) -> None:
+    client, launched = teach_client(tmp_path, OFFLINE_PROPOSAL)  # the box on a shelf
+    response = teach(client, "put the box on the shelf")
+    assert (response.status_code, response.json()["reasons"]) == (200, ["Not yet: the loop teaches one task"])
+    assert launched == []
+
+
+@pytest.mark.parametrize(
+    "text", ["Put the box in the bin", "Put it \"in\" the bin; rm -rf ~ $(touch pwned) `id` 'x'\n--task walk"]
+)
+def test_the_box_in_the_bin_starts_mom_run_with_the_instruction_as_one_untouched_argument(
+    tmp_path: Path, text: str
+) -> None:
+    client, launched = teach_client(tmp_path, BOX_IN_BIN)
+    response = teach(client, text)
+    assert response.status_code == 201
+    run_id = response.json()["run_id"]
+    assert response.json() == {"run_id": run_id, "started": True}
+    runs = tmp_path / "runs"
+    command = ["-m", "isaacs_mom.orchestrator.cli", "run", "--runs", str(runs.resolve()), "--run-id", run_id]
+    assert launched == [
+        ([sys.executable, *command, f"--instruction={text}", "--task", "fixed_feet"], runs / run_id / "run.log")
+    ]
+    assert run_events(tmp_path, run_id)[0] == ("instruction", {"text": text, "source": "teach"})
+    [listed] = client.get("/runs").json()
+    assert (listed["run_id"], listed["instruction"], listed["status"]) == (run_id, text, "live")
+
+
+def test_a_run_that_cannot_be_launched_is_not_started_with_why(tmp_path: Path) -> None:
+    client, launched = teach_client(tmp_path, BOX_IN_BIN, launch_error=True)
+    response = teach(client, "put the box in the bin")
+    assert (response.status_code, response.json()["reasons"]) == (200, ["mom run could not start: no such interpreter"])
+    assert client.get("/runs").json()[0]["status"] == "not_started"
+
+
+def test_a_launched_run_runs_in_its_own_session_with_its_output_in_the_log(tmp_path: Path) -> None:
+    log = tmp_path / "run.log"
+    script = "import os, sys; print(os.getsid(0) == os.getpid()); print('to stderr', file=sys.stderr)"
+    launch_run([sys.executable, "-c", script], log)
+    deadline = time.monotonic() + 30
+    while len(log.read_text().splitlines()) < 2 and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert sorted(log.read_text().splitlines()) == ["True", "to stderr"]

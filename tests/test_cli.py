@@ -1,3 +1,4 @@
+import subprocess
 import sys
 from pathlib import Path
 
@@ -83,3 +84,22 @@ def test_mom_run_refuses_an_instruction_the_teach_box_could_not_send(
     assert exit_.value.code == 2
     assert "argument --instruction" in capsys.readouterr().err
     assert not (tmp_path / "runs").exists()
+
+
+def test_mom_run_puts_its_run_in_the_runs_directory_it_is_given(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    run_cli(monkeypatch, "--runs", str(tmp_path / "served"), "--run-id", "r")
+    assert (tmp_path / "served" / "r" / "events.jsonl").is_file() and not (tmp_path / "runs").exists()
+
+
+def test_the_cli_runs_as_the_module_the_teach_box_starts() -> None:
+    shown = subprocess.run(
+        [sys.executable, "-m", "isaacs_mom.orchestrator.cli", "run", "--help"],
+        capture_output=True,
+        text=True,
+        timeout=120,
+        check=True,
+    )
+    assert "--instruction" in shown.stdout and "--runs" in shown.stdout

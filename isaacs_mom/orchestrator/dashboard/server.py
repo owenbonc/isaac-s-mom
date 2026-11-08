@@ -1,5 +1,5 @@
 """Dashboard server (SPEC §3.5) over a runs directory: one HTML page, and for each run its `events.jsonl` as
-server-sent events, its frame JPEGs and its training and replay summaries."""
+server-sent events, its frame JPEGs and its training and replay summaries; the Teach box starts a new run."""
 
 import asyncio
 import re
@@ -8,12 +8,16 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
 from isaacs_mom.contracts import Event, ReplayReport, TrainingSetSummary
-from isaacs_mom.orchestrator.runs import RunSummary, find_run, list_runs
+from isaacs_mom.orchestrator.loop import instruction_text
+from isaacs_mom.orchestrator.runs import Launch, RunSummary, find_run, launch_run, list_runs, teach
+from isaacs_mom.sim.mujoco.task import DEFAULT_TASK
+from isaacs_mom.teacher.argon import Generate
 
 STATIC = Path(__file__).parent / "static"
 POLL_SECONDS = 0.25
@@ -23,6 +27,11 @@ FRAME_KEYS = {"frame", "before_frame"}
 # Sent once a connection has replayed every event already written, so the page shows only where the replay settles.
 REPLAYED = "event: replayed\ndata: {}\n\n"
 TRAINING_SUMMARY = re.compile(r"training_r[0-9]+\.summary\.json")
+LOCAL_CLIENTS = {"127.0.0.1", "::1"}
+
+
+class TeachRequest(BaseModel):
+    instruction: str
 
 
 class FreshStatic(StaticFiles):
@@ -79,8 +88,18 @@ async def tail_events(
                 await asyncio.sleep(poll)
 
 
-def create_app(runs_dir: Path) -> FastAPI:
+def create_app(
+    runs_dir: Path,
+    *,
+    port: int = 8200,
+    task: str = DEFAULT_TASK.name,
+    generate: Generate | None = None,
+    launch: Launch = launch_run,
+) -> FastAPI:
+    """`task` is what a Teach-started run trains on; `generate` answers for Argon (None: Gemini) and `launch` starts
+    `mom run`."""
     app = FastAPI(title="Isaac's Mom dashboard")
+    own_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
 
     def served(run_id: str) -> Path:
         """The run directory an id from a URL names, or 404."""
@@ -131,12 +150,31 @@ def create_app(runs_dir: Path) -> FastAPI:
         except (OSError, ValidationError):
             raise HTTPException(status_code=404) from None
 
+    @app.post("/teach")
+    async def teach_box(request: Request) -> JSONResponse:
+        # Checked before the body is read: only this dashboard's own page, on this machine, starts a run (SPEC §3.5).
+        client = request.client
+        if client is None or client.host not in LOCAL_CLIENTS or request.headers.get("origin") not in own_origins:
+            raise HTTPException(status_code=403, detail="Teach takes an instruction only from this dashboard's page")
+        try:
+            instruction = instruction_text(TeachRequest.model_validate_json(await request.body()).instruction)
+        except ValidationError:
+            raise HTTPException(status_code=400, detail='send JSON: {"instruction": "<text>"}') from None
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+        run_id, reasons = await run_in_threadpool(
+            teach, runs_dir, instruction, task=task, generate=generate, launch=launch
+        )
+        if reasons:
+            return JSONResponse({"run_id": run_id, "started": False, "reasons": reasons})
+        return JSONResponse({"run_id": run_id, "started": True}, status_code=201)
+
     app.mount("/static", FreshStatic(directory=STATIC))
     return app
 
 
-def serve(runs_dir: Path, port: int) -> None:
+def serve(runs_dir: Path, port: int, task: str) -> None:
     import uvicorn
 
     # An open event stream never ends on its own, so shutdown would wait for it forever.
-    uvicorn.run(create_app(runs_dir), host="127.0.0.1", port=port, timeout_graceful_shutdown=1)
+    uvicorn.run(create_app(runs_dir, port=port, task=task), host="127.0.0.1", port=port, timeout_graceful_shutdown=1)
