@@ -20,7 +20,7 @@ from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.evaluation import adaptation_of
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import MOVE_BIN_SHARE as LOOP_MOVE_BIN_SHARE
-from isaacs_mom.orchestrator.loop import check_carry_over, moves_bin, run_loop
+from isaacs_mom.orchestrator.loop import StudentTrainer, check_carry_over, moves_bin, run_loop
 from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
@@ -353,7 +353,7 @@ def then_loop(
     rounds: int,
     *,
     argon: Argon,
-    train: Train,
+    train: StudentTrainer,
     make_student: Callable[[str], Policy],
     make_sim: Callable[[TaskSpec], TruthSim] = lambda spec: MujocoSim(spec.task_config()),
 ) -> tuple[Path, list[EvaluationResult]]:

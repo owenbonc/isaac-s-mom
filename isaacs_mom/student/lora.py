@@ -2,6 +2,7 @@
 
 import contextlib
 import json
+import math
 import random
 import tempfile
 import time
@@ -14,6 +15,7 @@ from peft import LoraConfig, get_peft_model
 from isaacs_mom.contracts import SkillCall
 from isaacs_mom.student import vlm
 from isaacs_mom.student.prompt import UnparseableReply, build_messages, parse_reply
+from isaacs_mom.student.tuning import Progress
 
 EPOCHS = 5
 LEARNING_RATE = 1e-4
@@ -27,7 +29,9 @@ SEED = 0
 IGNORE_INDEX = -100
 
 
-def lora_train(examples: list[dict[str, str]], images: dict[str, bytes], device: str) -> dict[str, bytes]:
+def lora_train(
+    examples: list[dict[str, str]], images: dict[str, bytes], device: str, progress: Progress | None
+) -> dict[str, bytes]:
     """Returns the adapter's files plus metrics.json, keyed by file name."""
     started = time.monotonic()
     if device == "cuda":
@@ -58,6 +62,8 @@ def lora_train(examples: list[dict[str, str]], images: dict[str, bytes], device:
     optimizer = torch.optim.AdamW([p for p in model.parameters() if p.requires_grad], lr=LEARNING_RATE)
     epoch_losses: list[float] = []
     order = list(range(len(examples)))
+    steps = EPOCHS * math.ceil(len(order) / GRAD_ACCUM)
+    step = 0
     for _ in range(EPOCHS):
         random.shuffle(order)
         total = 0.0
@@ -69,6 +75,9 @@ def lora_train(examples: list[dict[str, str]], images: dict[str, bytes], device:
             if i % GRAD_ACCUM == 0 or i == len(order):
                 optimizer.step()
                 optimizer.zero_grad()
+                step += 1
+                if progress:
+                    progress(step, steps)
         epoch_losses.append(round(total / len(order), 4))
 
     model.eval()

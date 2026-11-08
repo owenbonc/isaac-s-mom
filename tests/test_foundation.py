@@ -27,13 +27,14 @@ from isaacs_mom.contracts import (
 )
 from isaacs_mom.orchestrator import cli, loop
 from isaacs_mom.orchestrator.episode import run_episode
-from isaacs_mom.orchestrator.events import EventLog
+from isaacs_mom.orchestrator.events import EventLog, read_events
 from isaacs_mom.orchestrator.loop import carry_over, check_carry_over, evaluate, lesson_plan, run_loop
 from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.student.checkpoints import ADAPTER_FILES
+from isaacs_mom.student.tuning import Progress
 from isaacs_mom.tasks.example import OFFLINE_PROPOSAL
 from isaacs_mom.tasks.spec import TaskSpec
 from isaacs_mom.teacher import FailureMode, choose_scenes
@@ -579,7 +580,7 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
         built.append(checkpoint)
         return StubStudent(checkpoint)
 
-    def train_student(training_set: Path, previous_checkpoint: str, round_: int) -> str:
+    def train_student(training_set: Path, previous_checkpoint: str, round_: int, progress: Progress) -> str:
         return f"trained-{round_}"
 
     run_loop(
@@ -661,7 +662,7 @@ def test_the_cli_refuses_a_round_size_below_one_or_a_share_above_all(
     assert exit_.value.code == 2
 
 
-def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int], str]) -> tuple[dict, dict]:
+def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int, Progress], str]) -> tuple[dict, dict]:
     run_dir = tmp_path / "some-run"
     run_loop(
         FakeSim(),
@@ -686,8 +687,37 @@ def test_a_skipped_finetune_says_so_and_names_no_adapter(tmp_path: Path) -> None
     assert isinstance(completed["duration_s"], float)
 
 
+def test_finetune_progress_is_reported_at_most_once_a_second_and_always_at_the_last_step(tmp_path: Path) -> None:
+    now = 0.0
+    report = loop.finetune_progress(EventLog(tmp_path, "r"), 2, clock=lambda: now)
+    for step in range(1, 201):
+        now = {100: 1.5, 200: 1.9}.get(step, now + 0.001)
+        report(step, 200)
+    progress = [e.data for e in read_events(tmp_path) if e.type == "finetune_progress"]
+    assert progress == [{"round": 2, "step": step, "total": 200} for step in (1, 100, 200)]
+
+
+def test_a_finetune_reports_its_trainers_progress_between_started_and_completed(tmp_path: Path) -> None:
+    def train_student(training_set: Path, previous_checkpoint: str, round_: int, progress: Progress) -> str:
+        for step in range(1, 4):
+            progress(step, 3)
+        return previous_checkpoint
+
+    run_dir = tmp_path / "some-run"
+    argon = silent_argon(run_dir, "some-run")
+    run_loop(FakeSim(), run_dir, "some-run", max_rounds=1, demos=1, dev_trials=1, argon=argon,
+             make_student=StubStudent, train_student=train_student)  # fmt: skip
+    types = [e.type for e in read_events(run_dir)]
+    during = types[types.index("finetune_started") + 1 : types.index("finetune_completed")]
+    assert types.count("finetune_progress") == during.count("finetune_progress") == 2
+    progress = [e.data for e in read_events(run_dir) if e.type == "finetune_progress"]
+    assert progress == [{"round": 1, "step": 1, "total": 3}, {"round": 1, "step": 3, "total": 3}]
+
+
 def test_a_finetune_reports_what_it_trained_on_how_long_and_where(tmp_path: Path) -> None:
-    started, completed = finetune_events(tmp_path, lambda training_set, previous, round_: f"some-run/ckpt-r{round_}")
+    started, completed = finetune_events(
+        tmp_path, lambda training_set, previous, round_, progress: f"some-run/ckpt-r{round_}"
+    )
     assert (completed["checkpoint"], completed["skipped"]) == ("some-run/ckpt-r1", False)
     assert completed["examples"] == len(Path(started["training_set"]).read_text().splitlines())
     assert isinstance(completed["duration_s"], float) and completed["duration_s"] >= 0
@@ -1032,7 +1062,7 @@ def _from_run(tmp_path: Path, prev: Path, name: str = "next") -> tuple[Path, lis
         evaluated.append(checkpoint)
         return StubStudent(checkpoint)
 
-    def train_student(training_set: Path, previous_checkpoint: str, round_: int) -> str:
+    def train_student(training_set: Path, previous_checkpoint: str, round_: int, progress: Progress) -> str:
         images = [TrainingExample.model_validate_json(line).image for line in training_set.read_text().splitlines()]
         trained.append((previous_checkpoint, [Path(image).parents[1].name for image in images]))
         _finished(training_set.parent / "checkpoints" / f"ckpt-r{round_}")

@@ -442,7 +442,12 @@ class CrashesOnTheSecond(OraclePolicy):
 def test_a_demonstration_that_crashes_is_counted_and_the_batch_goes_on(tmp_path: Path) -> None:
     spec, run_dir = _started(tmp_path)
     collect(spec, run_dir, demos=3, workers=1, make_teacher=CrashesOnTheSecond)
-    report = finish(run_dir, exam_seeds=1, train=FakeFinetune(), make_student=Stops)
+    report = finish(
+        run_dir,
+        exam_seeds=1,
+        train=FakeFinetune(),
+        make_student=Stops,
+    )
     assert (report.demos_errored, report.accepted) == (1, 2)
     errors = [json.loads(line) for line in (run_dir / "workers" / "w0" / "events.jsonl").read_text().splitlines()]
     assert [e["data"]["seed"] for e in errors if e["type"] == "error"] == [DEMO_SEED_START + 1]
@@ -496,7 +501,12 @@ def test_a_fatal_argon_error_stops_the_batch_and_leaves_what_it_recorded_to_resu
     ]
     collected = Collected.model_validate_json((run_dir / "collected.json").read_text())
     assert collected.stopped_early == {"w0": f"{type(fatal).__name__}: {fatal}"}
-    report = finish(run_dir, exam_seeds=1, train=FakeFinetune(), make_student=Stops)
+    report = finish(
+        run_dir,
+        exam_seeds=1,
+        train=FakeFinetune(),
+        make_student=Stops,
+    )
     assert (report.demos, report.accepted, report.demos_errored) == (2, 1, 2)
 
 
@@ -520,7 +530,12 @@ def test_a_teacher_process_that_dies_leaves_a_run_that_resumes(tmp_path: Path) -
     collected = Collected.model_validate_json((run_dir / "collected.json").read_text())
     assert collected.stopped_early["w1"].startswith("BrokenProcessPool")
     assert not list((run_dir / "workers").glob("*/episodes/*"))  # whatever any process recorded is in the run
-    report = finish(run_dir, exam_seeds=1, train=FakeFinetune(), make_student=Stops)
+    report = finish(
+        run_dir,
+        exam_seeds=1,
+        train=FakeFinetune(),
+        make_student=Stops,
+    )
     assert report.demos_errored >= 1 and report.accepted + report.demos_errored == 3
 
 
@@ -609,7 +624,12 @@ def test_then_loop_continues_the_learned_skill_in_a_loop_run_beside_it_judged_by
     loop_dir = tmp_path / "runs" / "learn-x-loop"
     argon = Argon(EventLog(loop_dir, loop_dir.name), generate=stub_generate)
     out, results = then_loop(
-        run_dir, 1, argon=argon, train=FakeFinetune(), make_student=Stops, make_sim=lambda _spec: FakeSim()
+        run_dir,
+        1,
+        argon=argon,
+        train=lambda ts, prev, round_, _progress: FakeFinetune()(ts, prev, round_),
+        make_student=Stops,
+        make_sim=lambda _spec: FakeSim(),
     )
     assert out == loop_dir and [r.round for r in results] == [0, 1]
     assert results[0].checkpoint == "learn-x/ckpt-r1"  # round 0 is the learned skill, examined afresh
@@ -627,7 +647,14 @@ def test_then_loop_from_a_run_with_nothing_trained_is_refused_and_writes_nothing
     run_dir = _learned(tmp_path / "runs", _spec(), finished=False)
     argon = Argon(EventLog(tmp_path / "elsewhere", "x"), generate=stub_generate)
     with pytest.raises(ValueError, match="no finished checkpoint"):
-        then_loop(run_dir, 1, argon=argon, train=FakeFinetune(), make_student=Stops, make_sim=lambda _spec: FakeSim())
+        then_loop(
+            run_dir,
+            1,
+            argon=argon,
+            train=lambda ts, prev, round_, _progress: FakeFinetune()(ts, prev, round_),
+            make_student=Stops,
+            make_sim=lambda _spec: FakeSim(),
+        )
     assert not (tmp_path / "runs" / "learn-x-loop").exists()
 
 
@@ -641,7 +668,14 @@ def test_then_loop_moves_the_destination_only_in_a_spec_that_lets_it_move(
     run_dir = _learned(tmp_path / "runs", spec)
     loop_dir = tmp_path / "runs" / "learn-x-loop"
     argon = Argon(EventLog(loop_dir, loop_dir.name), generate=stub_generate)
-    then_loop(run_dir, 1, argon=argon, train=FakeFinetune(), make_student=Stops, make_sim=lambda _spec: FakeSim())
+    then_loop(
+        run_dir,
+        1,
+        argon=argon,
+        train=lambda ts, prev, round_, _progress: FakeFinetune()(ts, prev, round_),
+        make_student=Stops,
+        make_sim=lambda _spec: FakeSim(),
+    )
     logged = [json.loads(line) for line in (loop_dir / "events.jsonl").read_text().splitlines()]
     starts = [e["data"] for e in logged if e["type"] == "episode_started"]
     assert sum(bool(d.get("move_bin_after_lift")) for d in starts) == moved  # 5 of the round's 20 at 25%

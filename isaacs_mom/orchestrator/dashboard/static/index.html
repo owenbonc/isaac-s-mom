@@ -122,7 +122,7 @@
   </div>
 </header>
 <div class="controlbar">
-  <div class="control" id="control"></div>
+  <div class="control" id="control"><span class="sr">Loading</span><span class="skel" aria-hidden="true" style="width:10rem"></span><span class="skel" aria-hidden="true" style="width:22rem"></span></div>
   <form class="teach" id="teach" novalidate>
     <span class="field">
       <input id="instruction" name="instruction" type="text" autocomplete="off" dir="auto" placeholder="Tell the robot what to learn" aria-label="Tell the robot what to learn" aria-describedby="teach-count">
@@ -134,7 +134,28 @@
 </div>
 <section class="results-strip" aria-label="Held-out seeds">
   <p class="labels" aria-hidden="true"><span class="status">Status</span><span>Before</span><span>After</span></p>
-  <ol class="columns" id="columns"></ol>
+  <ol class="columns" id="columns">
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+    <li aria-hidden="true"><span class="skel-col"><span class="skel"></span><span class="skel"></span><span class="skel"></span></span></li>
+  </ol>
   <div class="switch" id="sides" role="group" aria-label="Checkpoints shown in a seed">
     <button type="button" data-side="before" data-f="side:before" aria-pressed="false" aria-disabled="true" aria-label="Before" aria-description="Choose a seed to compare" data-tip="Choose a seed to compare"><svg class="i" aria-hidden="true"><use href="#i-before"/></svg></button>
     <button type="button" data-side="both" data-f="side:both" aria-pressed="false" aria-disabled="true" aria-label="Both" aria-description="Choose a seed to compare" data-tip="Choose a seed to compare"><svg class="i" aria-hidden="true"><use href="#i-both"/></svg></button>
@@ -147,17 +168,22 @@
   <section class="panel results" id="results" aria-label="Held-out seed"></section>
   <section class="panel col camera">
     <header><h2>Head camera</h2></header>
-    <div class="stage" id="stage"></div>
+    <div class="stage" id="stage"><div class="frame" aria-hidden="true"><div class="cell"><div class="shot"><span class="skel"></span></div></div></div><div class="foot" aria-hidden="true"><span class="skel" style="width:24rem"></span></div></div>
     <ol class="strip" id="strip" aria-label="Recent head-camera frames"></ol>
   </section>
   <div class="col side" id="side" tabindex="0" role="region" aria-label="Results and diagnosis">
-    <section class="panel" id="p-rounds"></section>
-    <section class="panel" id="p-diagnosis"></section>
-    <section class="panel" id="p-training"></section>
+    <section class="panel" id="p-rounds"><header><h2>Held-out success</h2></header><div class="body stack" aria-hidden="true"><span class="skel" style="width:7rem;height:var(--t-fig)"></span><span class="skel" style="width:10rem"></span></div></section>
+    <section class="panel" id="p-diagnosis"><header><h2>Diagnosis</h2></header><div class="body stack" aria-hidden="true"><span class="skel" style="width:70%"></span><span class="skel" style="width:90%"></span><span class="skel" style="width:50%"></span></div></section>
+    <section class="panel" id="p-training"><header><h2>Training and replay</h2></header><div class="body stack" aria-hidden="true"><span class="skel" style="width:80%"></span><span class="skel" style="width:45%"></span></div></section>
   </div>
   <section class="panel col decisions">
     <header><h2>Decisions</h2><span id="chip-log"></span></header>
-    <ol class="log" id="log" tabindex="0" aria-label="Decision log"></ol>
+    <ol class="log" id="log" tabindex="0" aria-label="Decision log">
+    <li aria-hidden="true"><span></span><span class="stack"><span class="skel" style="width:6rem"></span><span class="skel" style="width:85%"></span></span></li>
+    <li aria-hidden="true"><span></span><span class="stack"><span class="skel" style="width:6rem"></span><span class="skel" style="width:85%"></span></span></li>
+    <li aria-hidden="true"><span></span><span class="stack"><span class="skel" style="width:6rem"></span><span class="skel" style="width:85%"></span></span></li>
+    <li aria-hidden="true"><span></span><span class="stack"><span class="skel" style="width:6rem"></span><span class="skel" style="width:85%"></span></span></li>
+    </ol>
   </section>
 </main>
 <footer class="models" id="models" aria-label="Where models run"></footer>
