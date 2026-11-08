@@ -16,6 +16,8 @@ MAX_BOX_OFFSET_M = 0.12  # the arms' sideways reach
 MIN_BIN_DISTANCE_M = 0.5  # a walking robot stops ~0.45 m short of the bin's centre to place
 MAX_BIN_DISTANCE_M = 2.2  # the longest walk measured, far_bin's
 TWIST_BIN_DISTANCE_M = (0.40, 0.50)  # a fixed-feet bin must sit where the twisted, outstretched arms put the box
+# and at a bearing the scripted policy places at on 20 of 20 seeds; at 112-124 degrees it lands on the rim (15 of 20).
+TWIST_BIN_BEARING_DEG = (85.0, 112.0)
 # Where `place` lands the box on a wall-less top every time: higher, it lands still between the open hands.
 PLATFORM_TOP_RANGE_M = (0.40, 0.45)
 # Boxes measured to settle on the top every time: the default and the small box up to 1 kg (20/20 seeds). With no wall
@@ -101,6 +103,8 @@ class TaskConfig:
         left, right = self.bin_bearing_deg
         if not 0.0 < left <= right < 360.0:
             problems.append(f"bin bearing {self.bin_bearing_deg} must lie between 0 and 360 degrees, low to high")
+        if not self.walking and not TWIST_BIN_BEARING_DEG[0] <= left <= right <= TWIST_BIN_BEARING_DEG[1]:
+            problems.append(f"bin bearing {self.bin_bearing_deg} is outside a waist twist's {TWIST_BIN_BEARING_DEG}")
         if self.platform_top_m is not None:
             lo, hi = PLATFORM_TOP_RANGE_M
             if not lo <= self.platform_top_m <= hi:

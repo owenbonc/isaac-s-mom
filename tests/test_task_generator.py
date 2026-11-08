@@ -212,6 +212,42 @@ def test_a_task_past_the_robots_limits_is_refused_with_the_reason(path: str, val
     assert isinstance(refusal, Refusal) and reason in refusal.reasons
 
 
+FIXED_FEET_PROPOSAL = {
+    **BIN_PROPOSAL,
+    "name": "twist_to_bin",
+    "scene": {
+        **BIN_PROPOSAL["scene"],
+        "destination": {"kind": "bin", "id": "bin", "distance_m": [0.43, 0.45], "bearing_deg": [97, 112]},
+    },
+    "stance": "fixed_feet",
+}
+
+
+def test_a_robot_told_to_stay_put_gets_a_fixed_feet_task() -> None:
+    spec = generate_task("without stepping, drop the box in the bin beside you", _fixed(FIXED_FEET_PROPOSAL))
+    assert isinstance(spec, TaskSpec) and spec.stance == "fixed_feet" and not spec.task_config().walking
+    assert _spec().stance == "walking" and _spec().task_config().walking  # left out, it walks
+
+
+@pytest.mark.parametrize(
+    ("path", "value", "reason"),
+    [
+        ("scene.destination.bearing_deg", [112, 124],
+         "bin bearing (112.0, 124.0) is outside a waist twist's (85.0, 112.0)"),
+        ("scene.destination.distance_m", [0.8, 1.0], "bin distance (0.8, 1.0) is outside a waist twist's (0.4, 0.5) m"),
+    ],
+)  # fmt: skip
+def test_a_fixed_feet_bin_out_of_the_twists_reach_is_refused(path: str, value: object, reason: str) -> None:
+    refusal = generate_task(INSTRUCTION, _fixed(_changed(FIXED_FEET_PROPOSAL, path, value)))
+    assert isinstance(refusal, Refusal) and reason in refusal.reasons
+
+
+def test_a_fixed_feet_shelf_is_refused() -> None:
+    shelf = {**OFFLINE_PROPOSAL, "stance": "fixed_feet"}
+    refusal = generate_task(INSTRUCTION, _fixed(shelf))
+    assert isinstance(refusal, Refusal) and "a platform is measured only for walking tasks" in refusal.reasons
+
+
 def test_a_bin_still_takes_the_heaviest_box() -> None:
     heavy = _changed(BIN_PROPOSAL, "scene.box.mass_kg", 2.0)
     assert isinstance(generate_task(INSTRUCTION, _fixed(heavy)), TaskSpec)
@@ -225,6 +261,8 @@ def test_the_prompt_states_the_limits_the_checks_enforce() -> None:
         "mass_kg up to 2.0",
         "(0.125, 0.15, 0.125)",
         "up to 1.0.",
+        "within 0.4 to\n  0.5 m",
+        "within 85 to 112",
     ]
     for limit in limits:
         assert limit in PROMPT, limit
