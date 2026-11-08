@@ -1415,6 +1415,30 @@ def test_a_seed_opens_over_the_run_arrows_step_its_neighbours_and_escape_returns
     assert out["claims"] is False
 
 
+def test_escape_from_a_seed_opened_over_move_returns_to_move_and_m_still_turns_it_off() -> None:
+    events = stream(*evaluated(0, (1, "failed")), *trial("t0", moved=True), *evaluated(1, (1, "succeeded")))
+    out = presenter(
+        """
+        open();
+        S.visit(v, { selected: "t0" });
+        press("m");
+        const at = () => [S.where(v), look().episode, look().focus];
+        const moved = at();
+        S.visit(v, S.showSeed(v, 1));
+        const seed = at();
+        press("Escape");
+        const back = at();
+        press("m");
+        return { moved, seed, back, off: at() };
+        """,
+        events,
+    )
+    assert out["moved"] == ["run", "t0", 1]
+    assert out["seed"] == ["seed", "t0", None]
+    assert out["back"] == ["run", "t0", 1]
+    assert out["off"] == ["run", "t0", None]
+
+
 def test_the_run_walks_every_episode_in_order_held_out_tests_included_and_move_opens_one_in_place() -> None:
     moved = [*held_out(1, 1, "failed")]
     moved.insert(2, ("perturbation", {"kind": "move_box", "step": 0}))

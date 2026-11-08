@@ -29,7 +29,7 @@
   // that never saw it live); `compare` is the box or bin move that Move shows, with the view to return to when pressed again;
   // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down; `settling`
   // while a connection's replay of the events already written streams in, which the page neither shows nor announces.
-  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true, seed: null, opened: null, side: "both" });
+  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true, seed: null, opened: null, side: "both", parked: null });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
@@ -554,9 +554,14 @@
     return null;
   }
 
+  // A seed opened over Move parks it, and coming back from the seed to the same episode shows Move again (SPEC §3.5).
   function visit(v, fields) {
+    const from = where(v);
+    const parked = from === "run" ? v.compare && { compare: v.compare, selected: v.selected } : v.parked;
     Object.assign(v, fields);
-    v.compare = null;
+    const to = where(v);
+    v.compare = from !== "run" && to === "run" && parked && parked.selected === v.selected ? parked.compare : null;
+    v.parked = to === "run" ? null : parked;
   }
   function go(v, now, key) {
     const to = target(v, now, key);
