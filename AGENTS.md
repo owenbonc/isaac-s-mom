@@ -23,7 +23,7 @@ Guidance for every agent and teammate working in this repo.
 ## Workflow
 
 - Branch from `phase-1`, one branch per piece of work, and open a PR into `phase-1`. Never push to `phase-1` or `main` directly.
-- A PR merges only through `node scripts/merge-gate.mjs <pr> owenbonc/isaac-s-mom`: CI green and the PR body's `## Review` section filled (`- deslop:`, `- no-comments:`, `- ponytail-review:`).
+- A PR merges only through `node scripts/merge-gate.mjs <pr> owenbonc/scaffld`: CI green and the PR body's `## Review` section filled (`- deslop:`, `- no-comments:`, `- ponytail-review:`).
 - Agents in a worktree run `scripts/agent-setup.sh origin/phase-1` first.
 
 ## Skills
