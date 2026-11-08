@@ -183,7 +183,7 @@ def create_app(
                 teach, runs_dir, instruction, task=task, generate=generate, launch=launch
             )
         except OSError as error:  # no run to list it as not started, so the page shows why instead
-            raise HTTPException(status_code=500, detail=f"The runs folder can't hold a new run: {error}") from None
+            raise HTTPException(status_code=500, detail=f"A new run couldn't be written: {error}") from None
         if reasons:
             return JSONResponse({"run_id": run_id, "started": False, "reasons": reasons})
         return JSONResponse({"run_id": run_id, "started": True}, status_code=201)

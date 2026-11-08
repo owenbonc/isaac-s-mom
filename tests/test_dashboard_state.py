@@ -1673,7 +1673,7 @@ def test_a_teach_answer_is_started_not_started_with_its_reasons_or_a_failure_in_
         [400, {"detail": "1 to 200 characters"}],
         [500, None],
         [0, None],
-        [500, {"detail": "The runs folder can't hold a new run: [Errno 17] File exists: '/srv/runs'"}],
+        [500, {"detail": "A new run couldn't be written: [Errno 17] File exists: '/srv/runs'"}],
     ]
     out = run("return events.map(([status, body]) => S.teachAnswer(status, body));", answers)
     assert out[0] == {"state": "started", "runId": "teach-1"}
@@ -1686,7 +1686,7 @@ def test_a_teach_answer_is_started_not_started_with_its_reasons_or_a_failure_in_
     assert out[6]["message"] == "The dashboard server could not take it (HTTP 500)."
     assert out[7]["message"] == "Could not reach the dashboard server."
     # The server's own reason when it has one, such as a runs folder it can't write.
-    assert out[8]["message"] == "The runs folder can't hold a new run: [Errno 17] File exists: '/srv/runs'"
+    assert out[8]["message"] == "A new run couldn't be written: [Errno 17] File exists: '/srv/runs'"
 
 
 def test_a_runs_instruction_and_why_it_did_not_start_are_read_from_its_events() -> None:

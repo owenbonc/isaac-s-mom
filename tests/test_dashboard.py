@@ -1,6 +1,7 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 import threading
@@ -815,17 +816,44 @@ def test_a_runs_folder_behind_a_dangling_symlink_fails_the_teach_at_once_naming_
     assert not (tmp_path / "gone").exists()
 
 
-def test_a_taken_run_id_is_drawn_again_but_only_so_many_times(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+def drawing(monkeypatch: pytest.MonkeyPatch, *tokens: str) -> list[str]:
+    """Run ids drawn from here on use `tokens` in turn, then "aaaa"; the list of what was drawn."""
+    queue, drawn = list(tokens), list[str]()
+
+    def token_hex(_: int) -> str:
+        drawn.append(queue.pop(0) if queue else "aaaa")
+        return drawn[-1]
+
+    monkeypatch.setattr(runs_module, "secrets", SimpleNamespace(token_hex=token_hex))
+    return drawn
+
+
+def test_a_taken_run_id_is_drawn_again_but_only_8_times(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     runs = tmp_path / "runs"
     (runs / "teach-20261108-120000-aaaa").mkdir(parents=True)
-    draws = ["aaaa", "bbbb"]
     monkeypatch.setattr(runs_module, "time", SimpleNamespace(strftime=lambda _: "teach-20261108-120000"))
-    monkeypatch.setattr(runs_module, "secrets", SimpleNamespace(token_hex=lambda _: draws.pop(0) if draws else "aaaa"))
+    drawn = drawing(monkeypatch, "aaaa", "bbbb")
     teach_now = teach_in(runs, lambda purpose, parts: json.dumps(REFUSES))
     assert finished_within(10, teach_now) == ("teach-20261108-120000-bbbb", ["Argon declined: it can only move boxes"])
+    assert drawn == ["aaaa", "bbbb"]
     error = finished_within(10, teach_now)  # every id it draws now is taken
-    assert isinstance(error, FileExistsError)
-    assert str(error) == f"no free run id in {runs} after {runs_module.RUN_ID_TRIES} draws"
+    assert isinstance(error, FileExistsError) and str(error) == f"no free run id in {runs} after 8 draws"
+    assert drawn[2:] == ["aaaa"] * 8 and runs_module.RUN_ID_TRIES == 8
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="only a POSIX non-root user is kept out")
+def test_a_runs_folder_it_may_not_write_fails_the_teach_on_its_first_draw(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    runs.chmod(0o500)
+    drawn = drawing(monkeypatch)
+    try:
+        error = finished_within(10, teach_in(runs))
+    finally:
+        runs.chmod(0o700)  # so tmp_path can be cleaned up
+    assert isinstance(error, PermissionError) and drawn == ["aaaa"]
 
 
 def test_a_runs_folder_that_cannot_hold_a_run_fails_the_teach_with_why(tmp_path: Path) -> None:
@@ -834,7 +862,7 @@ def test_a_runs_folder_that_cannot_hold_a_run_fails_the_teach_with_why(tmp_path:
     client = TestClient(app, base_url=LOCAL, client=("127.0.0.1", 50000), raise_server_exceptions=False)
     response = teach(client, "put the box in the bin")
     assert (response.status_code, response.headers["content-type"]) == (500, "application/json")
-    detail = f"The runs folder can't hold a new run: [Errno 17] File exists: '{tmp_path / 'runs'}'"
+    detail = f"A new run couldn't be written: [Errno 17] File exists: '{tmp_path / 'runs'}'"
     assert response.json() == {"detail": detail}
 
 
