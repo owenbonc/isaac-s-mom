@@ -2073,7 +2073,7 @@ def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_set
 
 def test_after_a_move_the_stage_marks_it_on_every_later_frame_and_only_icons_carry_the_results_mark_class() -> None:
     script = """
-    // `.mark` sizes the Results icons, so anything else in that class is squeezed into an icon's box.
+    // `.mark` sizes the strip's icons, so anything else in that class is squeezed into an icon's box.
     const marked = writes.flatMap(([, html]) => html.match(/<\\w+[^>]*class="[^"]*\\bmark\\b[^"]*"/g) || []);
     const stage = writes.filter(([id]) => id === "stage").pop()[1];
     return { stage, notIcons: marked.filter((t) => !t.startsWith("<svg")) };

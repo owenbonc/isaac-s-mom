@@ -73,7 +73,7 @@ const kindOf = (ep) => {
   const [name, seed] = KINDS[MomState.kind(ep)];
   return [name, `${seed} ${esc(ep.seed ?? "")}`];
 };
-// An errored held-out test takes Results' yellow ! wherever it shows, never a failure's red ✗ (rule 6).
+// An errored held-out test takes the strip's yellow ! wherever it shows, never a failure's red ✗ (rule 6).
 const verdictLook = (ep) => (MomState.errored(ep) ? ["warn", markIcon("error")] : MomState.accepted(ep) ? ["good", CHECK] : ["bad", X]);
 const verdictChip = (ep) => {
   const [look, icon] = verdictLook(ep);
@@ -415,7 +415,7 @@ function heldOut() {
     ? `<span class="fig" role="img" aria-label="Held-out success: ${esc(c.spoken)}">${esc(c.figure)}</span><span class="rates"><span>${esc(c.counts)}</span>${errored}</span>`
     : `<span>${esc(cap(c.spoken))}.</span>${errored}`);
   const gain = c && `<div class="gain">${lead}</div><div class="names" title="${esc(c.ids)}">${esc(c.names)}</div>`;
-  // A run that did not start says why where its results would be, so it needs no line here.
+  // A run that did not start says why on the stage's slate, so it needs no line here.
   const none = progress || (s.refused === null ? "No held-out evaluation in the events yet." : "");
   const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : none && `<div class="ph-text">${none}</div>`;
   // A run is taught and tested on its own instruction, so its rates carry it (SPEC §3.5).

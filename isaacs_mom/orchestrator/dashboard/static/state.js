@@ -25,8 +25,8 @@
   }
 
   // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing and when
-  // it was paused; `selected` pins the episode shown (null follows the run: its episode in progress while live, its
-  // story once finished); `compare` is the box or bin move that Move shows, with the view to return to when pressed again;
+  // it was paused; `selected` pins the episode shown (null follows the run: its latest episode, or its story for a view
+  // that never saw it live); `compare` is the box or bin move that Move shows, with the view to return to when pressed again;
   // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down; `settling`
   // while a connection's replay of the events already written streams in, which the page neither shows nor announces.
   const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true, seed: null, opened: null, side: "both" });
