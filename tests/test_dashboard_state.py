@@ -1907,14 +1907,14 @@ def test_no_value_from_an_event_or_the_runs_list_becomes_markup_in_any_view() ->
     assert {"run-list", "results", "control", "stage", "log", "p-rounds", "p-diagnosis", "teach-said"} <= set(
         out["escaped"]
     )
-    # A run that did not start shows why in Results and in Now, and Argon's answer can steer that text.
+    # A run that did not start shows why in Results and on Now's stage, and Argon's answer can steer that text.
     events = stream(
         ("instruction", {"text": HOSTILE, "source": "teach"}), ("error", {"error": f"not started: {HOSTILE}"})
     )
     script = 'vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);'
     out = app(REPLAY + script + MARKUP, [{**e, "run_id": f"r{HOSTILE}"} for e in events])
     assert out["injected"] == []
-    assert {"results", "control", "stage"} <= set(out["escaped"])
+    assert {"results", "stage"} <= set(out["escaped"])
 
 
 def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_settles() -> None:
@@ -1991,15 +1991,21 @@ def test_a_click_on_previous_or_next_in_results_takes_the_focus_to_the_seed_as_t
     assert app(REPLAY + script, stream(*TWO_EVALUATIONS)) == [f'.seeds [data-seed="{n}"]' for n in [2, 1, 3, 1]]
 
 
-def test_results_says_once_why_a_run_did_not_start() -> None:
+def test_a_run_that_did_not_start_says_why_once_in_each_tab() -> None:
     script = """
     const last = (id) => writes.filter(([at]) => at === id).pop()[1];
-    return { control: last("control"), results: last("results") };
+    const seen = [{ control: last("control"), shown: last("results") }];
+    for (const tab of ["teaching", "now"]) {
+      vm.runInContext(`MomState.visit(view, { tab: "${tab}" }); render();`, context);
+      seen.push({ control: last("control"), shown: last("stage") });
+    }
+    return seen;
     """
     refused = ("error", {"error": "not started: Not yet: the loop teaches one task"})
     out = app(REPLAY + script, stream(("instruction", {"text": "juggle", "source": "teach"}), refused))
-    assert "Not started" in out["control"] and "Not yet" not in out["control"]
-    assert "Not yet: the loop teaches one task" in out["results"]
+    for tab in out:
+        assert "Not started" in tab["control"] and "Not yet" not in tab["control"]
+        assert "Not yet: the loop teaches one task" in tab["shown"]
 
 
 HEARD = """

@@ -169,10 +169,11 @@ function renderControl() {
   if (!ep) {
     const s = MomState.shown(view);
     el.className = "control";
+    // A run that did not start says why on the stage's slate, so the bar names only that.
     el.innerHTML = !runId
       ? '<span class="what">No run yet</span>'
       : s.refused !== null
-        ? `<span class="what">Not started</span><span class="note">${esc(s.refused)}</span>`
+        ? '<span class="what">Not started</span>'
         : s.episodes.length
           ? `<span class="what">No teaching episode yet</span><span class="note">${TEACHING_STARTS}</span>`
           : '<span class="what">Waiting for the run to start</span>';
