@@ -28,9 +28,9 @@ from isaacs_mom.student import BASE_CHECKPOINT, StubStudent, StudentPolicy
 from isaacs_mom.validator.recorder import write_atomically
 from isaacs_mom.validator.rules import RECORDING_ERROR
 
-# SPEC §6.10's edge-device budget (Owen's pick, #22): 2 s per decision and 3 GB of memory on a laptop.
+# SPEC §6.10's edge-device budget: 2 s per decision and 3 GiB of memory on a laptop (GiB, as the student reports it).
 DEFAULT_BUDGET_MS = 2000.0
-MEMORY_BUDGET_GB = 3.0
+MEMORY_BUDGET_GIB = 3.0
 
 ConditionName = Literal["training_distribution", "new_layout", "move_bin_after_lift"]
 Outcome = Literal["accepted", "rejected", "errored"]
@@ -94,7 +94,7 @@ def evaluation_report(
     device: str,
     budget_ms: float = DEFAULT_BUDGET_MS,
     conditions: Sequence[Condition] = CONDITIONS,
-    peak_memory_gb: Callable[[], float | None] = lambda: None,
+    peak_memory_gib: Callable[[], float | None] = lambda: None,
 ) -> list[ConditionReport]:
     """Run every checkpoint on every condition's tasks and seeds; write the records and the report."""
     if not seeds:
@@ -127,8 +127,8 @@ def evaluation_report(
             reports.append(summarise(checkpoint, condition.name, records, budget_ms))
     report = {
         "budget_ms": budget_ms,
-        "memory_budget_gb": MEMORY_BUDGET_GB,
-        "peak_memory_gb": peak_memory_gb(),
+        "memory_budget_gib": MEMORY_BUDGET_GIB,
+        "peak_memory_gib": peak_memory_gib(),
         "device": device,
         "seeds": list(seeds),
         "conditions": [r.model_dump() for r in reports],
@@ -237,13 +237,13 @@ def markdown(
     budget_ms: float,
     device: str,
     seeds: Sequence[int],
-    peak_memory_gb: float | None = None,
+    peak_memory_gib: float | None = None,
 ) -> str:
     """The summary table: successes out of (n - errored), with the errored count and the latency against budget."""
-    memory = f"peak GPU memory {peak_memory_gb:.2f} GB" if peak_memory_gb is not None else "GPU memory not measured"
+    memory = f"peak GPU memory {peak_memory_gib:.2f} GiB" if peak_memory_gib is not None else "GPU memory not measured"
     lines = [
         f"Student only, held-out seeds {', '.join(map(str, seeds))} (n={len(seeds)} per task), on {device}; "
-        f"budget {budget_ms:.0f} ms per decision and {MEMORY_BUDGET_GB:.0f} GB, {memory}.",
+        f"budget {budget_ms:.0f} ms per decision and {MEMORY_BUDGET_GIB:.0f} GiB, {memory}.",
         "",
         "| Checkpoint | Condition | Successes / (n - errored) | Errored | Median ms | p95 ms | Over budget |",
         "|---|---|---|---|---|---|---|",
@@ -257,10 +257,10 @@ def markdown(
     return "\n".join(lines)
 
 
-def _cuda_peak_memory_gb() -> float:
+def _cuda_peak_memory_gib() -> float:
     import torch
 
-    return torch.cuda.max_memory_allocated() / 1e9
+    return torch.cuda.max_memory_allocated() / 2**30
 
 
 def main() -> None:
@@ -281,7 +281,7 @@ def main() -> None:
         from isaacs_mom.student import vlm  # loads torch, only for the real model
 
         make_student, device = StudentPolicy, vlm.pick_device()
-    peak_memory = _cuda_peak_memory_gb if device == "cuda" else lambda: None
+    peak_memory = _cuda_peak_memory_gib if device == "cuda" else lambda: None
     seeds = sorted(heldout_seeds())[: args.seeds]
     run_dir = Path("runs") / time.strftime("eval-%Y%m%d-%H%M%S")
     run_dir.mkdir(parents=True)  # refuses a second run started in the same second
@@ -293,7 +293,7 @@ def main() -> None:
         seeds=seeds,
         device=device,
         budget_ms=args.budget_ms,
-        peak_memory_gb=peak_memory,
+        peak_memory_gib=peak_memory,
     )
     print(markdown(reports, args.budget_ms, device, seeds, peak_memory()))
     print(f"saved to {run_dir}")
