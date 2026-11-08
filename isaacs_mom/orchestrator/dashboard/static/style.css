@@ -224,18 +224,24 @@ footer.models .v{color:var(--muted)}
 .sheet li{position:relative;overflow:hidden;background:var(--well)}
 .sheet img{display:block;width:100%;height:100%;object-fit:cover}
 
-/* The filmstrip takes only the height the frame leaves, and shows once its thumbnails can be read. */
-.strip{--st:1.6rem;list-style:none;margin:0;padding:.1rem .6rem .6rem;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-content:start;gap:.4rem;flex:1 1 0;min-height:0;container-type:size}
+/* The filmstrip fills the height the frame leaves, so the panel has no empty band: as many 4:3 thumbnails as fit that
+   height, 6 at most and 3 at least, the earliest dropped first (the stage's frame is never among the first three of 6).
+   Where three 4:3 thumbnails can't fill it, they crop towards square from the sides. It shows once they can be read. */
+.strip{--g:.4rem;list-style:none;margin:0;padding:.1rem .6rem .6rem;display:flex;align-items:flex-end;gap:var(--g);flex:1 1 0;min-height:0;container-type:size}
 /* Move's pair is the peak, so no thumbnail competes with it at any size. */
 .strip:empty,#stage:has(.cell + .cell) + .strip{display:none}
-.strip li{position:relative;display:flex;flex-direction:column;gap:.35rem;min-width:0}
-@container (height < 5rem){.strip li{display:none}}
-.thumb{position:relative;width:min(100%,(100cqh - var(--st)) * 4 / 3);aspect-ratio:4/3;background:var(--well);border-radius:4px;overflow:hidden}
+.strip li{--w:min((100cqw - 5 * var(--g)) / 6,100cqh * 4 / 3);position:relative;flex:none;width:var(--w)}
+@container (aspect-ratio < 8){.strip li{--w:min((100cqw - 4 * var(--g)) / 5,100cqh * 4 / 3)}.strip li:nth-last-child(n+6){display:none}}
+@container (aspect-ratio < 20 / 3){.strip li{--w:min((100cqw - 3 * var(--g)) / 4,100cqh * 4 / 3)}.strip li:nth-last-child(n+5){display:none}}
+@container (aspect-ratio < 16 / 3){.strip li{--w:min((100cqw - 2 * var(--g)) / 3,100cqh * 4 / 3)}.strip li:nth-last-child(n+4){display:none}}
+@container (height < 3rem){.strip li{display:none}}
+.thumb{position:relative;height:min(100cqh,var(--w));background:var(--well);border-radius:4px;overflow:hidden}
 .strip img{display:block;width:100%;height:100%;object-fit:cover}
 .strip li.now .thumb{outline:1.5px solid var(--ink);outline-offset:2px}
 .strip li.moved .thumb::before{content:"";position:absolute;top:0;right:0;z-index:1;border-style:solid;border-width:0 .8rem .8rem 0;border-color:transparent var(--accent) transparent transparent}
-.strip .st{font-size:var(--t-label);color:var(--muted)}
-.strip li.moved .st{background:var(--accent);color:var(--on-accent);border-radius:3px;padding:0 .3rem;align-self:flex-start}
+/* Each thumbnail's step sits in a corner notch, so the thumbnails take the strip's whole height. */
+.strip .st{position:absolute;top:0;left:0;z-index:1;padding:0 .35rem .1rem .3rem;border-bottom-right-radius:4px;background:var(--well);font-size:var(--t-label);color:var(--muted)}
+.strip li.moved .st{background:var(--accent);color:var(--on-accent)}
 /* No data is a sparse dot grid, a sensor with nothing on it; after the frame rules so a missing frame keeps it. */
 [data-missing]{background:radial-gradient(circle at 1px 1px,rgb(255 255 255 / .16) 1px,transparent 1.6px) 0 0 / 11px 11px,var(--well)}
 [data-missing] img{visibility:hidden}
@@ -359,8 +365,9 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
   .shot{width:100%}
   /* A page that scrolls has the height for Move's pair one above the other, each the full width. */
   .frame{grid-auto-flow:row;aspect-ratio:auto}
-  .strip{flex:none;container-type:normal}
-  .thumb{width:100%}
+  .strip{flex:none;container-type:normal;display:grid}
+  .strip li{width:auto}
+  .thumb{height:auto;aspect-ratio:4/3}
   ol.log{max-height:24rem}
   .strip{grid-template-columns:repeat(3,minmax(0,1fr))}
   footer.models .item{white-space:normal}
