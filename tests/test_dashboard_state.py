@@ -1510,7 +1510,7 @@ def test_an_eval_run_compares_the_first_and_last_checkpoint_on_the_training_task
         conditioned(1, "move_bin_after_lift", *[(s, "succeeded") for s in seeds]),
     ]
     out = results(*[e for block in blocks for e in block])
-    assert [c["name"] for c in out["checkpoints"]] == ["before\u00a0fine-tuning", "after\u00a0round\u00a01"]
+    assert [c["name"] for c in out["checkpoints"]] == ["ckpt-r0", "ckpt-r1"]
     assert [row[0] for row in out["rows"]] == list(seeds)
     assert out["rows"][2] == [3, "pass", ["succeeded", "succeeded"]]
     assert out["rows"][9] == [10, "up", ["failed", "succeeded"]]
@@ -1523,6 +1523,18 @@ def test_an_eval_run_compares_the_first_and_last_checkpoint_on_the_training_task
     # a loop run's results carry no condition, so every one of them counts
     loop = results(*TWO_EVALUATIONS)
     assert len(loop["checkpoints"]) == 2 and loop["claim"]["counts"] == "1 → 1 of 3"
+
+
+def test_an_eval_runs_checkpoints_are_named_by_their_ids_and_a_loop_runs_by_round() -> None:
+    # `mom eval --ckpt r/ckpt-r3` tests that checkpoint second, so its round is 1, which is no fine-tuning round
+    base = conditioned(0, "training_distribution", (1, "failed"))
+    *tuned, (kind, result) = conditioned(1, "training_distribution", (1, "succeeded"))
+    out = results(*base, *tuned, (kind, {**result, "checkpoint": "r/ckpt-r3"}))
+    assert [c["name"] for c in out["checkpoints"]] == ["ckpt-r0", "ckpt-r3"]
+    assert (out["claim"]["names"], out["claim"]["ids"]) == ("ckpt-r0 → ckpt-r3", "ckpt-r0 → r/ckpt-r3")
+    loop = results(*TWO_EVALUATIONS)
+    assert [c["name"] for c in loop["checkpoints"]] == ["before fine-tuning", "after round 1"]
+    assert loop["claim"]["names"] == "before fine-tuning → after round 1"
 
 
 def test_a_live_eval_run_shows_no_block_under_way_once_a_closed_result_names_its_condition() -> None:

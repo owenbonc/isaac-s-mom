@@ -326,8 +326,10 @@
   }
   // A fine-tuned checkpoint's id is `<run_id>/ckpt-rN` (student/checkpoints.py); the page names it by its last part.
   const shortCheckpoint = (c) => c.slice(c.lastIndexOf("/") + 1);
-  // No-break spaces keep each round's name on one line when a pair wraps.
+  // No-break spaces keep each round's name on one line when a pair wraps. A `mom eval` round is the checkpoint's
+  // position, not a fine-tuning round, so its checkpoint is named by its id (rule 6).
   function roundName(r) {
+    if (r.condition && r.checkpoint) return shortCheckpoint(r.checkpoint);
     if (r.from) return `from ${r.from.run}, ${shortCheckpoint(r.from.checkpoint)}`;
     return r.round === 0 ? "before\u00a0fine-tuning" : r.round === null ? "the\u00a0evaluation\u00a0under\u00a0way" : `after\u00a0round\u00a0${r.round}`;
   }
