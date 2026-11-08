@@ -3,7 +3,7 @@ import time
 from pathlib import Path
 
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import run_loop
+from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, run_loop
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -25,6 +25,13 @@ def run_id(text: str) -> str:
             f"{text!r}: use ASCII letters, digits, '.', '_' or '-', not starting or ending with '.'"
         )
     return text
+
+
+def at_least_one(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{value}: must be at least 1")
+    return value
 
 
 def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
@@ -49,6 +56,8 @@ def main() -> None:
         help="stub: no Argon calls and no key; the default on --sim fake, so the skeleton run needs no key",
     )
     run.add_argument("--rounds", type=int, default=3)
+    run.add_argument("--demos", type=at_least_one, default=DEMOS_PER_ROUND, help="teacher demonstrations per round")
+    run.add_argument("--dev-trials", type=at_least_one, default=DEV_TRIALS, help="student trials the teacher diagnoses")
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     run.add_argument("--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)")
     args = parser.parse_args()
@@ -69,6 +78,8 @@ def main() -> None:
         run_dir,
         args.run_id,
         max_rounds=args.rounds,
+        demos=args.demos,
+        dev_trials=args.dev_trials,
         argon=argon,
         make_student=make_student,
         train_student=train_student,
