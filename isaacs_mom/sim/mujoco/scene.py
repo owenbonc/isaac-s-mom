@@ -202,6 +202,24 @@ def _add_world(spec: mujoco.MjSpec, task: TaskConfig) -> None:
     green = [0.25, 0.62, 0.35, 1]
     bin_body = world.add_body(name="bin", mocap=True, pos=[0.0, 0.5, 0.0])
     outer = BIN_INNER_HALF + BIN_WALL
+    if task.platform_top_m is not None:
+        top = task.platform_top_m
+        bin_body.add_geom(
+            name="bin_stand",
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=[outer, outer, (top - 0.02) / 2],
+            pos=[0, 0, (top - 0.02) / 2],
+            rgba=[0.35, 0.35, 0.38, 1],
+        )
+        bin_body.add_geom(
+            name="bin_floor",
+            type=mujoco.mjtGeom.mjGEOM_BOX,
+            size=[outer, outer, 0.01],
+            pos=[0, 0, top - 0.01],
+            rgba=green,
+        )
+        _add_box_and_camera(world, task)
+        return
     bin_body.add_geom(
         name="bin_stand",
         type=mujoco.mjtGeom.mjGEOM_BOX,
@@ -225,6 +243,10 @@ def _add_world(spec: mujoco.MjSpec, task: TaskConfig) -> None:
     ]:
         bin_body.add_geom(name=name, type=mujoco.mjtGeom.mjGEOM_BOX, size=size, pos=pos, rgba=green)
 
+    _add_box_and_camera(world, task)
+
+
+def _add_box_and_camera(world: mujoco.MjsBody, task: TaskConfig) -> None:
     box = world.add_body(name="box", pos=[BOX_X, 0.0, TABLE_TOP_Z + task.box_half[2]])
     box.add_freejoint(name="box_free")
     box.add_geom(

@@ -201,10 +201,13 @@ class EvaluationResult(BaseModel):
     round: int
     successes: int
     n: int
+    errored: int
 
     @property
     def rate(self) -> float:
-        return self.successes / self.n if self.n else 0.0
+        """Successes out of the episodes that didn't error (SPEC §3.5)."""
+        scored = self.n - self.errored
+        return self.successes / scored if scored else 0.0
 
 
 class Event(BaseModel):

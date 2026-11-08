@@ -259,7 +259,7 @@ def test_a_box_dropped_in_the_bin_is_accepted_only_once_at_rest(sim: MujocoSim) 
     assert validate(gt).accepted
 
 
-@pytest.mark.parametrize("depth", [0.045, 0.05])  # shallower, the contact pushes it out before the first 20 ms tick
+@pytest.mark.parametrize("depth", [0.035, 0.045, 0.05])  # read after a tick, at ~75% of the depth
 def test_a_box_pushed_into_the_table_is_flagged(sim: MujocoSim, depth: float) -> None:
     start = sim.ground_truth().box_xyz
     _put_box(sim, (start[0], start[1], start[2] - depth))
@@ -499,6 +499,16 @@ def test_a_box_out_of_the_closed_hands_still_moves(sim: MujocoSim) -> None:
     assert sim.ground_truth().box_xyz[:2] != pytest.approx(start[:2], abs=0.01)
 
 
+def test_a_hug_short_of_the_box_misses_and_the_box_still_moves(blind_sim: MujocoSim) -> None:
+    # FakeSim's missed hug is the same two skills, so the sims agree that closed hands holding nothing hold nothing.
+    assert blind_sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30})).ok
+    assert blind_sim.execute(SkillCall(skill="hug")).ok
+    missed = blind_sim.ground_truth().box_xyz
+    assert blind_sim.closed and missed[2] > 0.8
+    assert blind_sim.perturb(Perturbation(kind="move_box", seed=99))
+    assert blind_sim.ground_truth().box_xyz[:2] != pytest.approx(missed[:2], abs=0.01)
+
+
 def test_a_moved_box_is_at_rest_only_a_full_second_later(sim: MujocoSim) -> None:
     def line_up() -> None:  # so the stepping robot's forearms don't brush the box while it waits
         dy = sim.ground_truth().box_xyz[1] - sim.work_y
@@ -558,6 +568,15 @@ def test_moving_the_bin_is_refused_while_the_box_is_in_it(sim: MujocoSim) -> Non
     assert before.box_on_bin_floor
     assert not sim.perturb(Perturbation(kind="move_bin", seed=99))
     assert sim.ground_truth() == before
+
+
+def test_the_hardest_drop_into_the_bin_is_contact_not_penetration(sim: MujocoSim) -> None:
+    # Let go 40 cm up, as `place` does: the deepest contact measured, 1.8 cm, is under PENETRATION_TOL_M.
+    x, y, yaw = _in_bin_frame(sim, 0.0)
+    _put_box(sim, (x, y, 0.32 + 0.125 + 0.40), yaw)
+    _wait(sim, 1.6)
+    gt = sim.ground_truth()
+    assert gt.box_on_bin_floor and not gt.penetration
 
 
 def test_a_box_landing_on_a_corner_is_contact_not_penetration(blind_sim: MujocoSim, tmp_path: Path) -> None:

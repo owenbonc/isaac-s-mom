@@ -14,7 +14,14 @@ BOX_HALF_HEIGHT_RANGE = (0.08, 0.15)
 MAX_BOX_MASS_KG = 2.0
 MAX_BOX_OFFSET_M = 0.12  # the arms' sideways reach
 MIN_BIN_DISTANCE_M = 0.5  # a walking robot stops ~0.45 m short of the bin's centre to place
+MAX_BIN_DISTANCE_M = 2.2  # the longest walk measured, far_bin's
 TWIST_BIN_DISTANCE_M = (0.40, 0.50)  # a fixed-feet bin must sit where the twisted, outstretched arms put the box
+# Where `place` lands the box on a wall-less top every time: higher, it lands still between the open hands.
+PLATFORM_TOP_RANGE_M = (0.40, 0.45)
+# Boxes measured to settle on the top every time: the default and the small box up to 1 kg (20/20 seeds). With no wall
+# to hold it off, a 2 kg box stays against the hands (14/20) and a taller one can tip (19/20).
+MAX_PLATFORM_BOX_HALF = (0.125, 0.15, 0.125)
+MAX_PLATFORM_BOX_MASS_KG = 1.0
 
 
 @dataclass(frozen=True)
@@ -69,6 +76,7 @@ class TaskConfig:
     box_offset_m: float = 0.10  # the box starts within this of the table's centre line
     bin_distance_m: tuple[float, float] = (1.0, 1.4)
     bin_bearing_deg: tuple[float, float] = (75.0, 285.0)  # anticlockwise from straight ahead; the table is ahead
+    platform_top_m: float | None = None  # unset, the bin; set, a wall-less platform with its top this high
 
     def __post_init__(self) -> None:
         problems = []
@@ -85,13 +93,28 @@ class TaskConfig:
         if (2 * self.box_half[0]) ** 2 + (2 * self.box_half[1]) ** 2 >= (2 * BIN_INNER_HALF) ** 2:
             problems.append("the box's footprint diagonal is as wide as the bin")
         near, far = self.bin_distance_m
-        if self.walking and not MIN_BIN_DISTANCE_M <= near <= far:
-            problems.append(f"bin distance {self.bin_distance_m} must run from at least {MIN_BIN_DISTANCE_M} m upwards")
+        if self.walking and not MIN_BIN_DISTANCE_M <= near <= far <= MAX_BIN_DISTANCE_M:
+            walkable = f"{MIN_BIN_DISTANCE_M}-{MAX_BIN_DISTANCE_M} m"
+            problems.append(f"bin distance {self.bin_distance_m} must run low to high within {walkable}")
         if not self.walking and not TWIST_BIN_DISTANCE_M[0] <= near <= far <= TWIST_BIN_DISTANCE_M[1]:
             problems.append(f"bin distance {self.bin_distance_m} is outside a waist twist's {TWIST_BIN_DISTANCE_M} m")
         left, right = self.bin_bearing_deg
         if not 0.0 < left <= right < 360.0:
             problems.append(f"bin bearing {self.bin_bearing_deg} must lie between 0 and 360 degrees, low to high")
+        if self.platform_top_m is not None:
+            lo, hi = PLATFORM_TOP_RANGE_M
+            if not lo <= self.platform_top_m <= hi:
+                problems.append(f"platform top {self.platform_top_m} m is outside the {lo}-{hi} m the drop lands on")
+            if not self.walking:
+                problems.append("a platform is measured only for walking tasks")
+            if any(half > most for half, most in zip(self.box_half, MAX_PLATFORM_BOX_HALF, strict=True)):
+                problems.append(
+                    f"box half-size {self.box_half} is past the {MAX_PLATFORM_BOX_HALF} m measured on a platform"
+                )
+            if self.box_mass_kg > MAX_PLATFORM_BOX_MASS_KG:
+                problems.append(
+                    f"box mass {self.box_mass_kg} kg is past the {MAX_PLATFORM_BOX_MASS_KG} kg measured on a platform"
+                )
         if problems:
             raise ValueError(f"task {self.name!r}: " + "; ".join(problems))
 

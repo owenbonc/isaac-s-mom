@@ -9,16 +9,17 @@ import pytest
 from pydantic import ValidationError
 
 from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, SkillCall, SkillTarget
-from isaacs_mom.orchestrator import cli
+from isaacs_mom.orchestrator import cli, loop
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import run_loop
+from isaacs_mom.orchestrator.loop import evaluate, run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
-from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, PLACE_X, FakeSim
+from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 from isaacs_mom.validator import replay, validate
+from isaacs_mom.validator.rules import recording_error_verdict
 from isaacs_mom.validator.training import build_training_set, training_examples
 
 
@@ -152,9 +153,8 @@ def test_fake_moves_the_box_only_while_it_rests_on_the_table_out_of_the_hands() 
     assert sim.perturb(Perturbation(kind="move_box", seed=99))
     assert sim.ground_truth().box_xyz != start.box_xyz
 
-    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
-    sim.execute(SkillCall(skill="hug"))  # turned away from the table, so the hands close on nothing
-    sim.execute(SkillCall(skill="turn_right", params={"angle_deg": 30}))
+    sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    sim.execute(SkillCall(skill="hug"))  # 30 cm short of the box, so the hands close on nothing, as in MujocoSim
     missed = sim.ground_truth()
     assert sim.closed and not sim.held
     assert sim.perturb(Perturbation(kind="move_box", seed=100))
@@ -175,6 +175,26 @@ def test_fake_moves_the_box_only_while_it_rests_on_the_table_out_of_the_hands() 
     assert placed.box_on_bin_floor
     assert not sim.perturb(Perturbation(kind="move_box", seed=99))
     assert sim.ground_truth() == placed
+
+
+def test_fake_moves_the_bin_under_a_box_held_over_it_mid_carry() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    policy = ScriptedPolicy(sim)
+    while (call := policy.act(sim.observe(), "", "")) and call.skill != "place":
+        assert sim.execute(call).ok
+    carried = sim.ground_truth()
+    assert sim.held and sim.lifted
+    assert sim.perturb(Perturbation(kind="move_bin", seed=99))  # held up in the hands, it is above any bin
+    moved = sim.ground_truth()
+    assert moved.bin_xy != carried.bin_xy and moved.box_xyz == carried.box_xyz
+
+    # Even right over where the new bin lands, as MujocoSim allows: a new bin is 1-1.4 m from the robot, so this is
+    # set up rather than carried there.
+    sim.reset(1234)
+    landing = np.random.default_rng(99)
+    sim.box, sim.box_z = _bin_pose(landing, sim.xy)[0], HELD_Z
+    assert sim.perturb(Perturbation(kind="move_bin", seed=99))
 
 
 def test_fake_moves_the_bin_only_clear_of_the_box() -> None:
@@ -353,6 +373,55 @@ def test_fake_sim_reports_the_robot_turned_by_its_waist() -> None:
     gt = sim.ground_truth()
     assert gt.robot_xy == (0.0, 0.0)
     assert gt.robot_yaw == pytest.approx(math.radians(30))
+
+
+class CrashesOn(FakeSim):
+    """A sim whose reset fails on some seeds, standing in for any crash mid-episode."""
+
+    def __init__(self, seeds: set[int]) -> None:
+        self.crash_seeds = seeds  # before super().__init__(), which resets
+        super().__init__()
+
+    def reset(self, seed: int) -> str:
+        if seed in self.crash_seeds:
+            raise RuntimeError(f"sim broke on {seed}")
+        return super().reset(seed)
+
+
+def test_a_heldout_episode_that_crashes_is_errored_and_the_evaluation_goes_on(tmp_path: Path) -> None:
+    seeds = sorted(heldout_seeds())
+    sim = CrashesOn({seeds[0], seeds[1]})
+    events = EventLog(tmp_path, "t")
+    result = evaluate(sim, "ckpt-r0", 0, tmp_path, events, lambda checkpoint: ScriptedPolicy(sim))
+    assert (result.successes, result.errored, result.n) == (len(seeds) - 2, 2, len(seeds))
+    assert result.rate == 1.0  # successes out of n - errored (SPEC §3.5)
+    errors = [json.loads(line)["data"] for line in events.path.read_text().splitlines() if '"error"' in line]
+    assert {e["seed"] for e in errors if e.get("split") == "heldout"} == {seeds[0], seeds[1]}
+
+
+def test_a_recording_error_verdict_is_errored_not_a_student_failure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = loop.run_episode
+    refused = sorted(heldout_seeds())[0]
+
+    def run_episode_refusing_one(*args: object, **kwargs: object) -> EpisodeManifest:
+        manifest = real(*args, **kwargs)  # type: ignore[arg-type]
+        if kwargs["seed"] == refused:
+            return manifest.model_copy(update={"validation": recording_error_verdict(ValueError("timestamps"))})
+        return manifest
+
+    monkeypatch.setattr(loop, "run_episode", run_episode_refusing_one)
+    result = evaluate(FakeSim(), "ckpt-r0", 0, tmp_path, EventLog(tmp_path, "t"), lambda checkpoint: GiveUp())
+    assert (result.successes, result.errored) == (0, 1)
+
+
+def test_a_student_that_cannot_be_built_stops_the_evaluation(tmp_path: Path) -> None:
+    def missing(checkpoint: str) -> GiveUp:
+        raise FileNotFoundError(f"no adapter for {checkpoint}")
+
+    with pytest.raises(FileNotFoundError):
+        evaluate(FakeSim(), "ckpt-r9", 0, tmp_path, EventLog(tmp_path, "t"), missing)
 
 
 def silent_argon(run_dir: Path, run_id: str) -> Argon:

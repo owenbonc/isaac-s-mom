@@ -110,6 +110,7 @@ def main() -> None:
         train_student=train_student,
     )
     for r in results:
-        print(f"round {r.round} {r.checkpoint}: {r.successes}/{r.n} held-out successes")
+        scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"
+        print(f"round {r.round} {r.checkpoint}: {scored}")
     print(argon.summary() + (" (stub teacher)" if teacher == "stub" else ""))
     print(f"run saved to {run_dir}")
