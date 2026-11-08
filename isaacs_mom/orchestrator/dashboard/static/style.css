@@ -323,7 +323,7 @@ footer.models .v{color:var(--muted)}
 [data-missing]::after{content:"Frame missing";position:absolute;inset:0;display:grid;place-items:center;color:var(--muted)}
 /* The caption line also carries the move's mark and the camera panel's provenance label. */
 .foot{flex:none;display:flex;align-items:center;gap:.5rem}
-.foot .mark{flex:none;display:inline-flex;align-items:center;gap:.35rem;padding-left:.55rem;font-weight:600}
+.foot .moved-at{flex:none;display:inline-flex;align-items:center;gap:.35rem;padding-left:.55rem;font-weight:600}
 .foot>.chip:last-child{margin-left:auto}
 .caption{flex:1;min-width:0;margin:0;padding:.3rem .55rem;border-radius:var(--r-sm);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* The move's caption is the stage's one raised line: grey, in full ink, the colour left to the frames. */

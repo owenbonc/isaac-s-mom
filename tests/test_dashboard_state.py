@@ -1865,3 +1865,26 @@ def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_set
     assert out["replaying"] == {"frames": 0, "written": []}
     assert out["announced"] == ""
     assert out["after"] > 5 and out["heard"]
+
+
+# Replays `events` through the stub stream and lets the replay settle, as a page opening a run does.
+REPLAY = """
+const [source] = sources;
+source.onopen();
+for (const e of events) source.onmessage({ data: JSON.stringify(e) });
+source.listeners.replayed();
+flush();
+"""
+
+
+def test_after_a_move_the_stage_marks_it_on_every_later_frame_and_only_icons_carry_the_results_mark_class() -> None:
+    script = """
+    vm.runInContext(`MomState.visit(view, { tab: "teaching" }); render();`, context);
+    // `.mark` sizes the Results icons, so anything else in that class is squeezed into an icon's box.
+    const marked = writes.flatMap(([, html]) => html.match(/<\\w+[^>]*class="[^"]*\\bmark\\b[^"]*"/g) || []);
+    const stage = writes.filter(([id]) => id === "stage").pop()[1];
+    return { stage, notIcons: marked.filter((t) => !t.startsWith("<svg")) };
+    """
+    out = app(REPLAY + script, stream(*TAKE))
+    assert "Box moved at step 1" in out["stage"]
+    assert out["notIcons"] == []

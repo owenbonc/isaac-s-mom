@@ -274,7 +274,7 @@ function renderCamera() {
   const move = MomState.move(ep);
   const what = move && esc(MOVED[ep.rows.findLast((r) => r.kind === "perturbation").what] || "Scene changed");
   // The caption row is always there, so the peak's caption never shrinks the frame.
-  let frame, caption, mark = "";
+  let frame, caption, movedAt = "";
   if (view.compare && move) {
     // The orchestrator took the left frame at the same pose right before the move, so no skill was chosen from it.
     frame = cell(move.before, null, false, "Before the move") + cell(move.after, skillRow(ep, move.after), true, "After");
@@ -285,13 +285,13 @@ function renderCamera() {
   } else {
     // The move stays marked on the caption line, with Move's icon, for the rest of its episode, so it can be shown after
     // the moment passed; the first frame after it says so in its own caption.
-    mark = last.after && !last.moved ? `<span class="mark">${MOVE}${what} at step ${esc(move.step)}</span>` : "";
+    movedAt = last.after && !last.moved ? `<span class="moved-at">${MOVE}${what} at step ${esc(move.step)}</span>` : "";
     frame = cell(last, skillRow(ep, last), last.moved);
     caption = last.moved
       ? `<p class="caption moved">${what} before step ${esc(move.step)}. This is the first frame after it.</p>`
       : `<p class="caption">${last.step === null ? "Head-camera frame." : `What the ${last.controller || "robot"} saw at step ${esc(last.step)}, before choosing.`}</p>`;
   }
-  $("stage").innerHTML = `<div class="frame">${frame}</div>${foot(mark + caption, panelChip(ep))}`;
+  $("stage").innerHTML = `<div class="frame">${frame}</div>${foot(movedAt + caption, panelChip(ep))}`;
   $("strip").innerHTML = frames
     .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (the scene moved before this frame)</span>' : ""}</span></li>`)
     .join("");
