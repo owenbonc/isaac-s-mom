@@ -169,11 +169,11 @@
         if (num(d.round) !== null && !s.trained.includes(d.round)) s.trained.push(d.round);
         break;
       case "finetune_progress": {
-        // A malformed report reads as Starting, never a guess.
+        // A malformed report is skipped: the bar keeps the last good one, or Starting with none, never a guess.
         const p = s.finetune.pending;
         if (!p || p.round === null || d.round !== p.round) break;
         const whole = Number.isInteger(d.step) && Number.isInteger(d.total) && d.total > 0 && d.step >= 0 && d.step <= d.total;
-        p.progress = whole ? Math.floor((d.step * 100) / d.total) : null;
+        if (whole) p.progress = Math.floor((d.step * 100) / d.total);
         break;
       }
       case "finetune_completed":

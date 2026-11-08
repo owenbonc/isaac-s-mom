@@ -262,7 +262,7 @@ footer.models .v{color:var(--muted)}
 .progress .fill{display:block;height:100%;border-radius:inherit;background:var(--ink);transform-origin:left;transform:scaleX(var(--p))}
 .progress .pct{min-width:4ch;font-weight:600;text-align:right}
 .progress:not([aria-valuenow]) .pct{color:var(--muted)}
-.progress:not([aria-valuenow]) .fill{transform:none;opacity:.3}
+.progress:not([aria-valuenow]) .fill{transform:none;opacity:0}
 @media (prefers-reduced-motion:no-preference){.progress:not([aria-valuenow]) .fill{width:30%;opacity:.7;animation:sweep 1.8s ease-in-out infinite}}
 @keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
 
@@ -403,6 +403,7 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 @media (max-width:1000px){
   body{height:auto;overflow:auto}
   .controlbar{flex-wrap:wrap}
+  .teach{flex-shrink:1;min-width:0}
   main{grid-template-columns:minmax(0,1fr)}
   .col{overflow:visible}
   .cell{container-type:normal}

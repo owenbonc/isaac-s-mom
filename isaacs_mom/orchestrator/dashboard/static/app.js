@@ -34,6 +34,8 @@ for (const el of document.querySelectorAll("[id]")) {
     },
   });
 }
+// The page's skeleton, written back when a reconnect's replay starts so the stale view never shows meanwhile.
+const SKELETON = new Map(["control", "columns", "stage", "p-rounds", "p-diagnosis", "p-training", "log"].map((id) => [id, $(id).innerHTML]));
 const { esc, shortCheckpoint } = MomState;
 const X = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
 const ARROW = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5L10 6l-3.5 3.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
@@ -859,6 +861,7 @@ function follow() {
   // The server replays the whole run on every connection, so the view starts over instead of adding to what is shown.
   source.onopen = () => {
     MomState.reconnect(view);
+    for (const [id, html] of SKELETON) $(id).innerHTML = html;
     renderedRows = 0;
     renderedEpisode = null;
   };
