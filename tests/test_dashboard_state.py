@@ -936,8 +936,9 @@ def test_while_the_stage_holds_a_step_the_bar_names_that_frames_controller_not_t
     assert take == [teacher, student_at_the_move]
 
 
-def evaluation(checkpoint: str, round_: int, successes: int, n: int) -> tuple[str, dict]:
-    return "evaluation_result", {"checkpoint": checkpoint, "round": round_, "successes": successes, "n": n}
+def evaluation(checkpoint: str, round_: int, successes: int, n: int, errored: int | None = None) -> tuple[str, dict]:
+    data = {"checkpoint": checkpoint, "round": round_, "successes": successes, "n": n}
+    return "evaluation_result", data if errored is None else {**data, "errored": errored}
 
 
 def heldout(episode_id: str, checkpoint: str, judged: bool = True) -> list[tuple[str, dict]]:
@@ -960,6 +961,7 @@ def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_
             "figure": "0/20",
             "spoken": "0 of 20 before\u00a0fine-tuning",
             "sample": "n=20",
+            "errored": None,
             "names": "before\u00a0fine-tuning",
             "ids": "ckpt-r0",
         },
@@ -971,6 +973,7 @@ def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_
         "figure": "0/20 → 9/20",
         "spoken": "0 of 20 before\u00a0fine-tuning, then 9 of 20 after\u00a0round\u00a02",
         "sample": "n=20 each",
+        "errored": None,
         "names": "before\u00a0fine-tuning → after\u00a0round\u00a02",
         "ids": "ckpt-r0 → ckpt-r2",
     }
@@ -980,6 +983,19 @@ def test_a_held_out_evaluation_with_no_episodes_says_so_in_words() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 0)))
     assert (claim["figure"], claim["sample"]) == ("0/20 → none", "n=20 and no held-out episode ran")
     assert claim["spoken"] == "0 of 20 before\u00a0fine-tuning, then no held-out episode ran after\u00a0round\u00a01"
+
+
+def test_held_out_success_is_out_of_n_minus_errored_with_the_errored_counts_shown_apart() -> None:
+    rounds = [evaluation("ckpt-r0", 0, 0, 20, errored=0), evaluation("ckpt-r1", 1, 3, 20, errored=1)]
+    claim, _ = run(CLAIM, stream(*rounds))
+    assert (claim["figure"], claim["sample"], claim["errored"]) == ("0/20 → 3/19", "n=20 each", "0 → 1 errored")
+    assert claim["spoken"] == "0 of 20 before\u00a0fine-tuning, then 3 of 19 after\u00a0round\u00a01, 1 errored"
+
+
+def test_a_held_out_evaluation_whose_every_episode_errored_says_so_in_words() -> None:
+    claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20, errored=20)))
+    assert (claim["figure"], claim["errored"]) == ("none", "20 errored")
+    assert claim["spoken"] == "all 20 held-out episodes errored before\u00a0fine-tuning"
 
 
 def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_evaluations_n() -> None:
@@ -1070,3 +1086,62 @@ def test_a_view_holds_still_from_each_connection_until_its_replayed_backlog_has_
         [],
     )
     assert out == [True, False, True, False]
+
+
+def argon_call(call: int, ok: bool = True, latency: object = 1000.0) -> tuple[str, dict]:
+    error = None if ok else "unreachable"
+    data = {"purpose": "diagnose", "model": "m", "call": call, "budget": 800, "ok": ok, "error": error}
+    return "argon_call", {**data, "latency_ms": latency}
+
+
+def test_the_argon_strip_counts_calls_used_of_the_budget_the_median_answer_and_the_failures() -> None:
+    script = "const s = S.initial(); for (const e of events) S.reduce(s, e); return S.argon(s);"
+    # The task generator's call comes first; the run's own calls count on from it (SPEC §3.5, rule 5).
+    calls = [argon_call(1, latency=1200.0), argon_call(2, ok=False, latency=30000.0), argon_call(3, latency=800.0)]
+    out = run(script, stream(*calls, argon_call(4, latency="slow"), argon_call(5)))
+    assert out == {"used": 5, "budget": 800, "answer": {"median": 1000.0, "n": 3}, "failed": 1}
+    assert run(script, stream(started("a"))) is None
+
+
+def test_each_fine_tune_names_the_round_whose_training_set_summary_the_page_reads() -> None:
+    out = fold(
+        ("finetune_started", {"round": 1, "training_set": "runs/r/training_r1.jsonl"}),
+        ("finetune_completed", {"round": 1}),
+        ("finetune_started", {"round": 2}),
+        ("finetune_started", {"round": 2}),
+        ("finetune_started", {"round": "3"}),
+    )
+    assert out["state"]["trained"] == [1, 2]
+
+
+def test_saved_run_files_are_read_only_when_they_have_the_contracts_shape() -> None:
+    summary = {
+        "round": 1,
+        "episodes_scanned": 30,
+        "demonstrations": 6,
+        "accepted": 5,
+        "rejected": 1,
+        "unfinished": 0,
+        "rejected_by": {"past_bin": 1},
+        "empty_dev_episodes": 0,
+        "examples": 43,
+    }
+    report = {"replayed": 5, "reproduced": 4, "failures": [{"episode_id": "e1", "reason": "box 3 cm off"}]}
+    files = [
+        summary,
+        {**summary, "accepted": "5"},
+        {**summary, "rejected_by": {"past_bin": -1}},
+        None,
+        report,
+        {**report, "failures": "none"},
+        {**report, "failures": [{"episode_id": 7}]},
+        [],
+    ]
+    script = """
+    const [ok, text, negative, missing, report, words, badFailure, list] = events;
+    const summaries = [ok, text, negative, missing].map((f) => S.trainingSummary(f));
+    return [summaries, [report, words, badFailure, list].map((f) => S.replayReport(f))];
+    """
+    summaries, reports = run(script, files)
+    assert summaries == [summary, None, None, None]
+    assert reports == [report, None, None, None]

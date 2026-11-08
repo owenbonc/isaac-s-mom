@@ -202,8 +202,14 @@ footer.models .v{color:var(--muted)}
   main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:fit-content(60%) minmax(0,1fr);grid-template-areas:"cam side" "cam log"}
   .camera{grid-area:cam}
   .decisions{grid-area:log}
-  /* The held-out column is as wide as its heading and chip on one line; the diagnosis takes the rest. */
-  .side{grid-area:side;display:grid;grid-template-columns:min-content minmax(0,1fr);align-items:start}
+  /* The held-out column is as wide as its heading and chip on one line; the diagnosis takes the rest, and the
+     training sets and replay run the band's full width under both. */
+  .side{grid-area:side;display:grid;grid-template-columns:min-content minmax(0,1fr);grid-template-areas:"rounds diag" "train train";align-items:start}
+  #p-rounds{grid-area:rounds}
+  #p-diagnosis{grid-area:diag}
+  #p-training{grid-area:train}
+  /* Each panel keeps its content's height and the band scrolls, so no panel ever overlaps the next. */
+  .side>.panel{min-height:auto}
   .side>.panel>header{flex-wrap:nowrap}
   .side>.panel>header h2{white-space:nowrap}
   .side .cited-row{grid-template-columns:minmax(0,6rem) minmax(0,1fr)}
@@ -220,7 +226,7 @@ footer.models .v{color:var(--muted)}
 /* Narrower than the projector's 1280 px the band has no room for two panels side by side, so they stack, and the
    episode keys show their icons alone (their names stay for screen readers and in their tooltips). */
 @media (min-width:1001px) and (max-width:1279px){
-  .side{grid-template-columns:minmax(0,1fr)}
+  .side{grid-template-columns:minmax(0,1fr);grid-template-areas:"rounds" "diag" "train"}
   .presenter .name{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
   .presenter button:has(.name){width:1.95rem;padding:0;justify-content:center}
 }
@@ -269,6 +275,10 @@ ol.log li.fresh{animation:in .16s var(--ease-out)}
 ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 
 .stack>*+*{margin-top:.35rem}
+/* Each saved file one line: its name as a label, its counts after. */
+.files{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.2rem .7rem;margin:0;align-items:baseline}
+.files dt{font-size:var(--t-label);font-weight:600;color:var(--muted)}
+.files dd{margin:0;text-wrap:pretty}
 .acting-on{margin:0;font-weight:600;color:var(--teacher)}
 .cited-row{display:grid;grid-template-columns:minmax(0,8rem) minmax(0,1fr);gap:.6rem;align-items:start}
 .cited{position:relative;aspect-ratio:4/3;background:var(--solid);border-radius:var(--r-sm);overflow:hidden;box-shadow:0 0 0 1px var(--edge)}

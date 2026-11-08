@@ -13,6 +13,9 @@ let flashedFrame = null;
 let lastHeard = { text: "", episode: null, count: 0, paused: false, lost: false };
 // A one-off line for the announcer: the box or bin move, heard once when it arrives live.
 let news = "";
+// Saved run files the events don't carry (SPEC §3.5): each trained round's training-set summary and the replay
+// report, by name; null once asked for and absent. A file once written never changes, so each is read until found.
+const runFiles = {};
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
 const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Argon (Gemini API)", finetune: "RTX 5070, local" };
 
@@ -357,22 +360,74 @@ function renderRounds() {
   const live = MomState.following(view, now()) && !view.lost;
   const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? " run so far" : ` of ${test.of} run`}${live ? "" : " when its events stopped"}.`;
   // First and latest only: the change is the claim.
-  const gain = c && `<div class="gain"><span class="fig" role="img" aria-label="Held-out successes: ${esc(c.spoken)}">${esc(c.figure)}</span><span>${esc(c.sample)}</span></div><div>${esc(c.names)}</div><div class="note mono">${esc(c.ids)}</div>`;
+  const errored = c && c.errored ? ` · ${esc(c.errored)}` : "";
+  const gain = c && `<div class="gain"><span class="fig" role="img" aria-label="Held-out successes: ${esc(c.spoken)}">${esc(c.figure)}</span><span>${esc(c.sample)}${errored}</span></div><div>${esc(c.names)}</div><div class="note mono">${esc(c.ids)}</div>`;
   const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}</div>`;
 }
 
-// One line: each model, where it runs (configured), and its measured median latency or fine-tune duration.
+const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
+
+// One line: each model, where it runs (configured), and its measured median latency or fine-tune duration; then the
+// Argon strip, the run's calls against its budget (rule 5).
 function renderModels() {
-  const s = MomState.summary(MomState.shown(view));
+  const shown = MomState.shown(view);
+  const s = MomState.summary(shown);
+  const a = MomState.argon(shown);
   const item = (who, where, measured) => `<span class="item"><b>${who}</b> ${where} <span class="v">${stat(measured)}</span></span>`;
+  const calls = a
+    ? `${a.used}${a.budget === null ? "" : ` of ${a.budget}`} <span class="v">· answers ${stat(a.answer)} · ${a.failed} failed</span>`
+    : '<span class="ph-text">none in the events</span>';
   $("models").innerHTML =
     // The item names say what the row is; the heading stays for screen readers so the row fits 1280 px.
     `<h2 class="sr">Models</h2><span class="chip quiet config">Configured</span>` +
     item("Student", CONFIGURED.student, s.student) +
     item("Teacher", CONFIGURED.teacher, s.teacher) +
     item("Fine-tune", CONFIGURED.finetune, s.finetune) +
+    `<span class="item"><b>Argon calls</b> ${calls}</span>` +
     panelChip();
+}
+
+// Each round's training set and the replay of the run's accepted episodes, from the run's saved files (SPEC §3.5).
+// A file not written yet says so in words.
+function renderTraining() {
+  const s = MomState.shown(view);
+  const missing = (name) => `<span class="ph-text">${name in runFiles || !s.runId ? "Not in the run's files." : "Reading the run's files."}</span>`;
+  const round = (r) => {
+    const t = runFiles[`training_r${r}.summary.json`];
+    if (!t) return `<dt>Round ${esc(r)}</dt><dd>${missing(`training_r${r}.summary.json`)}</dd>`;
+    const by = Object.entries(t.rejected_by).map(([why, n]) => `<span class="mono">${esc(why)}</span>&nbsp;${n}`).join(", ");
+    const detail = [
+      `${t.rejected} rejected${by ? ` (${by})` : ""}`,
+      t.unfinished ? `${t.unfinished} unfinished` : "",
+      `${t.empty_dev_episodes} empty of ${plural(t.episodes_scanned, "episode")}`,
+    ].filter(Boolean);
+    return `<dt>Round ${esc(r)}</dt><dd>${plural(t.examples, "example")} from ${t.accepted} accepted of ${plural(t.demonstrations, "demonstration")} so far <span class="note">· ${detail.join(" · ")}</span></dd>`;
+  };
+  const r = runFiles["replay_report.json"];
+  // The first two that failed, by episode and why; the rest counted.
+  const named = r ? r.failures.slice(0, 2).map((f) => `<span class="mono">${esc(f.episode_id)}</span> (${esc(f.reason)})`) : [];
+  const more = r && r.failures.length > 2 ? ` and ${r.failures.length - 2} more` : "";
+  const failed = named.length ? ` <span class="note">· not reproduced: ${named.join(", ")}${more}</span>` : "";
+  const replay = !r ? missing("replay_report.json") : r.replayed ? `${r.reproduced} of ${plural(r.replayed, "accepted episode")} reproduced${failed}` : "No accepted episode to replay.";
+  const rounds = s.trained.length ? s.trained.map(round).join("") : '<dt>Training</dt><dd class="ph-text">No training set built yet.</dd>';
+  $("p-training").innerHTML = `<header><h2>Training and replay</h2>${panelChip()}</header><dl class="body files">${rounds}<dt>Replay</dt><dd>${replay}</dd></dl>`;
+}
+
+// Reads the run's saved files not found yet, while the run may still write them: its last event under 30 minutes ago.
+async function readRunFiles() {
+  const s = MomState.shown(view);
+  if (!s.runId || (Object.keys(runFiles).length && now() - s.lastT > 30 * 60)) return;
+  const wanted = [...s.trained.map((r) => [`training_r${r}.summary.json`, MomState.trainingSummary]), ["replay_report.json", MomState.replayReport]];
+  const asked = await Promise.all(
+    wanted
+      .filter(([name]) => !runFiles[name])
+      .map(async ([name, parse]) => {
+        const response = await fetch(`/run-files/${encodeURIComponent(s.runId)}/${name}`).catch(() => null);
+        runFiles[name] = response && response.ok ? parse(await response.json().catch(() => null)) : null;
+      }),
+  );
+  if (asked.length) schedule();
 }
 
 // Clamped to four lines, so a long one never pushes the side band past its fold; the whole of it is in the title.
@@ -420,6 +475,7 @@ function render() {
   renderRounds();
   renderModels();
   renderDiagnosis();
+  renderTraining();
   // Last, so its scroll lands after every bar that sets its height is written.
   renderLog();
   // A new episode starts the side column at its top, where the held-out figure is.
@@ -509,6 +565,7 @@ source.onerror = () => {
 source.addEventListener("replayed", () => {
   MomState.settle(view);
   schedule();
+  readRunFiles();
 });
 source.onmessage = (message) => {
   try {
@@ -519,4 +576,5 @@ source.onmessage = (message) => {
   schedule();
 };
 setInterval(schedule, 1000); // live and recorded change with time, and the fine-tune clock ticks
+setInterval(readRunFiles, 10000); // a new round's summary and the replay report are written while the page is open
 schedule();

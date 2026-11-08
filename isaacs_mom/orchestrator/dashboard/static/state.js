@@ -14,6 +14,9 @@
       rounds: [],
       latency: { student: [], teacher: [] },
       finetune: { pending: null, durations: [] },
+      // Rounds whose training set was built (`finetune_started`), each with a summary file to read.
+      trained: [],
+      argon: { used: 0, budget: null, answers: [], failed: 0 },
       errorCount: 0,
     };
   }
@@ -149,15 +152,26 @@
       }
       case "evaluation_result":
         // `after` is where the next evaluation's held-out episodes start.
-        if (num(d.round) !== null && num(d.successes) !== null && num(d.n) !== null) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, after: s.episodes.length });
+        // `errored` is null for an evaluation recorded before errored episodes were counted apart.
+        if (num(d.round) !== null && num(d.successes) !== null && num(d.n) !== null) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: num(d.errored), after: s.episodes.length });
         break;
       case "finetune_started":
         s.finetune.pending = { round: num(d.round), t: event.t };
+        if (num(d.round) !== null && !s.trained.includes(d.round)) s.trained.push(d.round);
         break;
       case "finetune_completed":
         if (s.finetune.pending) s.finetune.durations.push((event.t - s.finetune.pending.t) * 1000);
         s.finetune.pending = null;
         break;
+      case "argon_call": {
+        // `call` counts on across the run's processes (rule 5), so the highest is how many were used.
+        const a = s.argon;
+        a.used = Math.max(a.used, num(d.call) ?? 0);
+        a.budget = num(d.budget) ?? a.budget;
+        if (d.ok !== true) a.failed += 1;
+        else if (num(d.latency_ms) !== null) a.answers.push(d.latency_ms);
+        break;
+      }
       case "error":
         s.errorCount += 1;
         if (ep) ep.rows.push({ kind: "error", text: text(d.message) || text(d.error) || "error event" });
@@ -285,8 +299,9 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
-  // The held-out claim (SPEC §3.5): the first and the latest evaluation, each with its n, named in words, with the
-  // checkpoint ids as a note. Null before the first evaluation.
+  // The held-out claim (SPEC §3.5): the first and the latest evaluation, each its successes out of the episodes that
+  // didn't error, with its n and errored count, named in words, with the checkpoint ids as a note. Null before the
+  // first evaluation.
   function claim(s) {
     if (!s.rounds.length) return null;
     const first = s.rounds[0];
@@ -294,15 +309,45 @@
     const pair = first === last ? [first] : [first, last];
     // No-break spaces keep each name on one line when the pair wraps.
     const name = (r) => (r.round === 0 ? "before\u00a0fine-tuning" : `after\u00a0round\u00a0${r.round}`);
-    const score = (r, of) => (r.n ? `${r.successes}${of}${r.n}` : "none");
+    const scored = (r) => r.n - (r.errored ?? 0);
+    const score = (r, of) => (scored(r) > 0 ? `${r.successes}${of}${scored(r)}` : "none");
+    const said = (r) =>
+      !r.n
+        ? `no held-out episode ran ${name(r)}`
+        : scored(r) <= 0
+          ? `all ${r.n} held-out episodes errored ${name(r)}`
+          : `${score(r, " of ")} ${name(r)}${r.errored ? `, ${r.errored} errored` : ""}`;
     const same = pair.every((r) => r.n === first.n) && first.n;
     return {
       figure: pair.map((r) => score(r, "/")).join(" → "),
-      spoken: pair.map((r) => (r.n ? `${score(r, " of ")} ${name(r)}` : `no held-out episode ran ${name(r)}`)).join(", then "),
+      spoken: pair.map(said).join(", then "),
       sample: same ? `n=${first.n}${pair.length > 1 ? " each" : ""}` : pair.map((r) => (r.n ? `n=${r.n}` : "no held-out episode ran")).join(" and "),
+      errored: pair.every((r) => r.errored !== null) ? `${pair.map((r) => r.errored).join(" → ")} errored` : null,
       names: pair.map(name).join(" → "),
       ids: pair.map((r) => r.checkpoint).join(" → "),
     };
+  }
+
+  // The Argon strip (SPEC §3.5, rule 5): calls used of the run's budget, the median answer with its n, and the calls
+  // that failed. Null before the first call.
+  function argon(s) {
+    const a = s.argon;
+    return a.used ? { used: a.used, budget: a.budget, answer: stat(a.answers), failed: a.failed } : null;
+  }
+
+  // Saved run files (SPEC §3.5), read only in the shape of their contract models; null for anything else.
+  const count = (v) => Number.isInteger(v) && v >= 0;
+  const SUMMARY = ["round", "episodes_scanned", "demonstrations", "accepted", "rejected", "unfinished", "empty_dev_episodes", "examples"];
+  function trainingSummary(f) {
+    if (!f || !SUMMARY.every((k) => count(f[k])) || !f.rejected_by || typeof f.rejected_by !== "object") return null;
+    const by = Object.entries(f.rejected_by);
+    if (!by.every(([, v]) => count(v))) return null;
+    return { ...Object.fromEntries(SUMMARY.map((k) => [k, f[k]])), rejected_by: Object.fromEntries(by) };
+  }
+  function replayReport(f) {
+    if (!f || !count(f.replayed) || !count(f.reproduced) || !Array.isArray(f.failures)) return null;
+    const failures = f.failures.map((x) => x && typeof x.episode_id === "string" && typeof x.reason === "string" && { episode_id: x.episode_id, reason: x.reason });
+    return failures.every(Boolean) ? { replayed: f.replayed, reproduced: f.reproduced, failures } : null;
   }
 
   // The held-out evaluation under way: its checkpoint, how many of its episodes have a verdict, and out of how many,
@@ -418,7 +463,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  const api = { initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, argon, trainingSummary, replayReport, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
