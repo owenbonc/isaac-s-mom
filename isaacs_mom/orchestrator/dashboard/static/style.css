@@ -291,10 +291,12 @@ footer.models .v{color:var(--muted)}
   /* The pair is as wide as the window allows; the height it leaves sits above and below it, not in one band. */
   .stage:has(.cell + .cell){margin-block:auto}
 }
-/* Narrower than the projector's 1280 px the band has no room for two panels side by side, so they stack. */
+/* Narrower than 1280 px, held-out and the diagnosis stay side by side (SPEC §3.5): the held-out column narrows, so
+   its rates fold under the figure, and the diagnosis's frame shrinks. */
 @media (min-width:1001px) and (max-width:1279px){
-  .side{grid-template-columns:minmax(0,1fr);grid-template-areas:"rounds" "diag" "train"}
-  .side>#p-diagnosis{border-left:0;border-top:1px solid var(--edge)}
+  .side{grid-template-columns:fit-content(15rem) minmax(0,1fr)}
+  .side>#p-rounds>header{flex-wrap:wrap}
+  .side .cited-row{grid-template-columns:minmax(0,4.5rem) minmax(0,1fr)}
   /* The control bar keeps one row: the episode's kind stands over its seed, and the Teach box narrows. */
   .control .kind{flex-direction:column;align-items:flex-start;gap:0;line-height:1.25}
   .teach input{width:12.5rem}
