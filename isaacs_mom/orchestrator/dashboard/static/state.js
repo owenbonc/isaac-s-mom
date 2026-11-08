@@ -20,11 +20,10 @@
 
   // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing and when
   // it was paused; `selected` pins an episode (null follows the run: its latest episode while live, its story once
-  // finished); `step` holds the shown episode at a step (M: the first frame after its move), null at its latest;
-  // `compare` is the box or bin move P shows, with the selection to return to when P is pressed again;
+  // finished); `compare` is the box or bin move that Move shows, with the selection to return to when it is pressed again;
   // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down; `settling`
   // while a connection's replay of the events already written streams in, which the page neither shows nor announces.
-  const view = () => ({ live: initial(), frozen: null, selected: null, step: null, compare: null, followed: false, lost: false, settling: true });
+  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
@@ -279,7 +278,7 @@
     if (!ep.verdict) return null;
     const good = accepted(ep);
     const k = kind(ep);
-    if (k === "demonstration") return good ? "Accepted for training" : "Rejected";
+    if (k === "demonstration") return good ? "Accepted for training" : "Rejected, not used for training";
     const outcome = good ? "Succeeded" : "Failed";
     if (k !== "take") return outcome;
     const took = ep.rows.find((r) => r.kind === "takeover");
@@ -293,7 +292,8 @@
     const first = s.rounds[0];
     const last = s.rounds[s.rounds.length - 1];
     const pair = first === last ? [first] : [first, last];
-    const name = (r) => (r.round === 0 ? "before fine-tuning" : `after round ${r.round}`);
+    // No-break spaces keep each name on one line when the pair wraps.
+    const name = (r) => (r.round === 0 ? "before\u00a0fine-tuning" : `after\u00a0round\u00a0${r.round}`);
     const score = (r, of) => (r.n ? `${r.successes}${of}${r.n}` : "none");
     const same = pair.every((r) => r.n === first.n) && first.n;
     return {
@@ -347,11 +347,12 @@
   }
 
   const teacherDrove = (ep) => ep.rows.some((r) => r.kind === "takeover" || r.controller === "teacher");
-  // The story beats D, T and M jump to (SPEC §3.5).
+  // The story beats D, T and Move jump to (SPEC §3.5).
   const BEATS = { d: (e) => e.diagnosis !== null, t: teacherDrove, m: (e) => e.perturbedStep !== null };
 
   // Where a navigation key leads from the shown episode: an index into the shown episodes, or -1 for nowhere new.
-  // A story beat goes to the nearest other episode that has it, forward on a tie.
+  // A story beat goes to the nearest other episode that has it, forward on a tie; Move stays on a shown episode
+  // that has a move.
   function target(v, now, key) {
     const episodes = shown(v).episodes;
     const at = episodes.indexOf(episode(v, now));
@@ -359,25 +360,40 @@
     if (at < 0) return -1;
     if (key === "ArrowLeft") return at > 0 ? at - 1 : -1;
     if (key === "ArrowRight") return at < last ? at + 1 : -1;
-    if (key === "End") return at < last || v.compare || v.step !== null ? last : -1;
+    if (key === "End") return at < last || v.compare ? last : -1;
+    if (key === "m" && BEATS.m(episodes[at])) return at;
     for (let d = 1; d <= last; d++) for (const i of [at + d, at - d]) if (episodes[i] && BEATS[key](episodes[i])) return i;
     return -1;
   }
 
-  // Landing on a live run's last episode follows the run again; M holds its episode at the move instead.
+  // Landing on a live run's last episode follows the run again.
   function go(v, now, key) {
     const i = target(v, now, key);
     if (i < 0) return;
     const episodes = shown(v).episodes;
-    v.selected = key !== "m" && i === episodes.length - 1 && following(v, now) ? null : episodes[i].id;
-    v.step = key === "m" ? episodes[i].perturbedStep : null;
+    v.selected = i === episodes.length - 1 && following(v, now) ? null : episodes[i].id;
     v.compare = null;
   }
 
-  // The step the stage holds the shown episode at: its move under P or after M, null for its latest frame.
-  const stageStep = (v) => (v.compare ? v.compare.step : v.step);
+  // Move (SPEC §3.5): the before and after of the shown episode's move, or of the nearest episode with one; pressing
+  // it again returns to the selection from before.
+  function showMove(v, now) {
+    if (v.compare) {
+      v.selected = v.compare.back;
+      v.compare = null;
+      return;
+    }
+    const i = target(v, now, "m");
+    if (i < 0) return;
+    const ep = shown(v).episodes[i];
+    v.compare = { step: ep.perturbedStep, back: v.selected };
+    v.selected = ep.id;
+  }
 
-  // Who the control bar names: the controller of the frame the stage holds after M or P, else the episode's latest.
+  // The step the stage holds the shown episode at: its move while Move shows it, null for its latest frame.
+  const stageStep = (v) => (v.compare ? v.compare.step : null);
+
+  // Who the control bar names: the controller of the frame the stage holds under Move, else the episode's latest.
   function inControl(v, now) {
     const ep = episode(v, now);
     if (!ep) return null;
@@ -389,26 +405,15 @@
   // An episode is over once judged, once the run has moved past it, or once the run has stopped.
   const finished = (v, now, ep) => ep.verdict !== null || ep !== current(shown(v)) || !following(v, now);
 
-  // Shows the shown episode's box or bin move; pressing again returns to the selection from before.
-  function compareMove(v, now) {
-    if (v.compare) {
-      v.selected = v.compare.back;
-      v.compare = null;
-      return;
-    }
-    const ep = episode(v, now);
-    if (!ep || ep.perturbedStep === null) return;
-    v.compare = { step: ep.perturbedStep, back: v.selected };
-    v.selected = ep.id;
-  }
-
-  const KEYS = { " ": togglePause, p: compareMove };
-  for (const key of ["ArrowLeft", "ArrowRight", "End", ...Object.keys(BEATS)]) KEYS[key] = (v, now) => go(v, now, key);
-  // Presenter keys (SPEC §3.5), whatever has focus. True when the key is the dashboard's, so the page claims it
+  const KEYS = { " ": togglePause, m: showMove };
+  for (const key of ["ArrowLeft", "ArrowRight", "End", "d", "t"]) KEYS[key] = (v, now) => go(v, now, key);
+  // Typing in a field is text, never a presenter key (SPEC §3.5).
+  const typing = (t) => Boolean(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable));
+  // Presenter keys (SPEC §3.5), whatever else has focus. True when the key is the dashboard's, so the page claims it
   // (a focused button must not also take Space as a click); a held key acts once.
   function keydown(v, e, now) {
     const action = KEYS[e.key.length === 1 ? e.key.toLowerCase() : e.key];
-    if (!action || e.metaKey || e.ctrlKey || e.altKey) return false;
+    if (!action || e.metaKey || e.ctrlKey || e.altKey || typing(e.target)) return false;
     if (!e.repeat) action(v, now);
     return true;
   }

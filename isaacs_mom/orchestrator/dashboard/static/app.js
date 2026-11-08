@@ -34,6 +34,7 @@ const ARROW = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5
 const DIAMOND = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5L10.5 6 6 10.5 1.5 6z" fill="currentColor"/></svg>';
 const BANG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v5M6 9.6v.4" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
 const CHECK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l2.6 2.6L10 3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+const MOVE = '<svg class="i" aria-hidden="true"><use href="#i-move"/></svg>';
 
 const now = () => Date.now() / 1000;
 const label = (kind) => kind[0].toUpperCase() + kind.slice(1);
@@ -128,13 +129,13 @@ function renderControl() {
     return "";
   }
   const [kind, where] = kindOf(ep);
-  const head = `<span class="what">${kind}</span><span class="note">${where}</span>`;
+  const head = `<span class="kind"><span class="what">${kind}</span><span class="note">${where}</span></span>`;
   if (!ep.controller) {
     el.className = "control";
     el.innerHTML = `${head}<span class="note">Waiting for the first decision.</span>`;
     return "";
   }
-  // After M or P the bar names whoever controlled the frame on the stage, not whoever controls the episode now.
+  // Under Move the bar names whoever controlled the frame on the stage, not whoever controls the episode now.
   const { controller, checkpoint, step } = MomState.inControl(view, now());
   const who = WHO[controller] || "An unknown controller";
   const took = ep.rows.find((r) => r.kind === "takeover");
@@ -213,8 +214,8 @@ function renderCamera() {
     const next = first ? ` First decision after the move: <span class="mono">${skillText(first)}</span>.${first.reason ? ` ${esc(first.reason)}` : ""}` : "";
     caption = `<p class="caption moved clamped"${first && first.reason ? ` title="${esc(first.reason)}"` : ""}>${what} between these frames, before step ${esc(move.step)}.${next}</p>`;
   } else {
-    // The move stays marked for the rest of its episode, so P still finds it after the moment has passed.
-    const mark = last.after ? `<span class="tag ink">${what} at step ${esc(move.step)} · <kbd>P</kbd></span>` : "";
+    // The move stays marked for the rest of its episode, with Move's icon, so the presenter can show it after the moment has passed.
+    const mark = last.after ? `<span class="tag ink">${what} at step ${esc(move.step)}${MOVE}</span>` : "";
     frame = cell(last, tag(last.controller, last.checkpoint), skillRow(ep, last), last.moved, mark);
     caption = last.moved
       ? `<p class="caption moved">${what} before step ${esc(move.step)}. This is the first frame after it.</p>`
@@ -229,7 +230,7 @@ function renderCamera() {
   const key = `${ep.id}@${last.step}`;
   const arriving = view.selected === null && !view.frozen && MomState.following(view, now());
   if (last.moved && arriving && key !== flashedFrame) {
-    news = `${what} at step ${move.step}. P shows the frames before and after.`;
+    news = `${what} at step ${move.step}. M shows the frames before and after.`;
     const shot = $("stage").querySelector(".shot");
     shot.classList.add("flash");
     shot.addEventListener("animationend", () => shot.classList.remove("flash"), { once: true });
@@ -284,6 +285,7 @@ function verdictRow(ep) {
 }
 
 const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m", "b-end": "End" };
+const PAUSE = $("b-pause");
 
 function renderEpisode() {
   const s = MomState.shown(view);
@@ -293,11 +295,11 @@ function renderEpisode() {
   const lost = view.lost ? ' <span class="lost">· connection lost, retrying</span>' : "";
   $("episode-line").innerHTML = (ep ? `Episode ${at + 1} of ${s.episodes.length}` : "") + lost;
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) < 0;
-  $("b-p").disabled = !view.compare && (!ep || ep.perturbedStep === null);
-  $("b-p").setAttribute("aria-pressed", String(view.compare !== null));
+  $("b-m").setAttribute("aria-pressed", String(view.compare !== null));
   // The visible label is the name; the key stays inverse while paused.
-  $("b-pause").classList.toggle("on", view.frozen !== null);
-  $("b-pause").lastElementChild.textContent = MomState.pauseLabel(view);
+  PAUSE.classList.toggle("on", view.frozen !== null);
+  PAUSE.lastElementChild.textContent = MomState.pauseLabel(view);
+  PAUSE.dataset.tip = `${view.frozen ? "Resume" : "Pause"} · Space`;
   // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when it failed or was rejected.
   $("rail").style.setProperty("--n", s.episodes.length);
   $("rail").innerHTML = s.episodes
@@ -324,9 +326,8 @@ function renderLog() {
   const stage = MomState.filmstrip(ep, step).find((f) => f.now);
   const full = (r) => !stage || stage.step === null || (r.step !== null && r.step >= stage.step);
   const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision, done, full(r)) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
-  // P hides the log in the two-column layout, so letting go of P parks it at the move row again.
-  const focus = step === null ? null : `${ep.id}@${step}${view.compare ? " P" : ""}`;
-  // Letting go of P drops the scroll it set, so the log follows new rows again.
+  // Move hides the log in the two-column layout; letting go of it drops the scroll it set, so the log follows new rows again.
+  const focus = step === null ? null : `${ep.id}@${step}`;
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows || (renderedFocus !== null && focus === null);
   if (fromStart) logFollowing = true;
   list.innerHTML = html.join("");
@@ -337,7 +338,7 @@ function renderLog() {
     list.scrollTop = stageRow ? stageRow.getBoundingClientRect().top - list.getBoundingClientRect().top + list.scrollTop : list.scrollHeight;
     logAnchor = list.scrollTop;
   }
-  // M and P park the log with the move row a third of the way down, and it stays parked until the reader scrolls.
+  // Move parks the log with the move row a third of the way down, and it stays parked until the reader scrolls.
   const row = list.querySelector("li.event.moved");
   if (focus !== null && focus !== renderedFocus && row) {
     list.scrollTop += row.getBoundingClientRect().top - list.getBoundingClientRect().top - list.clientHeight / 3;
@@ -356,7 +357,7 @@ function renderRounds() {
   const live = MomState.following(view, now()) && !view.lost;
   const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? " run so far" : ` of ${test.of} run`}${live ? "" : " when its events stopped"}.`;
   // First and latest only: the change is the claim.
-  const gain = c && `<div class="gain"><span class="fig" role="img" aria-label="Held-out successes: ${esc(c.spoken)}">${esc(c.figure)}</span><span>${esc(c.sample)}</span></div><div>${esc(c.names)} <span class="note mono">${esc(c.ids)}</span></div>`;
+  const gain = c && `<div class="gain"><span class="fig" role="img" aria-label="Held-out successes: ${esc(c.spoken)}">${esc(c.figure)}</span><span>${esc(c.sample)}</span></div><div>${esc(c.names)}</div><div class="note mono">${esc(c.ids)}</div>`;
   const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;
   $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}</div>`;
 }
@@ -429,13 +430,13 @@ function render() {
   keepFocus(focused);
 }
 
-// A key that disabled itself, or P hiding a focused panel, would drop focus to <body>: the nearest enabled presenter
-// key takes it instead, or P's own key.
+// A key that disabled itself, or Move hiding a focused panel, would drop focus to <body>: the nearest enabled
+// presenter key takes it instead, or Move's own key.
 function keepFocus(was) {
   if (!was || was === document.body || (!was.disabled && was.checkVisibility())) return;
   const keys = [...document.querySelectorAll(".presenter button")];
   const at = keys.indexOf(was);
-  if (at < 0) return $("b-p").focus();
+  if (at < 0) return $("b-m").focus();
   for (let d = 1; d < keys.length; d++) for (const key of [keys[at + d], keys[at - d]]) if (key && !key.disabled) return key.focus();
 }
 

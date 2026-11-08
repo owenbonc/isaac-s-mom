@@ -2,21 +2,43 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Isaac's Mom</title>
 <link rel="stylesheet" href="/static/style.css">
 <body>
+<!-- Icons drawn once, used by reference. Lucide (ISC licence, lucide.dev): chevron-left, chevron-right, skip-forward,
+     stethoscope, graduation-cap, pause, play. Hand-drawn: i-move. -->
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-latest" viewBox="0 0 24 24"><path d="M5 4l10 8-10 8z" fill="currentColor"/><path d="M19 5v14"/></symbol>
+  <symbol id="i-diag" viewBox="0 0 24 24"><path d="M11 2v2M5 2v2M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/></symbol>
+  <symbol id="i-teacher" viewBox="0 0 24 24"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
+  <!-- Before | after: one frame split down the middle, each half pointing outward. -->
+  <symbol id="i-move" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 2.5v19M8 10l-2 2 2 2M16 10l2 2-2 2"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3l14 9-14 9z" fill="currentColor"/></symbol>
+</svg>
 <header class="bar">
   <div class="top">
     <h1>Isaac's Mom</h1>
     <span id="status"></span>
+    <!-- Grouped as the presenter tells the story: where in the run, the story's beats, the view. Each key's shortcut
+         is in its tooltip and in Labels. -->
     <nav class="presenter" aria-label="Presenter keys">
-      <span class="pair"><button type="button" id="b-prev" data-key="ArrowLeft" aria-label="Previous episode"><kbd>←</kbd></button><button type="button" id="b-next" data-key="ArrowRight" aria-label="Next episode"><kbd>→</kbd></button> Episode</span>
-      <button type="button" id="b-d" data-key="d"><kbd>D</kbd> Diagnosis</button>
-      <button type="button" id="b-t" data-key="t"><kbd>T</kbd> Teacher</button>
-      <button type="button" id="b-m" data-key="m"><kbd>M</kbd> Move</button>
-      <button type="button" id="b-p" data-key="p" aria-pressed="false"><kbd>P</kbd> Before/after</button>
-      <button type="button" id="b-end" data-key="End"><kbd>End</kbd> Latest</button>
-      <button type="button" id="b-pause" data-key=" "><kbd>Space</kbd> <span>Pause</span></button>
+      <span class="group" role="group" aria-label="Episodes">
+        <button type="button" id="b-prev" data-key="ArrowLeft" aria-keyshortcuts="ArrowLeft" data-tip="Previous episode · ←"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg><span class="name">Previous</span></button>
+        <button type="button" id="b-next" data-key="ArrowRight" aria-keyshortcuts="ArrowRight" data-tip="Next episode · →"><svg class="i" aria-hidden="true"><use href="#i-next"/></svg><span class="name">Next</span></button>
+        <button type="button" id="b-end" data-key="End" aria-keyshortcuts="End" data-tip="Latest episode · End"><svg class="i" aria-hidden="true"><use href="#i-latest"/></svg><span class="name">Latest</span></button>
+      </span>
+      <span class="group" role="group" aria-label="Story">
+        <button type="button" id="b-d" data-key="d" aria-keyshortcuts="D" data-tip="Nearest diagnosis · D"><svg class="i" aria-hidden="true"><use href="#i-diag"/></svg>Diagnosis</button>
+        <button type="button" id="b-t" data-key="t" aria-keyshortcuts="T" data-tip="Nearest teacher demonstration · T"><svg class="i" aria-hidden="true"><use href="#i-teacher"/></svg>Teacher</button>
+        <button type="button" id="b-m" data-key="m" aria-keyshortcuts="M" aria-pressed="false" data-tip="The move, before and after · M"><svg class="i" aria-hidden="true"><use href="#i-move"/></svg>Move</button>
+      </span>
+      <span class="group" role="group" aria-label="View">
+        <button type="button" id="b-pause" data-key=" " aria-keyshortcuts="Space" data-tip="Pause · Space"><svg class="i off" aria-hidden="true"><use href="#i-pause"/></svg><svg class="i on" aria-hidden="true"><use href="#i-play"/></svg><span>Pause</span></button>
+      </span>
     </nav>
   </div>
   <div class="where">
@@ -32,14 +54,28 @@
           <dt><span class="chip paused">Paused</span></dt><dd>Space is holding the view; new events wait until it resumes.</dd>
           <dt><span class="chip placeholder">Placeholder</span></dt><dd>The run is on FakeSim, the stand-in simulator, or names no simulator. A panel with nothing to show says so in words.</dd>
           <dt><span class="chip config">Configured</span></dt><dd>Set in the code, not measured.</dd>
-          <dt>Rail</dt><dd>One mark per episode: tall for the teacher, short for the student; filled when it succeeded or was accepted for training, hollow when it failed or was rejected. The outlined mark is the episode shown.</dd>
+          <dt><span class="tag student">Student</span><span class="tag teacher">Teacher</span></dt><dd>Who chose a skill: blue for the student, teal for the teacher. Green and red mark only success and failure.</dd>
+          <dt>Rail</dt><dd>One mark per episode: tall for the teacher, short for the student; filled when it succeeded or was accepted for training, hollow when it failed or was rejected, half-filled while it runs. The outlined mark is the episode shown.</dd>
         </dl>
+        <div class="keys">
+          <h2>Keys</h2>
+          <dl>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg><svg class="i" aria-hidden="true"><use href="#i-next"/></svg><kbd>←</kbd><kbd>→</kbd></dt><dd>Previous or next episode</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-latest"/></svg><kbd>End</kbd></dt><dd>Latest episode, following the run again</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-diag"/></svg><kbd>D</kbd></dt><dd>Diagnosis: the nearest episode the teacher diagnosed</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-teacher"/></svg><kbd>T</kbd></dt><dd>Teacher: the nearest episode the teacher drove</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-move"/></svg><kbd>M</kbd></dt><dd>Move: the frames right before and after the box or bin was moved, side by side; again to go back</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-pause"/></svg><kbd>Space</kbd></dt><dd>Pause or resume; new events wait while paused</dd>
+          </dl>
+        </div>
         <p class="note" id="run-meta"></p>
       </div>
     </details>
   </div>
 </header>
-<div class="control" id="control"></div>
+<div class="controlbar">
+  <div class="control" id="control"></div>
+</div>
 <p class="sr" id="announce" aria-live="polite"></p>
 <main>
   <section class="panel col camera">
@@ -47,7 +83,7 @@
     <div class="stage" id="stage"></div>
     <ol class="strip" id="strip" aria-label="Recent head-camera frames"></ol>
   </section>
-  <div class="col side" id="side" tabindex="0" role="region" aria-label="Did it work">
+  <div class="col side" id="side" tabindex="0" role="region" aria-label="Results and diagnosis">
     <section class="panel" id="p-rounds"></section>
     <section class="panel" id="p-diagnosis"></section>
   </div>

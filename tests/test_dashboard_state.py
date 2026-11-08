@@ -428,7 +428,7 @@ def test_arrows_move_between_episodes_and_moving_past_the_last_follows_the_run_a
     assert out == ["b", "a", "a", "b", "b", "d"]
 
 
-def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_again() -> None:
+def test_move_shows_the_shown_episodes_move_and_pins_it_until_pressed_again() -> None:
     events = stream(
         started("a"),
         *[x for step in range(6) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))],
@@ -439,12 +439,12 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
     out = presenter(
         """
         feed(events.length - 1);
-        press("p");
+        press("m");
         const jumped = look();
-        const strip = S.filmstrip(S.episode(v, now), v.compare.step).map((f) => [f.step, f.moved, f.now]);
+        const strip = S.filmstrip(S.episode(v, now), S.stageStep(v)).map((f) => [f.step, f.moved, f.now]);
         feed(1);
         const pinned = look();
-        press("P");
+        press("M");
         return { jumped, strip, pinned, again: look() };
         """,
         events,
@@ -452,11 +452,17 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
     assert out["jumped"]["focus"] == 2 and out["jumped"]["episode"] == "a"
     assert [f for f in out["strip"] if f[2]] == [[2, True, True]]
     assert out["pinned"]["episode"] == "a"
-    # pressing P again returns to where the view was: following the run, now on "b"
+    # pressing Move again returns to where the view was: following the run, now on "b"
     assert out["again"] == {"shown": len(events), "held": 0, "episode": "b", "focus": None}
 
 
-def test_p_pressed_again_returns_to_a_pinned_episode() -> None:
+def test_p_is_no_longer_a_presenter_key() -> None:
+    events = stream(started("a"), decision(0), executed(0), ("perturbation", {"kind": "move_box", "step": 1}))
+    out = presenter("feed(events.length); const claimed = press('p'); return [claimed, look()];", events)
+    assert out == [False, {"shown": 4, "held": 0, "episode": "a", "focus": None}]
+
+
+def test_move_pressed_again_returns_to_a_pinned_episode() -> None:
     events = stream(
         started("a"),
         started("b"),
@@ -472,9 +478,9 @@ def test_p_pressed_again_returns_to_a_pinned_episode() -> None:
         feed(events.length);
         press("ArrowLeft");
         const before = look();
-        press("p");
+        press("m");
         const during = look();
-        press("p");
+        press("m");
         return [before, during, look()];
         """,
         events,
@@ -483,12 +489,32 @@ def test_p_pressed_again_returns_to_a_pinned_episode() -> None:
     assert [o["focus"] for o in out] == [None, 1, None]
 
 
-def test_p_does_nothing_on_an_episode_without_a_perturbation() -> None:
+def test_move_does_nothing_in_a_run_without_a_move() -> None:
     out = presenter(
-        "feed(3); press('p'); return look();",
+        "feed(3); const target = S.target(v, now, 'm'); press('m'); return [target, look()];",
         stream(started("a"), decision(0), executed(0)),
     )
-    assert out == {"shown": 3, "held": 0, "episode": "a", "focus": None}
+    assert out == [-1, {"shown": 3, "held": 0, "episode": "a", "focus": None}]
+
+
+def test_no_shortcut_acts_while_the_focus_is_in_a_text_field() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        press("ArrowLeft");
+        const before = look();
+        const field = { tagName: "INPUT" };
+        const keys = ["d", "t", "m", "M", " ", "ArrowLeft", "ArrowRight", "End"];
+        const claimed = keys.map((key) => S.keydown(v, { key, target: field }, now));
+        const area = S.keydown(v, { key: " ", target: { tagName: "TEXTAREA" } }, now);
+        const editable = S.keydown(v, { key: "m", target: { tagName: "DIV", isContentEditable: true } }, now);
+        return { claimed, area, editable, paused: Boolean(v.frozen), moved: Boolean(v.compare), before, after: look() };
+        """,
+        stream(*BEATS),
+    )
+    assert out["claimed"] == [False] * 8 and not out["area"] and not out["editable"]
+    assert not out["paused"] and not out["moved"]
+    assert out["after"] == out["before"]
 
 
 def test_space_pauses_from_any_focus_claims_the_key_and_acts_once_while_held() -> None:
@@ -739,31 +765,34 @@ def test_navigation_targets_say_where_each_key_leads_and_minus_one_for_nowhere_n
     assert out[1] == {"ArrowLeft": 0, "ArrowRight": 2, "d": 3, "t": 4, "m": 5, "End": 6}
 
 
-def test_m_opens_the_moved_episode_at_the_first_frame_after_the_move_and_p_pressed_twice_returns_there() -> None:
+def test_move_from_an_episode_without_one_opens_the_nearest_moves_before_and_after_and_again_returns() -> None:
     events = stream(
         started("a"),
         *[x for step in range(6) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))],
-        ("perturbation", {"kind": "move_box", "step": 2}),
+        ("perturbation", {"kind": "move_box", "step": 2, "before_frame": "/f/before.jpg"}),
         *trial("b"),
+        *trial("c"),
     )
-    events.insert(5, events.pop(-4))  # the perturbation arrives before decision 2
+    events.insert(5, events.pop(-7))  # the perturbation arrives before decision 2
     out = presenter(
         """
         feed(events.length);
-        const stage = () => S.filmstrip(S.episode(v, now), S.stageStep(v))
-          .filter((f) => f.now).map((f) => [f.step, f.moved]);
+        press("ArrowLeft");
+        const pair = () => { const m = S.move(S.episode(v, now)); return v.compare && [m.before.url, m.after.url]; };
         press("m");
-        const opened = [look(), stage()];
-        press("p"); press("p");
-        const back = [look(), stage()];
-        press("End");
+        const opened = [look(), pair()];
+        press("m");
+        const back = [look(), pair()];
+        press("m"); press("End");
         return [opened, back, look()];
         """,
         events,
     )
-    opened = [{"shown": len(events), "held": 0, "episode": "a", "focus": 2}, [[2, True]]]
-    assert out[0] == opened and out[1] == opened
-    assert out[2] == {"shown": len(events), "held": 0, "episode": "b", "focus": None}
+    assert out[0] == [{"shown": len(events), "held": 0, "episode": "a", "focus": 2}, ["/f/before.jpg", "/f/2.jpg"]]
+    # Move again returns to where the view was, the pinned "b", not to the moved episode
+    assert out[1] == [{"shown": len(events), "held": 0, "episode": "b", "focus": None}, None]
+    # End leaves the move for the latest episode
+    assert out[2] == {"shown": len(events), "held": 0, "episode": "c", "focus": None}
 
 
 def test_the_judged_take_is_marked_on_its_episode() -> None:
@@ -841,7 +870,7 @@ def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished
     )
     assert out == [
         ["demonstration", "Accepted for training"],
-        ["demonstration", "Rejected"],
+        ["demonstration", "Rejected, not used for training"],
         ["heldout", "Succeeded"],
         ["heldout", "Failed"],
         ["trial", "Succeeded"],
@@ -891,7 +920,7 @@ def test_while_the_stage_holds_a_step_the_bar_names_that_frames_controller_not_t
         feed(events.length);
         const who = () => S.inControl(v, now);
         const seen = [who()];
-        for (const key of ["m", "p", "p", "End"]) { press(key); seen.push(who()); }
+        for (const key of ["m", "m", "m", "End"]) { press(key); seen.push(who()); }
         return seen;
         """,
         stream(*TAKE, started("next")),
@@ -899,9 +928,9 @@ def test_while_the_stage_holds_a_step_the_bar_names_that_frames_controller_not_t
     teacher = {"controller": "teacher", "checkpoint": None, "step": None}
     student_at_the_move = {"controller": "student", "checkpoint": "ckpt-r0", "step": 1}
     nobody_yet = {"controller": None, "checkpoint": None, "step": None}
-    assert out == [nobody_yet, student_at_the_move, student_at_the_move, student_at_the_move, nobody_yet]
+    assert out == [nobody_yet, student_at_the_move, nobody_yet, student_at_the_move, nobody_yet]
     take = presenter(
-        "feed(events.length); const latest = S.inControl(v, now); press('p'); return [latest, S.inControl(v, now)];",
+        "feed(events.length); const latest = S.inControl(v, now); press('m'); return [latest, S.inControl(v, now)];",
         stream(*TAKE),
     )
     assert take == [teacher, student_at_the_move]
@@ -929,9 +958,9 @@ def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_
     assert first == [
         {
             "figure": "0/20",
-            "spoken": "0 of 20 before fine-tuning",
+            "spoken": "0 of 20 before\u00a0fine-tuning",
             "sample": "n=20",
-            "names": "before fine-tuning",
+            "names": "before\u00a0fine-tuning",
             "ids": "ckpt-r0",
         },
         None,
@@ -940,9 +969,9 @@ def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_
     claim, _ = run(CLAIM, stream(*rounds))
     assert claim == {
         "figure": "0/20 → 9/20",
-        "spoken": "0 of 20 before fine-tuning, then 9 of 20 after round 2",
+        "spoken": "0 of 20 before\u00a0fine-tuning, then 9 of 20 after\u00a0round\u00a02",
         "sample": "n=20 each",
-        "names": "before fine-tuning → after round 2",
+        "names": "before\u00a0fine-tuning → after\u00a0round\u00a02",
         "ids": "ckpt-r0 → ckpt-r2",
     }
 
@@ -950,7 +979,7 @@ def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_
 def test_a_held_out_evaluation_with_no_episodes_says_so_in_words() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 0)))
     assert (claim["figure"], claim["sample"]) == ("0/20 → none", "n=20 and no held-out episode ran")
-    assert claim["spoken"] == "0 of 20 before fine-tuning, then no held-out episode ran after round 1"
+    assert claim["spoken"] == "0 of 20 before\u00a0fine-tuning, then no held-out episode ran after\u00a0round\u00a01"
 
 
 def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_evaluations_n() -> None:
