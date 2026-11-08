@@ -152,7 +152,7 @@
       }
       case "evaluation_result":
         // `after` is where the next evaluation's held-out episodes start.
-        if (num(d.round) !== null && num(d.successes) !== null && num(d.n) !== null) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, after: s.episodes.length });
+        if ([d.round, d.successes, d.n, d.errored].every((v) => num(v) !== null)) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: d.errored, after: s.episodes.length });
         break;
       case "finetune_started":
         s.finetune.pending = { round: num(d.round), t: event.t };
@@ -288,20 +288,23 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
-  // The held-out claim (SPEC §3.5): the first and the latest evaluation, each with its n, named in words, with the
-  // checkpoint ids as a note. Null before the first evaluation.
+  // The held-out claim (SPEC §3.5): the first and the latest evaluation, each scored out of the episodes that didn't
+  // error with the errored ones apart, named in words, with the checkpoint ids as a note. Null before the first evaluation.
   function claim(s) {
     if (!s.rounds.length) return null;
     const first = s.rounds[0];
     const last = s.rounds[s.rounds.length - 1];
     const pair = first === last ? [first] : [first, last];
     const name = (r) => (r.round === 0 ? "before fine-tuning" : `after round ${r.round}`);
-    const score = (r, of) => (r.n ? `${r.successes}${of}${r.n}` : "none");
-    const same = pair.every((r) => r.n === first.n) && first.n;
+    const scored = (r) => r.n - r.errored;
+    const score = (r, of) => (scored(r) ? `${r.successes}${of}${scored(r)}` : "none");
+    const apart = (r) => (r.errored ? ` (${r.errored} errored)` : "");
+    const unscored = (r) => (r.n ? `all ${r.n} errored` : "no held-out episode ran");
+    const same = pair.every((r) => r.n === first.n && !r.errored) && first.n;
     return {
       figure: pair.map((r) => score(r, "/")).join(" → "),
-      spoken: pair.map((r) => (r.n ? `${score(r, " of ")} ${name(r)}` : `no held-out episode ran ${name(r)}`)).join(", then "),
-      sample: same ? `n=${first.n}${pair.length > 1 ? " each" : ""}` : pair.map((r) => (r.n ? `n=${r.n}` : "no held-out episode ran")).join(" and "),
+      spoken: pair.map((r) => (scored(r) ? `${score(r, " of ")} ${name(r)}${apart(r)}` : `${unscored(r)} ${name(r)}`)).join(", then "),
+      sample: same ? `n=${first.n}${pair.length > 1 ? " each" : ""}` : pair.map((r) => (scored(r) ? `n=${scored(r)}${apart(r)}` : unscored(r))).join(" and "),
       names: pair.map(name).join(" → "),
       ids: pair.map((r) => r.checkpoint).join(" → "),
     };

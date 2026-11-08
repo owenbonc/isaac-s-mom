@@ -157,16 +157,18 @@ def test_the_first_frame_after_the_perturbation_is_flagged_and_every_later_one_m
 
 def test_rounds_keep_their_n_and_a_new_episode_replaces_the_current_one() -> None:
     out = fold(
-        ("evaluation_result", {"checkpoint": "ckpt-r0", "round": 0, "successes": 0, "n": 20}),
-        ("evaluation_result", {"checkpoint": "ckpt-r1", "round": 1, "successes": 3, "n": 20}),
-        ("evaluation_result", {"checkpoint": "bad", "round": 2, "successes": "x", "n": 20}),
+        evaluation("ckpt-r0", 0, 0, 20),
+        evaluation("ckpt-r1", 1, 3, 20, errored=2),
+        ("evaluation_result", {"checkpoint": "bad", "round": 2, "successes": "x", "n": 20, "errored": 0}),
+        ("evaluation_result", {"checkpoint": "no errored", "round": 2, "successes": 1, "n": 20}),
+        ("evaluation_result", {"checkpoint": "bad errored", "round": 2, "successes": 1, "n": 20, "errored": "2"}),
         ("episode_started", {"episode_id": "a"}),
         decision(0),
         ("episode_started", {"episode_id": "b"}),
     )
-    assert [(r["checkpoint"], r["successes"], r["n"]) for r in out["state"]["rounds"]] == [
-        ("ckpt-r0", 0, 20),
-        ("ckpt-r1", 3, 20),
+    assert [(r["checkpoint"], r["successes"], r["n"], r["errored"]) for r in out["state"]["rounds"]] == [
+        ("ckpt-r0", 0, 20, 0),
+        ("ckpt-r1", 3, 20, 2),
     ]
     assert out["ep"]["id"] == "b" and out["ep"]["rows"] == []
     assert len(out["state"]["episodes"]) == 2
@@ -206,7 +208,7 @@ def test_a_reconnect_replays_the_stream_into_a_fresh_state_not_on_top_of_the_old
         executed(0),
         started("b"),
         decision(0, latency=50.0),
-        ("evaluation_result", {"checkpoint": "ckpt-r0", "round": 0, "successes": 0, "n": 20}),
+        evaluation("ckpt-r0", 0, 0, 20),
     )
     script = """
     const v = S.view();
@@ -940,8 +942,9 @@ def test_while_the_stage_holds_a_step_the_bar_names_that_frames_controller_not_t
     assert take == [teacher, student_at_the_move]
 
 
-def evaluation(checkpoint: str, round_: int, successes: int, n: int) -> tuple[str, dict]:
-    return "evaluation_result", {"checkpoint": checkpoint, "round": round_, "successes": successes, "n": n}
+def evaluation(checkpoint: str, round_: int, successes: int, n: int, errored: int = 0) -> tuple[str, dict]:
+    data = {"checkpoint": checkpoint, "round": round_, "successes": successes, "n": n, "errored": errored}
+    return "evaluation_result", data
 
 
 def heldout(episode_id: str, checkpoint: str, judged: bool = True) -> list[tuple[str, dict]]:
@@ -984,6 +987,20 @@ def test_a_held_out_evaluation_with_no_episodes_says_so_in_words() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 0)))
     assert (claim["figure"], claim["sample"]) == ("0/20 → none", "n=20 and no held-out episode ran")
     assert claim["spoken"] == "0 of 20 before fine-tuning, then no held-out episode ran after round 1"
+
+
+def test_the_held_out_rate_is_out_of_the_episodes_that_did_not_error_with_the_errored_shown_apart() -> None:
+    claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 9, 20, errored=2)))
+    assert (claim["figure"], claim["sample"]) == ("9/18", "n=18 (2 errored)")
+    assert claim["spoken"] == "9 of 18 before fine-tuning (2 errored)"
+    claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 9, 20, errored=2), evaluation("ckpt-r1", 1, 15, 20)))
+    assert (claim["figure"], claim["sample"]) == ("9/18 → 15/20", "n=18 (2 errored) and n=20")
+
+
+def test_an_evaluation_whose_episodes_all_errored_says_so_in_words() -> None:
+    claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 20, errored=20)))
+    assert (claim["figure"], claim["sample"]) == ("0/20 → none", "n=20 and all 20 errored")
+    assert claim["spoken"] == "0 of 20 before fine-tuning, then all 20 errored after round 1"
 
 
 def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_evaluations_n() -> None:
