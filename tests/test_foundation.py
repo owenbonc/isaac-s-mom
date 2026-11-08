@@ -14,7 +14,7 @@ from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import evaluate, run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
-from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, PLACE_X, FakeSim
+from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
@@ -153,9 +153,8 @@ def test_fake_moves_the_box_only_while_it_rests_on_the_table_out_of_the_hands() 
     assert sim.perturb(Perturbation(kind="move_box", seed=99))
     assert sim.ground_truth().box_xyz != start.box_xyz
 
-    sim.execute(SkillCall(skill="turn_left", params={"angle_deg": 30}))
-    sim.execute(SkillCall(skill="hug"))  # turned away from the table, so the hands close on nothing
-    sim.execute(SkillCall(skill="turn_right", params={"angle_deg": 30}))
+    sim.execute(SkillCall(skill="walk_back", params={"distance_cm": 30}))
+    sim.execute(SkillCall(skill="hug"))  # 30 cm short of the box, so the hands close on nothing, as in MujocoSim
     missed = sim.ground_truth()
     assert sim.closed and not sim.held
     assert sim.perturb(Perturbation(kind="move_box", seed=100))
@@ -176,6 +175,26 @@ def test_fake_moves_the_box_only_while_it_rests_on_the_table_out_of_the_hands() 
     assert placed.box_on_bin_floor
     assert not sim.perturb(Perturbation(kind="move_box", seed=99))
     assert sim.ground_truth() == placed
+
+
+def test_fake_moves_the_bin_under_a_box_held_over_it_mid_carry() -> None:
+    sim = FakeSim()
+    sim.reset(1234)
+    policy = ScriptedPolicy(sim)
+    while (call := policy.act(sim.observe(), "", "")) and call.skill != "place":
+        assert sim.execute(call).ok
+    carried = sim.ground_truth()
+    assert sim.held and sim.lifted
+    assert sim.perturb(Perturbation(kind="move_bin", seed=99))  # held up in the hands, it is above any bin
+    moved = sim.ground_truth()
+    assert moved.bin_xy != carried.bin_xy and moved.box_xyz == carried.box_xyz
+
+    # Even right over where the new bin lands, as MujocoSim allows: a new bin is 1-1.4 m from the robot, so this is
+    # set up rather than carried there.
+    sim.reset(1234)
+    landing = np.random.default_rng(99)
+    sim.box, sim.box_z = _bin_pose(landing, sim.xy)[0], HELD_Z
+    assert sim.perturb(Perturbation(kind="move_bin", seed=99))
 
 
 def test_fake_moves_the_bin_only_clear_of_the_box() -> None:

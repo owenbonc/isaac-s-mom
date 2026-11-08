@@ -19,6 +19,7 @@ BOX_HALF = (0.125, 0.15)
 TABLE_CENTER, TABLE_HALF = (0.40, 0.0), (0.2, 0.25)
 BIN_INNER_HALF, BIN_WALL = 0.22, 0.02
 BIN_OUTER_HALF = BIN_INNER_HALF + BIN_WALL
+BOX_REACH = math.hypot(*BOX_HALF)  # how far the box reaches from its centre, however it's turned
 BIN_DIST = (1.0, 1.4)
 BIN_BEARING = (math.radians(75), math.radians(285))
 TABLE_CLEARANCE = 0.45
@@ -204,13 +205,12 @@ class FakeSim:
         return self.box_z < TABLE_Z
 
     def _clear_of_box(self, bin_xy: np.ndarray, bin_yaw: float) -> bool:
-        """A bin at this pose would stand clear of the box, however the box is turned."""
         x, y = self.box - bin_xy
         outside = np.maximum(np.abs(_rot(-bin_yaw, (float(x), float(y)))) - BIN_OUTER_HALF, 0.0)
-        return float(np.linalg.norm(outside)) > math.hypot(*BOX_HALF)
+        return float(np.linalg.norm(outside)) > BOX_REACH
 
     def _over_bin(self) -> bool:
-        """Every corner of the box, which is turned with the robot, is inside the bin's walls."""
+        # The carried box turns with the robot, so each of its corners is checked against the walls.
         corners = [(sx * BOX_HALF[0], sy * BOX_HALF[1]) for sx in (-1, 1) for sy in (-1, 1)]
         for corner in corners:
             local = _rot(-self.bin_yaw, self.box + _rot(self.heading, corner) - self.bin)
