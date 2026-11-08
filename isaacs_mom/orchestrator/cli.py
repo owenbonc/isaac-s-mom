@@ -54,8 +54,8 @@ def main() -> None:
     run.add_argument(
         "--instruction", type=instruction, default=INSTRUCTION, help="what the robot learns; held-out tests use it too"
     )
-    dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a run directory")
-    dashboard.add_argument("--run", type=Path, required=True)
+    dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a runs directory")
+    dashboard.add_argument("--runs", type=Path, required=True, help="a directory of run directories, e.g. runs/")
     dashboard.add_argument("--port", type=int, default=8200)
     demo = commands.add_parser("demo", help="the judged single take, recorded to an MP4")
     demo.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
@@ -80,7 +80,7 @@ def main() -> None:
     if args.command == "dashboard":
         from isaacs_mom.orchestrator.dashboard.server import serve
 
-        serve(args.run, args.port)
+        serve(args.runs, args.port)
         return
     if args.sim == "fake" and args.task != DEFAULT_TASK.name:
         parser.error(f"--sim fake plays only the default task, {DEFAULT_TASK.name}")
