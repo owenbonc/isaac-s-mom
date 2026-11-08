@@ -111,7 +111,7 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 /* While paused, the events waiting: a plain number beside the play icon. */
 #b-pause.on{padding:0 .55rem 0 .45rem}
 /* A tooltip names the key, what it does and its shortcut: after a beat on hover, at once on keyboard focus. */
-:is(.presenter,.teach,.filters,.switch) button::after,:is(.tabs button[data-tip],button.back)::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
+:is(.presenter,.teach,.filters,.switch) button::after,.tabs button[data-tip]::after,button.back::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
 /* Keys near the window's right edge open their tooltips leftwards, a back key rightwards, so they stay on screen. */
 :is(.presenter .group:not(:first-child),.teach,.switch) button::after{left:auto;right:0;--tx:0%}
 button.back::after{left:0;--tx:0%}
@@ -233,7 +233,8 @@ button.card:focus-visible{background:var(--row)}
 .card-head{display:flex;flex-wrap:wrap;align-items:baseline;gap:.1rem .6rem;font-weight:600}
 .card-head .note{font-weight:450;font-size:var(--t-label)}
 .card .cell{flex:1}
-.card-verdict{display:flex;flex-direction:column;gap:.15rem;min-height:3.2em}
+/* The verdict and up to two lines of its reason, so every card's frame sits at the same height. */
+.card-verdict{display:flex;flex-direction:column;gap:.15rem;min-height:4.5em}
 .verdict.warn{color:var(--warn)}
 .mark{width:1.25rem;height:1.25rem}
 .mark.up{color:var(--ok);stroke-width:2.6}
@@ -287,8 +288,8 @@ footer.models .v{color:var(--muted)}
 .said .i{width:1rem;height:1rem}
 .said.student{color:var(--student)}
 .said.teacher{color:var(--teacher)}
-/* The controller is a small pill in the frame's bottom-left corner, beside the left hand, where the floor shows. */
-.shot>.tag{position:absolute;left:.5rem;bottom:.5rem;z-index:1;padding:.1rem .55rem;border-radius:999px;background:var(--well);box-shadow:0 0 0 1px var(--edge-strong)}
+/* The controller is a small pill in the frame's bottom-right corner (SPEC §3.5). */
+.shot>.tag{position:absolute;right:.5rem;bottom:.5rem;z-index:1;padding:.1rem .55rem;border-radius:999px;background:var(--well);box-shadow:0 0 0 1px var(--edge-strong)}
 /* Frame-sized, so the stage keeps its shape between episodes and while nothing is on camera yet. */
 .slate{display:grid;place-content:center;gap:.4rem;padding:1.5rem;text-align:center;text-wrap:balance}
 .slate p{margin:0}

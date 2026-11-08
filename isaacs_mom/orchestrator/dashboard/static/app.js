@@ -152,8 +152,13 @@ function renderControl() {
   }
   const place = MomState.where(view);
   if (place === "list" || place === "seed") {
+    const s = MomState.shown(view);
+    const tested = MomState.results(s).seeds.length;
     el.className = "control";
-    el.innerHTML = `<span class="what">Held-out seeds</span><span class="note">${place === "list" ? "Choose a seed to see its test at each checkpoint." : "Choose a checkpoint to see that episode in full."}</span>`;
+    el.innerHTML =
+      s.refused !== null
+        ? `<span class="what">Not started</span><span class="note">${esc(s.refused)}</span>`
+        : `<span class="what">Held-out seeds</span>${!tested ? "" : `<span class="note">${place === "list" ? "Choose a seed to see its test at each checkpoint." : "Choose a checkpoint to see that episode in full."}</span>`}`;
     return "";
   }
   if (!ep) {
@@ -174,7 +179,7 @@ function renderControl() {
   const k = row ? row.episodes.findIndex((x) => x.id === ep.id) : -1;
   const at = k < 0 ? "" : `, ${esc(MomState.results(MomState.shown(view)).checkpoints[k].name)}`;
   const among = position(ep);
-  const back = place === "episode" ? `<button type="button" class="back" data-back aria-label="Back to seed ${esc(view.seed)}" data-tip="Back to seed ${esc(view.seed)} · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
+  const back = place === "episode" ? `<button type="button" class="back" data-back data-f="control-back" aria-label="Back to seed ${esc(view.seed)}" data-tip="Back to seed ${esc(view.seed)} · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
   const head = `${back}<span class="kind"><span class="what">${kind}</span><span class="note">${where}${at}${among ? ` · ${among.toLowerCase()}` : ""}</span></span>`;
   if (!ep.controller) {
     el.className = "control";
@@ -309,7 +314,7 @@ const foot = (caption, provenance) => `<div class="foot">${caption}${provenance}
 const skillRow = (ep, f) => (f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill)) || null;
 
 // One frame on the stage: the skill `row` chose from it, led by `label`, in a notch at its top left, and its controller
-// in a pill at its bottom left; nothing else covers it. A missing frame stays, hatched.
+// in a pill at its bottom right; nothing else covers it. A missing frame stays, hatched.
 function cell(f, row, moved, label = "") {
   const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : ` at step ${esc(f.step)}`}">` : "";
   const skill = row ? `<span class="said ${row.controller || "unknown"}"><svg class="i" aria-hidden="true"><use href="#s-${esc(row.skill)}"/></svg>${skillText(row)}</span>` : "";
@@ -426,7 +431,9 @@ function heldOut() {
     : `<span>${esc(cap(c.spoken))}.</span>${errored}`);
   // The checkpoint ids are the names' tooltip.
   const gain = c && `<div class="gain">${lead}</div><div class="names" title="${esc(c.ids)}">${esc(c.names)}</div>`;
-  const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;
+  // A run that did not start says why where its results would be, so it needs no line here.
+  const none = progress || (s.refused === null ? "No held-out evaluation in the events yet." : "");
+  const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : none && `<div class="ph-text">${none}</div>`;
   // A run is taught and tested on its own instruction, so its rates carry it (SPEC §3.5).
   const said = s.instruction && s.instruction.text;
   const taught = said ? `<p class="taught clamped" title="${esc(said)}">${c ? "Tested on" : "Instruction"} <q dir="auto">${esc(said)}</q></p>` : "";
@@ -483,7 +490,7 @@ const sideFor = (count) => side || (innerWidth / count >= FRAME_MIN ? "both" : "
 function cardVerdict(e, ep) {
   if (e.outcome === "pending") return `<span class="note">${ep ? "Running" : "Not run yet"}</span>`;
   if (e.outcome === "errored") {
-    const why = !ep ? "It stopped before its episode started." : ep.verdict ? cap(ep.verdict.reason) : "No verdict before its evaluation ended.";
+    const why = !ep ? "This test's events hold no episode of the seed." : ep.verdict ? cap(ep.verdict.reason) : "No verdict before its test ended.";
     return `<span class="verdict warn">${markIcon("error")}Errored</span><span class="note clamped two" title="${esc(why)}">${esc(why)}</span>`;
   }
   return `${verdictChip(ep)}<span class="note clamped two" title="${esc(cap(ep.verdict.reason))}">${esc(cap(ep.verdict.reason))}</span>`;
@@ -495,7 +502,7 @@ function seedCard(c, e, ep) {
   const f = ep && ep.frames[ep.frames.length - 1];
   const shot = f
     ? `<span class="shot"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="The episode's last head-camera frame${f.step === null ? "" : `, step ${esc(f.step)}`}">` : ""}${tag(f.controller, f.checkpoint)}</span>`
-    : `<span class="shot slate"><span class="note">${ep ? "No frame yet." : e.outcome === "pending" ? "Not run yet." : "No episode."}</span></span>`;
+    : `<span class="shot slate"><span class="note">${!ep ? (e.outcome === "pending" ? "Not run yet." : "No episode.") : e.outcome === "pending" ? "No frame yet." : "No frame recorded."}</span></span>`;
   const body = `${head}<span class="cell">${shot}</span><span class="card-verdict">${cardVerdict(e, ep)}</span>`;
   return ep ? `<button type="button" class="card" data-open="${esc(ep.id)}" data-f="card:${esc(ep.id)}">${body}</button>` : `<div class="card">${body}</div>`;
 }
@@ -662,7 +669,7 @@ function render() {
 }
 
 // A key that moved Results' focus, or a move to another place, takes the keyboard there: the focused seed in the list,
-// or in a seed the card of the episode just left, else its latest.
+// in a seed the card of the episode just left, else its latest, and in a seed's episode the key back to the seed.
 let renderedPlace = null;
 let seedMoved = false;
 let leftEpisode = null;
@@ -679,7 +686,9 @@ function placeFocus() {
       ? at(`.seeds [data-seed="${CSS.escape(String(view.focus))}"]`) || at(".seeds .seed")
       : place === "seed"
         ? (leftEpisode !== null && at(`.card[data-open="${CSS.escape(leftEpisode)}"]`)) || [...$("results").querySelectorAll(".card")].pop() || at(".back")
-        : null;
+        : place === "episode"
+          ? $("control").querySelector(".back")
+          : null;
   if (to) to.focus();
 }
 
@@ -689,7 +698,7 @@ function keepFocus(was) {
   if (!was || was === document.body || (was.isConnected && !was.disabled && was.checkVisibility())) return;
   // A control the render rewrote takes the focus back in its new copy.
   const again = was.dataset.f && document.querySelector(`[data-f="${CSS.escape(was.dataset.f)}"]`);
-  if (again && !again.disabled) return again.focus();
+  if (again && !again.disabled && again.checkVisibility()) return again.focus();
   const keys = [...document.querySelectorAll(".presenter button")];
   const at = keys.indexOf(was);
   if (at < 0) return $("b-m").focus();
