@@ -539,14 +539,14 @@ function renderResults() {
   if (place === "seed") $("results").innerHTML = seedDetail();
 }
 
-// The tabs: Results, Teaching, and Now while the run is live or Now is shown; Now's dot is the live dot, so it shows
-// only while the run is live, never once it is recorded, paused or disconnected (SPEC §3.5).
+// The tabs: Results, Teaching, and Now while the run is live or Now is shown.
 function renderTabs() {
   for (const b of $("tabs").querySelectorAll("button")) {
     if (b.dataset.tab === view.tab) b.setAttribute("aria-current", "page");
     else b.removeAttribute("aria-current");
   }
   $("tabs").querySelector('[data-tab="now"]').hidden = !(view.tab === "now" || (MomState.following(view, now()) && !view.lost));
+  // Now's dot is the live dot (SPEC §3.5), so a recorded, paused or disconnected run shows none.
   $("now-dot").hidden = MomState.provenance(view, now()) !== "live";
 }
 
