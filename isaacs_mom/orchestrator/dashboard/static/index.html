@@ -2,54 +2,152 @@
 <html lang="en">
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="dark">
 <title>Isaac's Mom</title>
 <link rel="stylesheet" href="/static/style.css">
 <body>
+<!-- Lucide (ISC licence, lucide.dev): chevron-left, chevron-right, stethoscope, graduation-cap, pause, play, chevron-down, corner-down-left, loader-circle; for the skills, move-left,
+     move-right, arrow-up, arrow-down, rotate-ccw, rotate-cw, fold-horizontal, arrow-up-from-line, arrow-down-to-line and
+     eye; for the Results marks, arrow-up, arrow-down, x, check, triangle-alert and a filled dot; for a seed's switch,
+     panel-left, columns-2 and panel-right; info. Hand-drawn: i-move. -->
+<svg class="sprite" aria-hidden="true">
+  <symbol id="i-prev" viewBox="0 0 24 24"><path d="m15 18-6-6 6-6"/></symbol>
+  <symbol id="i-next" viewBox="0 0 24 24"><path d="m9 18 6-6-6-6"/></symbol>
+  <symbol id="i-diag" viewBox="0 0 24 24"><path d="M11 2v2M5 2v2M5 3H4a2 2 0 0 0-2 2v4a6 6 0 0 0 12 0V5a2 2 0 0 0-2-2h-1"/><path d="M8 15a6 6 0 0 0 12 0v-3"/><circle cx="20" cy="10" r="2"/></symbol>
+  <symbol id="i-teacher" viewBox="0 0 24 24"><path d="M21.42 10.922a1 1 0 0 0-.019-1.838L12.83 5.18a2 2 0 0 0-1.66 0L2.6 9.08a1 1 0 0 0 0 1.832l8.57 3.908a2 2 0 0 0 1.66 0z"/><path d="M22 10v6M6 12.5V16a6 3 0 0 0 12 0v-3.5"/></symbol>
+  <symbol id="i-move" viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M12 2.5v19M8 10l-2 2 2 2M16 10l2 2-2 2"/></symbol>
+  <symbol id="i-pause" viewBox="0 0 24 24"><rect x="6" y="4" width="4" height="16" rx="1" fill="currentColor"/><rect x="14" y="4" width="4" height="16" rx="1" fill="currentColor"/></symbol>
+  <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3l14 9-14 9z" fill="currentColor"/></symbol>
+  <symbol id="i-choose" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
+  <symbol id="i-enter" viewBox="0 0 24 24"><path d="M9 10l-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></symbol>
+  <symbol id="i-wait" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
+  <symbol id="i-info" viewBox="0 0 24 24"><circle cx="12" cy="12" r="10"/><path d="M12 16v-4M12 8h.01"/></symbol>
+  <symbol id="i-before" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M9 3v18"/></symbol>
+  <symbol id="i-both" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M12 3v18"/></symbol>
+  <symbol id="i-after" viewBox="0 0 24 24"><rect width="18" height="18" x="3" y="3" rx="2"/><path d="M15 3v18"/></symbol>
+  <symbol id="m-up" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></symbol>
+  <symbol id="m-down" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
+  <symbol id="m-pass" viewBox="0 0 24 24"><path d="M20 6 9 17l-5-5"/></symbol>
+  <symbol id="m-fail" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+  <symbol id="m-error" viewBox="0 0 24 24"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3M12 9v4M12 17h.01"/></symbol>
+  <symbol id="m-pending" viewBox="0 0 24 24"><circle cx="12" cy="12" r="3" fill="currentColor" stroke="none"/></symbol>
+  <!-- One per contracts.Skill: app.js shows #s-<skill> beside the skill's name. -->
+  <symbol id="s-reach_left" viewBox="0 0 24 24"><path d="M6 8l-4 4 4 4M2 12h20"/></symbol>
+  <symbol id="s-reach_right" viewBox="0 0 24 24"><path d="M18 8l4 4-4 4M2 12h20"/></symbol>
+  <symbol id="s-walk_forward" viewBox="0 0 24 24"><path d="m5 12 7-7 7 7M12 19V5"/></symbol>
+  <symbol id="s-walk_back" viewBox="0 0 24 24"><path d="M12 5v14M19 12l-7 7-7-7"/></symbol>
+  <symbol id="s-turn_left" viewBox="0 0 24 24"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></symbol>
+  <symbol id="s-turn_right" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></symbol>
+  <symbol id="s-hug" viewBox="0 0 24 24"><path d="M2 12h6M22 12h-6M12 2v2M12 8v2M12 14v2M12 20v2M19 9l-3 3 3 3M5 15l3-3-3-3"/></symbol>
+  <symbol id="s-lift" viewBox="0 0 24 24"><path d="m18 9-6-6-6 6M12 3v14M5 21h14"/></symbol>
+  <symbol id="s-place" viewBox="0 0 24 24"><path d="M12 17V3M6 11l6 6 6-6M19 21H5"/></symbol>
+  <symbol id="s-reobserve" viewBox="0 0 24 24"><path d="M2.06 12.35a1 1 0 0 1 0-.7 10.75 10.75 0 0 1 19.88 0 1 1 0 0 1 0 .7 10.75 10.75 0 0 1-19.88 0"/><circle cx="12" cy="12" r="3"/></symbol>
+</svg>
 <header class="bar">
   <div class="top">
     <h1>Isaac's Mom</h1>
-    <span id="status"></span>
-    <nav class="presenter" aria-label="Presenter keys">
-      <span class="pair"><button type="button" id="b-prev" data-key="ArrowLeft" aria-label="Previous episode"><kbd>←</kbd></button><button type="button" id="b-next" data-key="ArrowRight" aria-label="Next episode"><kbd>→</kbd></button> Episode</span>
-      <button type="button" id="b-d" data-key="d"><kbd>D</kbd> Diagnosis</button>
-      <button type="button" id="b-t" data-key="t"><kbd>T</kbd> Teacher</button>
-      <button type="button" id="b-m" data-key="m"><kbd>M</kbd> Move</button>
-      <button type="button" id="b-p" data-key="p" aria-pressed="false"><kbd>P</kbd> Before/after</button>
-      <button type="button" id="b-end" data-key="End"><kbd>End</kbd> Latest</button>
-      <button type="button" id="b-pause" data-key=" "><kbd>Space</kbd> <span>Pause</span></button>
-    </nav>
-  </div>
-  <div class="where">
-    <p id="episode-line"></p>
-    <ol class="rail" id="rail" aria-hidden="true"></ol>
-    <details class="legend">
-      <summary>Labels</summary>
+    <details class="runs" id="runs" hidden>
+      <summary><span class="sr">Run </span><span class="run-name" id="run-name"></span><svg class="i" aria-hidden="true"><use href="#i-choose"/></svg></summary>
       <div class="pop">
-        <dl>
-          <dt><span class="chip live">Live</span></dt><dd>Events are arriving (the last within 20 s), or a fine-tune started in the last 30 minutes is still running.</dd>
-          <dt><span class="chip recorded">Recorded</span></dt><dd>From the run's saved files; nothing new is arriving for it.</dd>
-          <dt><span class="chip lost">Disconnected</span></dt><dd>The page lost the run's event stream and is retrying; nothing shown is live until it returns.</dd>
-          <dt><span class="chip paused">Paused</span></dt><dd>Space is holding the view; new events wait until it resumes.</dd>
-          <dt><span class="chip placeholder">Placeholder</span></dt><dd>The run is on FakeSim, the stand-in simulator, or names no simulator. A panel with nothing to show says so in words.</dd>
-          <dt><span class="chip config">Configured</span></dt><dd>Set in the code, not measured.</dd>
-          <dt>Rail</dt><dd>One mark per episode: tall for the teacher, short for the student; filled when it succeeded or was accepted for training, hollow when it failed or was rejected. The outlined mark is the episode shown.</dd>
-        </dl>
-        <p class="note" id="run-meta"></p>
+        <h2>Runs, live first</h2>
+        <ul class="run-list" id="run-list"></ul>
+      </div>
+    </details>
+    <span id="status"></span>
+    <nav class="tabs" id="tabs" aria-label="Views">
+      <button type="button" data-tab="results" data-f="tab:results">Results</button>
+      <button type="button" data-tab="teaching" data-f="tab:teaching">Teaching</button>
+      <button type="button" data-tab="now" data-f="tab:now" aria-keyshortcuts="End" data-tip="Now: the episode in progress · End" hidden><span class="dot live" id="now-dot" aria-hidden="true" hidden></span>Now</button>
+    </nav>
+    <!-- Grouped as the presenter tells the story: where in the run, its beats, the view. -->
+    <nav class="presenter" aria-label="Presenter keys">
+      <span class="group" role="group" aria-label="Episodes">
+        <button type="button" id="b-prev" data-key="ArrowLeft" aria-keyshortcuts="ArrowLeft" aria-label="Previous" data-tip="Previous episode · ←"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>
+        <button type="button" id="b-next" data-key="ArrowRight" aria-keyshortcuts="ArrowRight" aria-label="Next" data-tip="Next episode · →"><svg class="i" aria-hidden="true"><use href="#i-next"/></svg></button>
+      </span>
+      <span class="group" role="group" aria-label="Story">
+        <button type="button" id="b-d" data-key="d" aria-keyshortcuts="D" aria-label="Diagnosis" data-tip="Diagnosis: the nearest diagnosed episode · D"><svg class="i" aria-hidden="true"><use href="#i-diag"/></svg></button>
+        <button type="button" id="b-t" data-key="t" aria-keyshortcuts="T" aria-label="Teacher" data-tip="Teacher: the nearest teacher demonstration · T"><svg class="i" aria-hidden="true"><use href="#i-teacher"/></svg></button>
+        <button type="button" id="b-m" data-key="m" aria-keyshortcuts="M" aria-label="Move" aria-pressed="false" data-tip="Move: the frames before and after the move · M"><svg class="i" aria-hidden="true"><use href="#i-move"/></svg></button>
+      </span>
+      <span class="group" role="group" aria-label="View">
+        <button type="button" id="b-pause" data-key=" " aria-keyshortcuts="Space" aria-label="Pause" data-tip="Pause · Space"><svg class="i off" aria-hidden="true"><use href="#i-pause"/></svg><svg class="i on" aria-hidden="true"><use href="#i-play"/></svg><span class="count"></span></button>
+      </span>
+    </nav>
+    <details class="legend">
+      <summary aria-label="Legend" data-tip="Legend: every mark, icon and key"><svg class="i" aria-hidden="true"><use href="#i-info"/></svg></summary>
+      <div class="pop">
+        <section>
+          <h2>Labels</h2>
+          <dl>
+            <dt><span class="chip live">Live</span></dt><dd>Events are arriving (the last within 20 s), or a fine-tune started in the last 30 minutes is still running. Its dot pulses.</dd>
+            <dt><span class="chip recorded">Recorded</span></dt><dd>From the run's saved files; nothing new is arriving for it.</dd>
+            <dt><span class="chip placeholder">Placeholder</span></dt><dd>The run is on FakeSim, the stand-in simulator, or names no simulator. A panel with nothing to show says so in words.</dd>
+            <dt><span class="chip lost">Disconnected</span></dt><dd>The page lost the run's event stream and is retrying; nothing shown is live until it returns.</dd>
+            <dt><span class="chip paused">Paused</span></dt><dd>Space is holding the view; new events wait until it resumes.</dd>
+            <dt><span class="chip config">Configured</span></dt><dd>Set in the code, not measured.</dd>
+            <dt><span class="chip refused">Not started</span></dt><dd>A Teach the task generator refused, a task the loop does not train on yet, or a run that stopped before its first episode. The run says why.</dd>
+            <dt><span class="tag student">Student</span><span class="tag teacher">Teacher</span></dt><dd>Who chose a skill: blue for the student, teal for the teacher. Green and red mark only success and failure.</dd>
+          </dl>
+          <p class="note">The header names the run's label; a panel shows its label's dot, and its word only where it differs.</p>
+        </section>
+        <section>
+          <h2>Results</h2>
+          <dl>
+            <dt><svg class="i mark down" aria-hidden="true"><use href="#m-down"/></svg></dt><dd>Regressed: succeeded at the first checkpoint, failed at the latest</dd>
+            <dt><svg class="i mark up" aria-hidden="true"><use href="#m-up"/></svg></dt><dd>Improved: failed at the first checkpoint, succeeded at the latest</dd>
+            <dt><svg class="i mark fail" aria-hidden="true"><use href="#m-fail"/></svg></dt><dd>Still fails: failed at both</dd>
+            <dt><svg class="i mark pass" aria-hidden="true"><use href="#m-pass"/></svg></dt><dd>Always passed: succeeded at both</dd>
+            <dt><svg class="i mark error" aria-hidden="true"><use href="#m-error"/></svg></dt><dd>Errored at either, counted apart, never as a failure</dd>
+            <dt><svg class="i mark pending" aria-hidden="true"><use href="#m-pending"/></svg></dt><dd>Pending: the latest test hasn't reached the seed, or there is only one</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-before"/></svg><svg class="i" aria-hidden="true"><use href="#i-both"/></svg><svg class="i" aria-hidden="true"><use href="#i-after"/></svg></dt><dd>A seed's first checkpoint, every one side by side, or its latest</dd>
+          </dl>
+          <p class="note">Each count is a filter: choose it to show only those seeds, again to show all.</p>
+        </section>
+        <section class="keys">
+          <h2>Keys</h2>
+          <dl>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg><svg class="i" aria-hidden="true"><use href="#i-next"/></svg><kbd>←</kbd><kbd>→</kbd></dt><dd>Previous or next seed in Results, checkpoint in a seed's episode, episode in Teaching</dd>
+            <dt><kbd>↑</kbd><kbd>↓</kbd></dt><dd>Previous or next seed in Results' list</dd>
+            <dt><kbd>Enter</kbd></dt><dd>Open the seed or the episode focused</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg><kbd>Esc</kbd></dt><dd>Back: from an episode to its seed, from a seed to the list</dd>
+            <dt><kbd>End</kbd></dt><dd>Now: the episode in progress, while the run is live</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-diag"/></svg><kbd>D</kbd></dt><dd>Diagnosis: the nearest episode the teacher diagnosed, in Teaching</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-teacher"/></svg><kbd>T</kbd></dt><dd>Teacher: the nearest episode the teacher drove, in Teaching</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-move"/></svg><kbd>M</kbd></dt><dd>Move: the frames right before and after the box or bin was moved, side by side; again to go back</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-pause"/></svg><kbd>Space</kbd></dt><dd>Pause or resume; new events wait while paused</dd>
+            <dt><svg class="i" aria-hidden="true"><use href="#i-enter"/></svg><kbd>Enter</kbd></dt><dd>Teach: in the Teach box, sends what you typed. While you type there, the keys above type text.</dd>
+          </dl>
+        </section>
+        <p class="note run" id="run-meta"></p>
       </div>
     </details>
   </div>
 </header>
-<div class="control" id="control"></div>
+<div class="controlbar">
+  <div class="control" id="control"></div>
+  <form class="teach" id="teach" novalidate>
+    <span class="field">
+      <input id="instruction" name="instruction" type="text" autocomplete="off" dir="auto" placeholder="Tell the robot what to learn" aria-label="Tell the robot what to learn" aria-describedby="teach-count">
+      <span class="count" id="teach-count"></span>
+    </span>
+    <button type="submit" id="teach-go" aria-label="Teach" data-tip="Teach · Enter"><svg class="i go" aria-hidden="true"><use href="#i-enter"/></svg><svg class="i wait" aria-hidden="true"><use href="#i-wait"/></svg></button>
+    <div class="pop answer" id="teach-said" aria-hidden="true" hidden></div>
+  </form>
+</div>
+<p class="sr" id="teach-status" role="status"></p>
 <p class="sr" id="announce" aria-live="polite"></p>
-<main>
+<main id="main">
+  <section class="panel results" id="results" aria-label="Results"></section>
   <section class="panel col camera">
     <header><h2>Head camera</h2></header>
     <div class="stage" id="stage"></div>
     <ol class="strip" id="strip" aria-label="Recent head-camera frames"></ol>
   </section>
-  <div class="col side" id="side" tabindex="0" role="region" aria-label="Did it work">
+  <div class="col side" id="side" tabindex="0" role="region" aria-label="Results and diagnosis">
     <section class="panel" id="p-rounds"></section>
     <section class="panel" id="p-diagnosis"></section>
+    <section class="panel" id="p-training"></section>
   </div>
   <section class="panel col decisions">
     <header><h2>Decisions</h2><span id="chip-log"></span></header>

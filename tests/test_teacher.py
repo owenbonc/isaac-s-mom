@@ -556,6 +556,18 @@ def test_a_fatal_4xx_is_still_logged_as_a_call(tmp_path: Path) -> None:
     assert a.calls == 1
 
 
+def test_a_logged_call_error_shows_the_key_as_a_placeholder(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    key = "dummy-gemini-key-teacher"
+    monkeypatch.setenv("GEMINI_API_KEY", key)
+    a, _ = argon(tmp_path, ArgonUnavailable(f"503 for key {key}"), RuntimeError(f"401 bad key {key}"))
+    assert a.ask("act", ["x"]) is None
+    with pytest.raises(RuntimeError):
+        a.ask("act", ["x"])
+    logged = [e["error"] for e in events(tmp_path, "argon_call")]
+    assert logged == ["503 for key [key]", "RuntimeError: 401 bad key [key]"] and a.last_error == logged[-1]
+    assert key not in (tmp_path / "events.jsonl").read_text()
+
+
 def test_failing_the_last_budgeted_call_ends_at_once_without_a_wait(tmp_path: Path) -> None:
     waits: list[float] = []
     a, _ = argon(tmp_path, ArgonUnavailable("down"), budget=1, waits=waits)

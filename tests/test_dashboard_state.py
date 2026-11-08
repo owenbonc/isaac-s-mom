@@ -28,7 +28,7 @@ def stream(*events: tuple[str, dict]) -> list[dict]:
     return [{"t": float(i), "run_id": "r", "type": type_, "data": data} for i, (type_, data) in enumerate(events)]
 
 
-def run(script: str, events: list[dict]) -> Any:
+def run(script: str, events: list[Any]) -> Any:
     """Run `script` (a JS function body with `S` = state.js and `events`) under node and return its result."""
     stdin = json.dumps({"events": events, "script": script})
     out = subprocess.run(["node", "-e", DRIVER, str(STATE_JS)], input=stdin, capture_output=True, text=True, check=True)
@@ -39,11 +39,18 @@ def fold(*events: tuple[str, dict]) -> dict:
     return run(FOLD, stream(*events))
 
 
-def decision(step: int, controller: str = "student", latency: object = 100.0, reason: str = "why") -> tuple[str, dict]:
+def ckpt(round_: int) -> str:
+    """The student's checkpoint id after `round_` as the producer writes it: the base bare, the rest with the run."""
+    return "ckpt-r0" if round_ == 0 else f"r/ckpt-r{round_}"
+
+
+def decision(
+    step: int, controller: str = "student", latency: object = 100.0, reason: str = "why", round_: int = 0
+) -> tuple[str, dict]:
     skill = {"skill": "hug", "params": {}}
     return "decision", {
         "controller": controller,
-        "checkpoint": "ckpt-r0",
+        "checkpoint": ckpt(round_),
         "step": step,
         "skill": skill,
         "reason": reason,
@@ -294,6 +301,38 @@ def test_nothing_is_live_while_the_event_stream_is_disconnected() -> None:
     assert run(script, events) == "live"
 
 
+def panel(events: list[dict], now: float, episode: int | None = None) -> dict:
+    script = f"""
+    const v = S.view();
+    for (const e of events) S.reduce(v.live, e);
+    return S.panelLabel(v, {now}, {"null" if episode is None else f"S.shown(v).episodes[{episode}]"});
+    """
+    return run(script, events)
+
+
+def test_a_panel_shows_its_provenance_as_a_dot_and_spells_it_only_where_it_differs_from_the_runs() -> None:
+    events = stream(started("a"), verdict(False), started("b"))
+    assert panel(events, now=500.0, episode=0) == {"kind": "recorded", "spelled": False}  # as the run is
+    assert panel(events, now=5.0, episode=1) == {"kind": "live", "spelled": False}
+    # the run is live, the judged episode a panel shows is recorded
+    assert panel(events, now=5.0, episode=0) == {"kind": "recorded", "spelled": True}
+    assert panel(stream(started("a", "fake-1")), now=1.0) == {"kind": "placeholder", "spelled": False}
+
+
+def test_a_run_whose_mom_run_stopped_mid_fine_tune_reads_recorded_at_once() -> None:
+    stopped = ("error", {"error": "mom run stopped (exit 1): torch.OutOfMemoryError: CUDA out of memory"})
+    events = stream(started("a"), verdict(True), ("finetune_started", {"round": 1}), stopped)
+    assert provenance(events, now=4.0) == "recorded"  # its last event is fresh and its fine-tune pending
+    assert run(VIEW + "feed(events.length); return S.following(v, now);", events) is False
+
+
+def test_a_run_that_stopped_before_its_first_episode_reads_not_started() -> None:
+    stopped = ("error", {"error": "not started: mom run stopped: ModuleNotFoundError: No module named 'mujoco'"})
+    events = stream(("instruction", {"text": "Put the box in the bin", "source": "teach"}), stopped)
+    out = run(VIEW + "feed(events.length); return [S.shown(v).refused, S.following(v, now)];", events)
+    assert out == ["mom run stopped: ModuleNotFoundError: No module named 'mujoco'", False]
+
+
 def test_a_run_stops_being_live_20_s_after_its_last_event() -> None:
     events = stream(started("a"))  # last event at t=0
     assert provenance(events, now=19.9) == "live"
@@ -380,6 +419,8 @@ def test_each_frame_keeps_the_controller_that_saw_it_after_a_takeover() -> None:
 
 VIEW = """
 const v = S.view();
+// The presenter tests below drive Teaching unless they choose another tab.
+S.visit(v, { tab: "teaching" });
 let now = 0;
 // Each event arrives a second after it was written, as from a live run.
 const feed = (n) => { for (const e of events.splice(0, n)) { now = e.t + 1; S.receive(v, e, now); } };
@@ -463,7 +504,7 @@ def test_arrows_move_between_episodes_and_moving_past_the_last_follows_the_run_a
     assert out == ["b", "a", "a", "b", "b", "d"]
 
 
-def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_again() -> None:
+def test_move_shows_the_shown_episodes_move_and_pins_it_until_pressed_again() -> None:
     events = stream(
         started("a"),
         *[x for step in range(6) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))],
@@ -474,12 +515,12 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
     out = presenter(
         """
         feed(events.length - 1);
-        press("p");
+        press("m");
         const jumped = look();
-        const strip = S.filmstrip(S.episode(v, now), v.compare.step).map((f) => [f.step, f.moved, f.now]);
+        const strip = S.filmstrip(S.episode(v, now), S.stageStep(v)).map((f) => [f.step, f.moved, f.now]);
         feed(1);
         const pinned = look();
-        press("P");
+        press("M");
         return { jumped, strip, pinned, again: look() };
         """,
         events,
@@ -487,11 +528,11 @@ def test_p_jumps_to_the_perturbation_frame_and_pins_the_episode_until_pressed_ag
     assert out["jumped"]["focus"] == 2 and out["jumped"]["episode"] == "a"
     assert [f for f in out["strip"] if f[2]] == [[2, True, True]]
     assert out["pinned"]["episode"] == "a"
-    # pressing P again returns to where the view was: following the run, now on "b"
+    # pressing Move again returns to where the view was: following the run, now on "b"
     assert out["again"] == {"shown": len(events), "held": 0, "episode": "b", "focus": None}
 
 
-def test_p_pressed_again_returns_to_a_pinned_episode() -> None:
+def test_move_pressed_again_returns_to_a_pinned_episode() -> None:
     events = stream(
         started("a"),
         started("b"),
@@ -507,9 +548,9 @@ def test_p_pressed_again_returns_to_a_pinned_episode() -> None:
         feed(events.length);
         press("ArrowLeft");
         const before = look();
-        press("p");
+        press("m");
         const during = look();
-        press("p");
+        press("m");
         return [before, during, look()];
         """,
         events,
@@ -518,12 +559,32 @@ def test_p_pressed_again_returns_to_a_pinned_episode() -> None:
     assert [o["focus"] for o in out] == [None, 1, None]
 
 
-def test_p_does_nothing_on_an_episode_without_a_perturbation() -> None:
+def test_move_does_nothing_in_a_run_without_a_move() -> None:
     out = presenter(
-        "feed(3); press('p'); return look();",
+        "feed(3); const target = S.target(v, now, 'm'); press('m'); return [target, look()];",
         stream(started("a"), decision(0), executed(0)),
     )
-    assert out == {"shown": 3, "held": 0, "episode": "a", "focus": None}
+    assert out == [None, {"shown": 3, "held": 0, "episode": "a", "focus": None}]
+
+
+def test_no_shortcut_acts_while_the_focus_is_in_a_text_field() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        press("ArrowLeft");
+        const before = look();
+        const field = { tagName: "INPUT" };
+        const keys = ["d", "t", "m", "M", " ", "ArrowLeft", "ArrowRight", "End"];
+        const claimed = keys.map((key) => S.keydown(v, { key, target: field }, now));
+        const area = S.keydown(v, { key: " ", target: { tagName: "TEXTAREA" } }, now);
+        const editable = S.keydown(v, { key: "m", target: { tagName: "DIV", isContentEditable: true } }, now);
+        return { claimed, area, editable, paused: Boolean(v.frozen), moved: Boolean(v.compare), before, after: look() };
+        """,
+        stream(*BEATS),
+    )
+    assert out["claimed"] == [False] * 8 and not out["area"] and not out["editable"]
+    assert not out["paused"] and not out["moved"]
+    assert out["after"] == out["before"]
 
 
 def test_space_pauses_from_any_focus_claims_the_key_and_acts_once_while_held() -> None:
@@ -738,27 +799,28 @@ def test_d_from_between_two_diagnoses_goes_forward_on_a_tie() -> None:
     assert out == ["t2", "t3"]
 
 
-def test_end_follows_a_live_run_and_lands_on_a_finished_runs_latest_episode() -> None:
+def test_end_opens_now_on_the_episode_in_progress_while_the_run_is_live_and_now_stays_there_once_it_stops() -> None:
     out = presenter(
         """
         const tail = events.splice(events.length - 3);
         feed(events.length);
         press("ArrowLeft"); press("End");
-        const live = look().episode;
+        const live = [v.tab, look().episode];
         events.push(...tail); feed(3);
         const followed = look().episode;
         now += 60;
+        const stopped = [look().episode, S.target(v, now, "End")];
+        S.visit(v, { tab: "teaching" });
         press("ArrowLeft");
-        const back = look().episode;
-        press("End");
-        return [live, followed, back, look().episode];
+        return [live, followed, stopped, look().episode, S.target(v, now, "End")];
         """,
         stream(*BEATS),
     )
-    assert out == ["t5", "t6", "t5", "t6"]
+    # Teaching kept the d4 that ← pinned before End, so ← from there reaches t3
+    assert out == [["now", "t5"], "t6", ["t6", None], "t3", None]
 
 
-def test_navigation_targets_say_where_each_key_leads_and_minus_one_for_nowhere_new() -> None:
+def test_navigation_targets_say_where_each_key_leads_and_null_for_nowhere_new() -> None:
     out = presenter(
         """
         feed(events.length);
@@ -770,35 +832,54 @@ def test_navigation_targets_say_where_each_key_leads_and_minus_one_for_nowhere_n
         """,
         stream(*BEATS),
     )
-    assert out[0] == {"ArrowLeft": 5, "ArrowRight": -1, "d": 3, "t": 4, "m": 5, "End": -1}
-    assert out[1] == {"ArrowLeft": 0, "ArrowRight": 2, "d": 3, "t": 4, "m": 5, "End": 6}
+    teaching = lambda id_: {"tab": "teaching", "selected": id_}  # noqa: E731
+    # following the latest: ← pins t5, nothing lies to the right, End opens Now; landing on t6 again would follow
+    assert out[0] == {
+        "ArrowLeft": teaching("t5"),
+        "ArrowRight": None,
+        "d": teaching("t3"),
+        "t": teaching("d4"),
+        "m": teaching("t5"),
+        "End": {"tab": "now"},
+    }
+    assert out[1] == {
+        "ArrowLeft": teaching("t0"),
+        "ArrowRight": teaching("t2"),
+        "d": teaching("t3"),
+        "t": teaching("d4"),
+        "m": teaching("t5"),
+        "End": {"tab": "now"},
+    }
 
 
-def test_m_opens_the_moved_episode_at_the_first_frame_after_the_move_and_p_pressed_twice_returns_there() -> None:
+def test_move_from_an_episode_without_one_opens_the_nearest_moves_before_and_after_and_again_returns() -> None:
     events = stream(
         started("a"),
         *[x for step in range(6) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))],
-        ("perturbation", {"kind": "move_box", "step": 2}),
+        ("perturbation", {"kind": "move_box", "step": 2, "before_frame": "/f/before.jpg"}),
         *trial("b"),
+        *trial("c"),
     )
-    events.insert(5, events.pop(-4))  # the perturbation arrives before decision 2
+    events.insert(5, events.pop(-7))  # the perturbation arrives before decision 2
     out = presenter(
         """
         feed(events.length);
-        const stage = () => S.filmstrip(S.episode(v, now), S.stageStep(v))
-          .filter((f) => f.now).map((f) => [f.step, f.moved]);
+        press("ArrowLeft");
+        const pair = () => { const m = S.move(S.episode(v, now)); return v.compare && [m.before.url, m.after.url]; };
         press("m");
-        const opened = [look(), stage()];
-        press("p"); press("p");
-        const back = [look(), stage()];
-        press("End");
+        const opened = [look(), pair()];
+        press("m");
+        const back = [look(), pair()];
+        press("m"); press("End");
         return [opened, back, look()];
         """,
         events,
     )
-    opened = [{"shown": len(events), "held": 0, "episode": "a", "focus": 2}, [[2, True]]]
-    assert out[0] == opened and out[1] == opened
-    assert out[2] == {"shown": len(events), "held": 0, "episode": "b", "focus": None}
+    assert out[0] == [{"shown": len(events), "held": 0, "episode": "a", "focus": 2}, ["/f/before.jpg", "/f/2.jpg"]]
+    # Move again returns to where the view was, the pinned "b", not to the moved episode
+    assert out[1] == [{"shown": len(events), "held": 0, "episode": "b", "focus": None}, None]
+    # End leaves the move for the latest episode
+    assert out[2] == {"shown": len(events), "held": 0, "episode": "c", "focus": None}
 
 
 def test_the_judged_take_is_marked_on_its_episode() -> None:
@@ -849,6 +930,9 @@ def test_a_move_before_the_first_decision_names_the_controller_of_the_first_fram
     assert (before["url"], before["controller"], before["checkpoint"]) == ("/f/before.jpg", "teacher", "ckpt-r0")
 
 
+RECORDING_REFUSED = ("validation", {"task_success": False, "physics_valid": True, "reason": "recording error: x"})
+
+
 def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished_it() -> None:
     def kinded(episode_id: str, **data: object) -> tuple[str, dict]:
         return "episode_started", {**started(episode_id)[1], **data}
@@ -859,6 +943,7 @@ def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished
         *demo("demo-bad", "trial", accepted=False),
         *[kinded("heldout-ok", split="heldout"), decision(0), verdict(True)],
         *[kinded("heldout-bad", split="heldout"), decision(0), verdict(False)],
+        *[kinded("heldout-errored", split="heldout"), decision(0), RECORDING_REFUSED],
         *[started("trial-ok"), decision(0), verdict(True)],
         *[started("trial-bad"), decision(0), verdict(False)],
         *[kinded("alone", demo=True), decision(0), verdict(True)],
@@ -876,9 +961,10 @@ def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished
     )
     assert out == [
         ["demonstration", "Accepted for training"],
-        ["demonstration", "Rejected"],
+        ["demonstration", "Rejected, not used for training"],
         ["heldout", "Succeeded"],
         ["heldout", "Failed"],
+        ["heldout", "Errored, not counted"],
         ["trial", "Succeeded"],
         ["trial", "Failed"],
         ["take", "Succeeded, by the student alone"],
@@ -926,7 +1012,7 @@ def test_while_the_stage_holds_a_step_the_bar_names_that_frames_controller_not_t
         feed(events.length);
         const who = () => S.inControl(v, now);
         const seen = [who()];
-        for (const key of ["m", "p", "p", "End"]) { press(key); seen.push(who()); }
+        for (const key of ["m", "m", "m", "End"]) { press(key); seen.push(who()); }
         return seen;
         """,
         stream(*TAKE, started("next")),
@@ -934,9 +1020,9 @@ def test_while_the_stage_holds_a_step_the_bar_names_that_frames_controller_not_t
     teacher = {"controller": "teacher", "checkpoint": None, "step": None}
     student_at_the_move = {"controller": "student", "checkpoint": "ckpt-r0", "step": 1}
     nobody_yet = {"controller": None, "checkpoint": None, "step": None}
-    assert out == [nobody_yet, student_at_the_move, student_at_the_move, student_at_the_move, nobody_yet]
+    assert out == [nobody_yet, student_at_the_move, nobody_yet, student_at_the_move, nobody_yet]
     take = presenter(
-        "feed(events.length); const latest = S.inControl(v, now); press('p'); return [latest, S.inControl(v, now)];",
+        "feed(events.length); const latest = S.inControl(v, now); press('m'); return [latest, S.inControl(v, now)];",
         stream(*TAKE),
     )
     assert take == [teacher, student_at_the_move]
@@ -947,8 +1033,8 @@ def evaluation(checkpoint: str, round_: int, successes: int, n: int, errored: in
     return "evaluation_result", data
 
 
-def heldout(episode_id: str, checkpoint: str, judged: bool = True) -> list[tuple[str, dict]]:
-    events = [("episode_started", {**started(episode_id)[1], "split": "heldout"}), decision(0)]
+def heldout(episode_id: str, checkpoint: str, judged: bool = True, seed: int = 1) -> list[tuple[str, dict]]:
+    events = [("episode_started", {**started(episode_id)[1], "split": "heldout", "seed": seed}), decision(0)]
     events[-1][1]["checkpoint"] = checkpoint
     return [*events, verdict(False)] if judged else events
 
@@ -960,47 +1046,145 @@ return [S.claim(s), S.testing(s)];
 """
 
 
-def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_note() -> None:
-    first = run(CLAIM, stream(*heldout("h1", "ckpt-r0"), evaluation("ckpt-r0", 0, 0, 20)))
+def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoint_ids_beside_them() -> None:
+    rounds = [evaluation(ckpt(0), 0, 4, 20), evaluation(ckpt(1), 1, 9, 20), evaluation(ckpt(2), 2, 15, 20)]
+    claim, _ = run(CLAIM, stream(*rounds))
+    # the counts carry n, so there is no n line, and nothing errored, so there is no errored note
+    assert claim == {
+        "figure": "+55 pts",
+        "counts": "4 → 15 of 20",
+        "spoken": "Up 55 percentage points: 20%, 4 of 20, before\u00a0fine-tuning, "
+        "then 75%, 15 of 20, after\u00a0round\u00a02",
+        "errored": None,
+        "names": "before\u00a0fine-tuning → after\u00a0round\u00a02",
+        "ids": "ckpt-r0 → r/ckpt-r2",
+    }
+
+
+def test_with_one_held_out_evaluation_the_figure_is_its_rate_with_its_count_of_n() -> None:
+    first = run(CLAIM, stream(*heldout("h1", "ckpt-r0"), evaluation("ckpt-r0", 0, 4, 20)))
     assert first == [
         {
-            "figure": "0/20",
-            "spoken": "0 of 20 before fine-tuning",
-            "sample": "n=20",
-            "names": "before fine-tuning",
+            "figure": "20%",
+            "counts": "4 of 20",
+            "spoken": "20%, 4 of 20, before\u00a0fine-tuning",
+            "errored": None,
+            "names": "before\u00a0fine-tuning",
             "ids": "ckpt-r0",
         },
         None,
     ]
-    rounds = [evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 3, 20), evaluation("ckpt-r2", 2, 9, 20)]
-    claim, _ = run(CLAIM, stream(*rounds))
-    assert claim == {
-        "figure": "0/20 → 9/20",
-        "spoken": "0 of 20 before fine-tuning, then 9 of 20 after round 2",
-        "sample": "n=20 each",
-        "names": "before fine-tuning → after round 2",
-        "ids": "ckpt-r0 → ckpt-r2",
-    }
+
+
+@pytest.mark.parametrize(
+    ("first", "latest", "figure", "counts", "spoken"),
+    [
+        ((15, 20), (13, 20), "\u221210 pts", "15 → 13 of 20", "Down 10 percentage points: "),
+        ((0, 20), (0, 20), "+0 pts", "0 → 0 of 20", "No change: "),
+        # The change is taken between the rates as shown (33% → 67%), never from the unrounded 33.3 points.
+        ((1, 3), (2, 3), "+34 pts", "1 → 2 of 3", "Up 34 percentage points: "),
+    ],
+)
+def test_the_held_out_change_is_in_points_between_the_rates_shown(
+    first: tuple[int, int], latest: tuple[int, int], figure: str, counts: str, spoken: str
+) -> None:
+    claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, *first), evaluation("ckpt-r1", 1, *latest)))
+    assert (claim["figure"], claim["counts"]) == (figure, counts)
+    assert claim["spoken"].startswith(spoken)
 
 
 def test_a_held_out_evaluation_with_no_episodes_says_so_in_words() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 0)))
-    assert (claim["figure"], claim["sample"]) == ("0/20 → none", "n=20 and no held-out episode ran")
-    assert claim["spoken"] == "0 of 20 before fine-tuning, then no held-out episode ran after round 1"
+    assert (claim["figure"], claim["counts"]) == (None, "0/20 → none")
+    assert (
+        claim["spoken"] == "0%, 0 of 20, before\u00a0fine-tuning, then no held-out episode ran after\u00a0round\u00a01"
+    )
+
+
+def test_held_out_counts_whose_denominators_differ_show_each_and_the_errored_counts_apart() -> None:
+    rounds = [evaluation("ckpt-r0", 0, 4, 20, errored=0), evaluation("ckpt-r1", 1, 3, 20, errored=1)]
+    claim, _ = run(CLAIM, stream(*rounds))
+    assert (claim["figure"], claim["counts"], claim["errored"]) == ("\u22124 pts", "4/20 → 3/19", "0 → 1 errored")
+    assert claim["spoken"] == (
+        "Down 4 percentage points: 20%, 4 of 20, before\u00a0fine-tuning, "
+        "then 16%, 3 of 19, after\u00a0round\u00a01, 1 errored"
+    )
+    same = run(CLAIM, stream(evaluation("ckpt-r0", 0, 4, 20, errored=2), evaluation("ckpt-r1", 1, 9, 20, errored=2)))
+    assert (same[0]["counts"], same[0]["errored"]) == ("4 → 9 of 18", "2 → 2 errored")
+
+
+def test_a_held_out_evaluation_whose_every_episode_errored_says_so_in_words_and_shows_no_points() -> None:
+    claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20, errored=20)))
+    assert (claim["figure"], claim["counts"], claim["errored"]) == (None, "none", "20 errored")
+    assert claim["spoken"] == "all 20 held-out episodes errored before\u00a0fine-tuning"
+    later, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 4, 20), evaluation("ckpt-r1", 1, 0, 20, errored=20)))
+    assert (later["figure"], later["counts"]) == (None, "4/20 → none")
 
 
 def test_the_held_out_rate_is_out_of_the_episodes_that_did_not_error_with_the_errored_shown_apart() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 9, 20, errored=2)))
-    assert (claim["figure"], claim["sample"]) == ("9/18", "n=18 (2 errored)")
-    assert claim["spoken"] == "9 of 18 before fine-tuning (2 errored)"
+    assert (claim["figure"], claim["counts"], claim["errored"]) == ("50%", "9 of 18", "2 errored")
+    assert claim["spoken"] == "50%, 9 of 18, before\u00a0fine-tuning, 2 errored"
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 9, 20, errored=2), evaluation("ckpt-r1", 1, 15, 20)))
-    assert (claim["figure"], claim["sample"]) == ("9/18 → 15/20", "n=18 (2 errored) and n=20")
+    assert (claim["figure"], claim["counts"], claim["errored"]) == ("+25 pts", "9/18 → 15/20", "2 → 0 errored")
 
 
 def test_an_evaluation_whose_episodes_all_errored_says_so_in_words() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 20, errored=20)))
-    assert (claim["figure"], claim["sample"]) == ("0/20 → none", "n=20 and all 20 errored")
-    assert claim["spoken"] == "0 of 20 before fine-tuning, then all 20 errored after round 1"
+    assert (claim["figure"], claim["counts"]) == (None, "0/20 → none")
+    assert claim["spoken"] == (
+        "0%, 0 of 20, before\u00a0fine-tuning, then all 20 held-out episodes errored after\u00a0round\u00a01"
+    )
+
+
+FROM = """
+const s = S.initial();
+for (const e of events) S.reduce(s, e);
+const c = S.claim(s);
+const checkpoints = S.results(s).checkpoints.map((x) => x.name);
+return { names: c && c.names, spoken: c && c.spoken, checkpoints, carried: S.lessons(s).carried };
+"""
+
+
+def from_run(value: object) -> tuple[str, dict]:
+    return "evaluation_result", {**evaluation("fixed-v2/ckpt-r1", 0, 4, 20)[1], "from_run": value}
+
+
+def test_a_run_started_from_an_earlier_run_names_round_0_by_that_run_and_counts_its_carried_demonstrations() -> None:
+    source = {"run": "fixed-v2", "checkpoint": "fixed-v2/ckpt-r1", "carried": 8}
+    out = run(FROM, stream(*held_out(0, 1, "failed"), from_run(source), *evaluated(1, (1, "succeeded"))))
+    assert out["names"] == "from fixed-v2, ckpt-r1 → after\u00a0round\u00a01"
+    assert out["spoken"].endswith("20%, 4 of 20, from fixed-v2, ckpt-r1, then 100%, 1 of 1, after\u00a0round\u00a01")
+    assert out["checkpoints"] == ["from fixed-v2, ckpt-r1", "after\u00a0round\u00a01"]
+    assert out["carried"] == {"count": 8, "run": "fixed-v2"}
+    # until its result names round 0's source, a round 0 on a checkpoint other than the base is only under way
+    started_from = [
+        ("episode_started", held_out(0, 1, None)[0][1]),
+        ("decision", {**decision(0)[1], "checkpoint": "x"}),
+    ]
+    assert run(FROM, stream(*started_from))["checkpoints"] == ["the\u00a0evaluation\u00a0under\u00a0way"]
+    # and so is one before its first decision, which could be on another checkpoint
+    assert run(FROM, stream(*started_from[:1]))["checkpoints"] == ["the\u00a0evaluation\u00a0under\u00a0way"]
+    assert run(FROM, stream(*held_out(0, 1, None)))["checkpoints"] == ["before\u00a0fine-tuning"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        {"run": "fixed-v2", "checkpoint": "ckpt-r1"},
+        {"run": 5, "checkpoint": "ckpt-r1", "carried": 8},
+        {"run": "", "checkpoint": "ckpt-r1", "carried": 8},
+        {"run": "fixed-v2", "checkpoint": ["ckpt-r1"], "carried": 8},
+        {"run": "fixed-v2", "checkpoint": "ckpt-r1", "carried": -1},
+        {"run": "fixed-v2", "checkpoint": "ckpt-r1", "carried": 1.5},
+        "fixed-v2",
+    ],
+)
+def test_a_run_without_a_well_formed_from_run_reads_round_0_as_before_fine_tuning(value: object) -> None:
+    out = run(FROM, stream(from_run(value)))
+    assert out["names"] == out["checkpoints"][0] == "before\u00a0fine-tuning"
+    assert out["carried"] is None
 
 
 def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_evaluations_n() -> None:
@@ -1013,12 +1197,288 @@ def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_eva
         decision(0),
         verdict(False),
         *heldout("h2", "ckpt-r1"),
-        *heldout("h3", "ckpt-r1"),
+        *heldout("h3", "ckpt-r1", seed=2),
         started("take-is-dev"),
     )
     assert run(CLAIM, later)[1] == {"checkpoint": "ckpt-r1", "run": 2, "of": 20}
     done = stream(*heldout("h1", "ckpt-r0"), evaluation("ckpt-r0", 0, 0, 20), started("trial"))
     assert run(CLAIM, done)[1] is None
+    # a seed counts once it has run, whether it reached a verdict or crashed before or during its episode
+    first = evaluated(0, (1, "failed"), (2, "failed"), (3, "failed"))
+    crashing = [
+        *first,
+        started("trial"),
+        *held_out(1, 1, "failed"),
+        crashed(2, 1),
+        *held_out(1, 3, None),
+        crashed(3, 1),
+    ]
+    assert run(CLAIM, stream(*crashing))[1] == {"checkpoint": "r/ckpt-r1", "run": 3, "of": 3}
+
+
+VERDICTS = {
+    "succeeded": (True, "box at rest inside bin"),
+    "failed": (False, "box past the bin"),
+    "errored": (False, "recording error: joint limit"),
+}
+
+
+def held_out(round_: int, seed: object, outcome: str | None) -> list[tuple[str, dict]]:
+    """`round_`'s held-out episode on `seed`: succeeded, failed, a recording error, or (None) still running."""
+    start = ("episode_started", {**started(f"h{round_}-{seed}")[1], "seed": seed, "split": "heldout", "round": round_})
+    test = decision(0, round_=round_)
+    if outcome is None:
+        return [start, test]
+    task, reason = VERDICTS[outcome]
+    return [start, test, ("validation", {"task_success": task, "physics_valid": True, "reason": reason})]
+
+
+def crashed(seed: int, round_: int) -> tuple[str, dict]:
+    """The loop's error for a held-out episode on `seed` that raised, before or after it started."""
+    return "error", {"seed": seed, "split": "heldout", "round": round_, "error": "RuntimeError: reset failed"}
+
+
+def evaluated(round_: int, *outcomes: tuple[object, str | None]) -> list[tuple[str, dict]]:
+    """`round_`'s whole evaluation: each (seed, outcome)'s episode, then its result."""
+    episodes = [e for seed, outcome in outcomes for e in held_out(round_, seed, outcome)]
+    good = sum(outcome == "succeeded" for _, outcome in outcomes)
+    bad = sum(outcome in {"errored", None} for _, outcome in outcomes)
+    return [*episodes, evaluation(ckpt(round_), round_, good, len(outcomes), errored=bad)]
+
+
+RESULTS = """
+const s = S.initial();
+for (const e of events) S.reduce(s, e);
+const r = S.results(s, ONLY);
+return {
+  checkpoints: r.checkpoints,
+  rows: r.seeds.map((x) => [x.seed, x.mark, x.episodes.map((e) => e.outcome)]),
+  ids: r.seeds.map((x) => x.episodes.map((e) => e.id)),
+  counts: r.counts,
+};
+"""
+
+
+def results(*events: tuple[str, dict], only: str | None = None) -> dict:
+    return run(RESULTS.replace("ONLY", json.dumps(only)), stream(*events))
+
+
+def test_each_seed_is_marked_by_how_its_held_out_episode_changed_from_the_first_to_the_latest_evaluation() -> None:
+    first = evaluated(0, (1, "failed"), (2, "succeeded"), (3, "succeeded"), (4, "failed"))
+    latest = evaluated(1, (1, "succeeded"), (2, "failed"), (3, "succeeded"), (4, "failed"))
+    out = results(*first, started("trial"), *latest)
+    # regressed and improved sort first, then still fails and always passed
+    assert out["rows"] == [
+        [2, "down", ["succeeded", "failed"]],
+        [1, "up", ["failed", "succeeded"]],
+        [4, "fail", ["failed", "failed"]],
+        [3, "pass", ["succeeded", "succeeded"]],
+    ]
+    assert out["ids"][0] == ["h0-2", "h1-2"]
+    assert out["checkpoints"] == [
+        {"round": 0, "checkpoint": "ckpt-r0", "name": "before fine-tuning", "done": True},
+        {"round": 1, "checkpoint": "r/ckpt-r1", "name": "after round 1", "done": True},
+    ]
+    assert out["counts"] == {"down": 1, "up": 1, "fail": 1, "pass": 1, "error": 0, "pending": 0}
+
+
+def test_a_seed_that_errored_in_the_first_or_the_latest_evaluation_is_marked_errored() -> None:
+    crash = ("error", {"seed": 4, "split": "heldout", "round": 0, "error": "RuntimeError: reset failed"})
+    first = [*held_out(0, 1, "errored"), *held_out(0, 2, "failed"), *held_out(0, 3, None), crash]
+    out = results(
+        *first,
+        evaluation("ckpt-r0", 0, 0, 4, errored=3),
+        *evaluated(1, (1, "succeeded"), (2, "errored"), (3, "succeeded"), (4, "succeeded")),
+    )
+    # a recording error, an episode with no verdict once its evaluation finished, and a crash before the episode started
+    assert out["rows"] == [
+        [1, "error", ["errored", "succeeded"]],
+        [2, "error", ["failed", "errored"]],
+        [3, "error", ["errored", "succeeded"]],
+        [4, "error", ["errored", "succeeded"]],
+    ]
+    assert out["ids"][3] == [None, "h1-4"]
+
+
+def test_with_one_evaluation_every_seed_is_pending_and_mid_evaluation_so_is_every_seed_not_yet_judged() -> None:
+    first = evaluated(0, (1, "failed"), (2, "succeeded"), (3, "errored"))
+    one = results(*first)
+    assert one["rows"] == [[3, "error", ["errored"]], [1, "pending", ["failed"]], [2, "pending", ["succeeded"]]]
+    mid = results(*first, started("trial"), *held_out(1, 1, "succeeded"), *held_out(1, 2, None))
+    assert mid["rows"] == [
+        [1, "up", ["failed", "succeeded"]],
+        [3, "error", ["errored", "pending"]],
+        [2, "pending", ["succeeded", "pending"]],
+    ]
+    assert mid["checkpoints"][1] == {"round": 1, "checkpoint": "r/ckpt-r1", "name": "after round 1", "done": False}
+    running = results(*held_out(0, 1, "failed"), *held_out(0, 2, None))
+    assert running["rows"] == [[1, "pending", ["failed"]], [2, "pending", ["pending"]]]
+    # a seed whose episode crashed in the evaluation under way is errored before that evaluation's result
+    crash = results(*first, started("trial"), *held_out(1, 1, "succeeded"), *held_out(1, 2, None), crashed(2, 1))
+    assert [2, "error", ["succeeded", "errored"]] in crash["rows"]
+
+
+def test_with_three_checkpoints_the_mark_compares_the_first_and_the_latest_and_lists_every_one() -> None:
+    out = results(
+        *evaluated(0, (1, "failed"), (2, "succeeded")),
+        *evaluated(1, (1, "succeeded"), (2, "failed")),
+        *evaluated(2, (1, "failed"), (2, "succeeded")),
+    )
+    assert out["rows"] == [
+        [1, "fail", ["failed", "succeeded", "failed"]],
+        [2, "pass", ["succeeded", "failed", "succeeded"]],
+    ]
+    assert [c["name"] for c in out["checkpoints"]] == [
+        "before fine-tuning",
+        "after round 1",
+        "after round 2",
+    ]
+
+
+def test_seeds_sort_by_mark_then_number_the_counts_sum_to_the_seeds_and_a_filter_keeps_one_mark() -> None:
+    first = evaluated(0, *[(seed, "failed") for seed in (9, 3, 5)], (7, "succeeded"), (8, "errored"), (2, "failed"))
+    latest = [
+        *held_out(1, 9, "succeeded"),
+        *held_out(1, 3, "succeeded"),
+        *held_out(1, 5, "failed"),
+        *held_out(1, 7, "failed"),
+    ]
+    out = results(*first, *latest)
+    assert [row[:2] for row in out["rows"]] == [
+        [7, "down"],
+        [3, "up"],
+        [9, "up"],
+        [5, "fail"],
+        [8, "error"],
+        [2, "pending"],
+    ]
+    assert out["counts"] == {"down": 1, "up": 2, "fail": 1, "pass": 0, "error": 1, "pending": 1}
+    assert sum(out["counts"].values()) == len(out["rows"])
+    only = results(*first, *latest, only="up")
+    assert [row[0] for row in only["rows"]] == [3, 9]
+    assert only["counts"] == out["counts"]
+
+
+def test_a_seed_missing_from_a_finished_evaluation_errored_and_one_the_running_evaluation_lacks_is_pending() -> None:
+    out = results(
+        *evaluated(0, (1, "failed")),
+        *evaluated(1, (1, "succeeded"), (2, "succeeded")),
+        *held_out(2, 1, "failed"),
+    )
+    # seed 1's latest is the running evaluation's verdict
+    assert out["rows"] == [
+        [1, "fail", ["failed", "succeeded", "failed"]],
+        [2, "error", ["errored", "succeeded", "pending"]],
+    ]
+    assert out["ids"][1] == [None, "h1-2", None]
+
+
+def test_hostile_seed_and_checkpoint_values_never_make_a_row_or_break_the_model() -> None:
+    hostile = [held_out(0, seed, "failed") for seed in ("7", None, "<img src=x onerror=alert(1)>", [1], {"n": 1})]
+    twice = [
+        *held_out(0, 1, "failed"),
+        ("episode_started", {**held_out(0, 1, None)[0][1], "episode_id": "again"}),
+        verdict(True),
+    ]
+    bad_round = ("evaluation_result", {"checkpoint": {"<b>": 1}, "round": 0, "successes": 0, "n": 1, "errored": 0})
+    out = results(*[e for h in hostile for e in h], *twice, bad_round)
+    # the first try of a seed in an evaluation is its episode; a checkpoint that is not text reads as none
+    assert out["rows"] == [[1, "pending", ["failed"]]]
+    assert out["checkpoints"] == [{"round": 0, "checkpoint": "", "name": "before fine-tuning", "done": True}]
+    assert results()["rows"] == [] and results()["checkpoints"] == []
+
+
+TWO_EVALUATIONS = [
+    *evaluated(0, (1, "failed"), (2, "succeeded"), (3, "failed")),
+    *trial("t0", diagnosed=True),
+    *evaluated(1, (1, "succeeded"), (2, "failed"), (3, "failed")),
+]
+
+
+def test_a_run_opens_on_results_where_the_arrows_step_through_the_seeds_and_escape_returns_to_the_one_left() -> None:
+    out = presenter(
+        """
+        S.visit(v, { tab: "results" });
+        open();
+        const seen = [];
+        const at = () => [S.where(v), v.focus, v.seed, look().episode];
+        for (const key of ["ArrowDown", "ArrowDown", "ArrowRight", "ArrowDown", "ArrowUp"]) {
+          press(key);
+          seen.push(at());
+        }
+        S.visit(v, { seed: v.focus, focus: v.focus });  // Enter on the focused row
+        seen.push(at());
+        press("ArrowRight"); seen.push(at());
+        press("Escape"); seen.push(at());
+        const claims = [press("Escape"), S.target(v, now, "ArrowLeft")];
+        return { first: S.view().tab, seen, claims };
+        """,
+        stream(*TWO_EVALUATIONS),
+    )
+    assert out["first"] == "results"
+    # sorted ↓ 2, ↑ 1, ✗ 3; the list stops at its ends
+    assert out["seen"] == [
+        ["list", 2, None, None],
+        ["list", 1, None, None],
+        ["list", 3, None, None],
+        ["list", 3, None, None],
+        ["list", 1, None, None],
+        ["seed", 1, 1, None],
+        ["seed", 3, 3, None],
+        ["list", 3, None, None],
+    ]
+    # Escape in the list is not Results' to take; ← goes back up the list
+    assert out["claims"] == [False, {"focus": 1}]
+
+
+def test_a_filter_keeps_the_arrows_to_its_seeds_and_a_seeds_episodes_step_through_its_checkpoints() -> None:
+    out = presenter(
+        """
+        S.visit(v, { tab: "results" });
+        open();
+        S.visit(v, { only: "fail" });
+        press("ArrowDown");
+        const filtered = [v.focus, S.target(v, now, "ArrowDown")];
+        S.visit(v, { only: null, seed: 1, focus: 1, opened: "h0-1" });
+        const seen = [look().episode];
+        for (const key of ["ArrowRight", "ArrowRight", "ArrowLeft"]) { press(key); seen.push(look().episode); }
+        const up = press("ArrowUp");
+        press("Escape");
+        return { filtered, seen, up, back: [S.where(v), v.seed] };
+        """,
+        stream(*TWO_EVALUATIONS),
+    )
+    assert out["filtered"] == [3, None]
+    assert out["seen"] == ["h0-1", "h1-1", "h1-1", "h0-1"]
+    # ↑ scrolls an episode's view as usual; Escape returns to the seed
+    assert out["up"] is False
+    assert out["back"] == ["seed", 1]
+
+
+def test_teaching_holds_every_episode_but_the_held_out_tests_and_move_may_open_one_under_results() -> None:
+    moved = [*held_out(1, 1, "failed")]
+    moved.insert(2, ("perturbation", {"kind": "move_box", "step": 0}))
+    events = stream(*evaluated(0, (1, "failed")), *trial("t0", diagnosed=True), *trial("t1"), *moved)
+    out = presenter(
+        """
+        open();
+        const seen = [look().episode];
+        press("ArrowRight"); seen.push(look().episode);
+        press("ArrowLeft"); seen.push(look().episode);
+        press("d"); seen.push(look().episode);
+        press("m");
+        const moved = [S.where(v), v.seed, look().episode, S.stageStep(v)];
+        press("m");
+        const ups = [press("ArrowUp"), press("ArrowDown")];
+        return { seen, moved, back: [S.where(v), look().episode], ups };
+        """,
+        events,
+    )
+    # a finished run's Teaching lands on its latest teaching episode; → finds no other, the held-out test is not one
+    assert out["seen"] == ["t1", "t1", "t0", "t0"]
+    assert out["moved"] == ["episode", 1, "h1-1", 0]
+    assert out["back"] == ["teaching", "t0"]
+    assert out["ups"] == [False, False]
 
 
 def test_an_episode_is_finished_once_judged_moved_past_or_its_run_has_stopped() -> None:
@@ -1076,6 +1536,7 @@ def test_the_fine_tune_shows_each_accepted_demonstrations_last_frame_and_counts_
         "accepted": 3,
         "rejected": 1,
         "n": 4,
+        "carried": None,
     }
 
 
@@ -1091,3 +1552,641 @@ def test_a_view_holds_still_from_each_connection_until_its_replayed_backlog_has_
         [],
     )
     assert out == [True, False, True, False]
+
+
+def argon_call(call: int, ok: bool = True, latency: object = 1000.0) -> tuple[str, dict]:
+    error = None if ok else "unreachable"
+    data = {"purpose": "diagnose", "model": "m", "call": call, "budget": 800, "ok": ok, "error": error}
+    return "argon_call", {**data, "latency_ms": latency}
+
+
+def test_the_argon_strip_counts_calls_used_of_the_budget_the_median_answer_and_the_failures() -> None:
+    script = "const s = S.initial(); for (const e of events) S.reduce(s, e); return S.argon(s);"
+    # The task generator's call comes first; the run's own calls count on from it (SPEC §3.5, rule 5).
+    calls = [argon_call(1, latency=1200.0), argon_call(2, ok=False, latency=30000.0), argon_call(3, latency=800.0)]
+    out = run(script, stream(*calls, argon_call(4, latency="slow"), argon_call(5)))
+    assert out == {"used": 5, "budget": 800, "answer": {"median": 1000.0, "n": 3}, "failed": 1}
+    assert run(script, stream(started("a"))) is None
+
+
+def test_each_fine_tune_names_the_round_whose_training_set_summary_the_page_reads() -> None:
+    out = fold(
+        ("finetune_started", {"round": 1, "training_set": "runs/r/training_r1.jsonl"}),
+        ("finetune_completed", {"round": 1}),
+        ("finetune_started", {"round": 2}),
+        ("finetune_started", {"round": 2}),
+        ("finetune_started", {"round": "3"}),
+    )
+    assert out["state"]["trained"] == [1, 2]
+
+
+def test_saved_run_files_are_read_only_when_they_have_the_contracts_shape() -> None:
+    summary = {
+        "round": 1,
+        "episodes_scanned": 30,
+        "demonstrations": 6,
+        "accepted": 5,
+        "rejected": 1,
+        "unfinished": 0,
+        "rejected_by": {"past_bin": 1},
+        "empty_dev_episodes": 0,
+        "examples": 43,
+    }
+    report = {"replayed": 5, "reproduced": 4, "failures": [{"episode_id": "e1", "reason": "box 3 cm off"}]}
+    files = [
+        summary,
+        {**summary, "accepted": "5"},
+        {**summary, "rejected_by": {"past_bin": -1}},
+        None,
+        report,
+        {**report, "failures": "none"},
+        {**report, "failures": [{"episode_id": 7}]},
+        [],
+    ]
+    script = """
+    const [ok, text, negative, missing, report, words, badFailure, list] = events;
+    const summaries = [ok, text, negative, missing].map((f) => S.trainingSummary(f));
+    return [summaries, [report, words, badFailure, list].map((f) => S.replayReport(f))];
+    """
+    summaries, reports = run(script, files)
+    assert summaries == [summary, None, None, None]
+    assert reports == [report, None, None, None]
+
+
+def test_the_runs_list_is_read_only_in_the_contracts_shape_and_keeps_the_servers_order() -> None:
+    live = {
+        "run_id": "teach-1",
+        "instruction": "Put the box in the bin",
+        "status": "live",
+        "reason": None,
+        "started_t": 2.0,
+    }
+    refused = {
+        "run_id": "teach-0",
+        "instruction": "Juggle",
+        "status": "not_started",
+        "reason": "No such skill",
+        "started_t": 1.0,
+    }
+    old = {"run_id": "shot", "instruction": None, "status": "recorded", "reason": None, "started_t": 0.0}
+    bad = [
+        {**old, "run_id": 7},
+        {**old, "status": "paused"},
+        {**old, "reason": 3},
+        {**old, "started_t": "yesterday"},
+        {**old, "instruction": ["x"]},
+        None,
+    ]
+    script = "return [S.runsOf(events), S.runsOf({ runs: events }), S.runsOf(null)];"
+    assert run(script, [live, *bad, refused, old]) == [[live, refused, old], [], []]
+
+
+def test_a_page_whose_url_names_no_run_opens_the_first_listed() -> None:
+    runs = [{"run_id": "live"}, {"run_id": "older"}]
+    assert run("const [runs] = events; return [S.runToOpen(runs), S.runToOpen([])];", [runs]) == ["live", None]
+
+
+def test_an_instruction_is_1_to_200_characters_once_trimmed_and_the_count_shows_near_the_limit() -> None:
+    texts = ["   ", "x", "y" * 200, "z" * 201, "  " + "w" * 200 + "\n", "a" * 159, "a" * 160]
+    script = "return events.map((t) => [S.instructionProblem(t), S.teachCount(t), S.tooLong(t)]);"
+    out = run(script, texts)
+    empty, fits = "Type what the robot should learn.", None
+    too_long = "At most 200 characters."
+    assert [problem for problem, _, _ in out] == [empty, fits, fits, too_long, fits, fits, fits]
+    assert [shown for _, shown, _ in out] == [None, None, "200/200", "201/200", "200/200", None, "160/200"]
+    assert [over for _, _, over in out] == [False, False, False, True, False, False, False]
+
+
+@pytest.mark.parametrize(("n", "problem"), [(199, None), (200, None), (201, "At most 200 characters.")])
+def test_an_emoji_counts_as_one_character_as_the_server_counts_it(n: int, problem: str | None) -> None:
+    script = "return events.map((t) => [S.instructionProblem(t), S.teachCount(t), S.tooLong(t)]);"
+    assert run(script, ["\N{ROBOT FACE}" * n]) == [[problem, f"{n}/200", n > 200]]
+
+
+def test_a_teach_answer_is_started_not_started_with_its_reasons_or_a_failure_in_words() -> None:
+    answers = [
+        [201, {"run_id": "teach-1", "started": True}],
+        [200, {"run_id": "teach-2", "started": False, "reasons": ["Not yet: the loop teaches one task"]}],
+        [200, {"run_id": "teach-3", "started": False, "reasons": ['<img src=x onerror="alert(1)">']}],
+        [200, {"run_id": "teach-4", "started": False, "reasons": "unreachable"}],
+        [403, {"detail": "Forbidden"}],
+        [400, {"detail": "1 to 200 characters"}],
+        [500, None],
+        [0, None],
+    ]
+    out = run("return events.map(([status, body]) => S.teachAnswer(status, body));", answers)
+    assert out[0] == {"state": "started", "runId": "teach-1"}
+    assert out[1] == {"state": "refused", "runId": "teach-2", "reasons": ["Not yet: the loop teaches one task"]}
+    # Typed and generated text stays text: the page escapes it where it is shown.
+    assert out[2]["reasons"] == ['<img src=x onerror="alert(1)">']
+    assert [o["state"] for o in out[3:]] == ["failed"] * 5
+    assert out[4]["message"] == "The dashboard takes instructions only from its own page on this computer."
+    assert out[5]["message"] == "An instruction is 1 to 200 characters."
+    assert out[6]["message"] == "The dashboard server could not take it (HTTP 500)."
+    assert out[7]["message"] == "Could not reach the dashboard server."
+
+
+def test_a_runs_instruction_and_why_it_did_not_start_are_read_from_its_events() -> None:
+    refused = fold(
+        ("instruction", {"text": "Juggle three boxes", "source": "teach"}),
+        argon_call(1),
+        ("instruction", {"text": "a second one is not the run's", "source": "cli"}),
+        ("error", {"error": "not started: No such skill; Not yet: the loop teaches one task"}),
+    )["state"]
+    assert refused["instruction"] == {"text": "Juggle three boxes", "source": "teach"}
+    assert refused["refused"] == "No such skill; Not yet: the loop teaches one task"
+    taught = fold(("instruction", {"text": "Put the box in the bin", "source": "cli"}), started("a"))["state"]
+    assert taught["refused"] is None and taught["instruction"]["source"] == "cli"
+    assert fold(started("a"))["state"]["instruction"] is None
+
+
+APP_JS = STATE_JS.parent / "app.js"
+# app.js under a DOM stub that records every write; the test drives the event stream and the animation frames.
+APP_DRIVER = r"""
+const vm = require("vm");
+const fs = require("fs");
+const [statePath, appPath] = process.argv.slice(1);
+const { events, runs, script } = JSON.parse(fs.readFileSync(0, "utf8"));
+const writes = [];
+const elements = new Map();
+class FakeElement {
+  constructor(id = "", tagName = "DIV") {
+    Object.assign(this, { id, tagName, dataset: {}, hidden: false, disabled: false, textContent: "", value: "" });
+    Object.assign(this, { children: [], scrollTop: 0, scrollHeight: 0, clientHeight: 0, isConnected: true });
+    Object.assign(this, { open: false, listeners: {} });
+    this.style = { setProperty() {} };
+    this.classList = { add() {}, remove() {}, toggle() {}, contains: () => false };
+    this.lastElementChild = { textContent: "" };
+  }
+  get innerText() { return ""; }
+  setAttribute() {}
+  removeAttribute() {}
+  toggleAttribute() {}
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  querySelector(selector) { return Object.assign(new FakeElement(), { selector }); }
+  querySelectorAll() { return []; }
+  getBoundingClientRect() { return { top: 0 }; }
+  checkVisibility() { return true; }
+  contains() { return false; }
+  focus() { doc.activeElement = this; }
+}
+Object.defineProperty(FakeElement.prototype, "innerHTML", {
+  get() { return this.html ?? ""; },
+  set(html) { this.html = html; writes.push([this.id, html]); },
+  configurable: true,
+});
+const IDS = ["status", "run-meta", "announce", "control", "stage", "strip", "log", "chip-log", "p-rounds",
+  "p-diagnosis", "p-training", "models", "side", "results", "main", "tabs", "now-dot", "runs", "run-name", "run-list",
+  "teach", "instruction", "teach-count", "teach-go", "teach-said", "teach-status", "b-prev", "b-next", "b-d", "b-t",
+  "b-m", "b-pause"];
+for (const id of IDS) elements.set(id, new FakeElement(id, id === "instruction" ? "INPUT" : "DIV"));
+const body = new FakeElement("", "BODY");
+const doc = {
+  body,
+  activeElement: body,
+  listeners: {},
+  getElementById: (id) => elements.get(id) || null,
+  // The run picker stands for the page's popovers.
+  querySelectorAll: (selector) =>
+    selector === "[id]" ? [...elements.values()] : selector.includes("details.runs") ? [elements.get("runs")] : [],
+  // One element per selector, so a listener app.js adds to it can be driven.
+  found: new Map(),
+  querySelector(selector) {
+    if (!this.found.has(selector)) this.found.set(selector, Object.assign(new FakeElement(), { selector }));
+    return this.found.get(selector);
+  },
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+  getAnimations: () => [],
+};
+const sources = [];
+class EventSource {
+  constructor(url) { this.url = url; this.listeners = {}; sources.push(this); }
+  addEventListener(type, fn) { this.listeners[type] = fn; }
+}
+const frames = [];
+const fetched = [];
+const intervals = [];
+// A body-less answer's json() throws, as a 204's does.
+const answer = (status, body) => ({
+  ok: status < 300, status, headers: new Map(), json: async () => body ?? JSON.parse(""),
+});
+const refused = { run_id: "t", started: false, reasons: ["Not yet"] };
+const context = vm.createContext({
+  document: doc, Element: FakeElement, EventSource, console, structuredClone, URLSearchParams,
+  location: { search: "?run=r", replace() {}, assign() {} },
+  history: { replaceState() {} },
+  fetch: async (url) => {
+    fetched.push(url);
+    return url === "/runs" ? answer(200, runs) : url === "/teach" ? answer(200, refused) : answer(204);
+  },
+  requestAnimationFrame: (fn) => frames.push(fn),
+  setInterval: (fn, ms) => intervals.push([fn.name, ms]),
+  addEventListener() {},
+  innerWidth: 1280,
+  CSS: { escape: (s) => s },
+});
+vm.runInContext(fs.readFileSync(statePath, "utf8"), context);
+vm.runInContext(fs.readFileSync(appPath, "utf8"), context);
+const flush = () => { while (frames.length) frames.shift()(); };
+const settled = () => new Promise((resolve) => setImmediate(resolve));
+(async () => {
+  for (let i = 0; i < 5; i++) await settled();
+  const AsyncFunction = (async () => {}).constructor;
+  const names = ["vm", "context", "sources", "writes", "frames", "flush", "doc", "events", "fetched", "intervals"];
+  const run = new AsyncFunction(...names, script);
+  const out = await run(vm, context, sources, writes, frames, flush, doc, events, fetched, intervals);
+  console.log(JSON.stringify(out));
+})();
+"""
+
+HOSTILE = "<img src=x onerror=alert(1)>"
+
+
+def app(script: str, events: list[dict], runs: list[dict] | None = None) -> Any:
+    """Run `script` (an async JS function body) against app.js loaded under the DOM stub, and return its result."""
+    listed = (
+        runs
+        if runs is not None
+        else [{"run_id": "r", "instruction": None, "status": "recorded", "reason": None, "started_t": 0}]
+    )
+    stdin = json.dumps({"events": events, "runs": listed, "script": script})
+    command = ["node", "-e", APP_DRIVER, str(STATE_JS), str(APP_JS)]
+    out = subprocess.run(command, input=stdin, capture_output=True, text=True, check=True)
+    return json.loads(out.stdout)
+
+
+def hostile_run() -> list[dict]:
+    """A run whose every text an event carries is markup: instruction, ids, reasons, checkpoints, frames, errors."""
+    x = HOSTILE
+    say = {"hypothesis": x, "evidence": x, "lesson": x, "confidence": 0.5}
+    start = {"seed": 7, "split": "heldout", "sim_version": f"mujoco {x}", "robot_config": x}
+    events = [
+        ("instruction", {"text": x, "source": "teach"}),
+        ("episode_started", {**start, "episode_id": f"h0{x}", "round": 0}),
+        (
+            "decision",
+            {"controller": "student", "checkpoint": x, "step": 0, "skill": {"skill": x}, "reason": x, "latency_ms": 5},
+        ),
+        ("action_executed", {"step": 0, "ok": False, "error": x, "frame": x}),
+        ("validation", {"task_success": False, "physics_valid": True, "reason": x}),
+        (
+            "evaluation_result",
+            {
+                "checkpoint": x,
+                "round": 0,
+                "successes": 0,
+                "n": 1,
+                "errored": 0,
+                "from_run": {"run": x, "checkpoint": x, "carried": 2},
+            },
+        ),
+        ("episode_started", {**start, "split": "dev", "seed": 1000, "episode_id": f"t{x}", "round": 1}),
+        ("decision", {"controller": "student", "checkpoint": x, "step": 0, "skill": {"skill": x}, "reason": x}),
+        ("perturbation", {"kind": x, "step": 0, "before_frame": x}),
+        ("validation", {"task_success": False, "physics_valid": False, "reason": x}),
+        ("diagnosis", {"episode_id": f"t{x}", **say}),
+        ("episode_started", {**start, "split": "dev", "seed": 1000, "episode_id": f"d{x}", "acting_on": f"t{x}"}),
+        ("decision", {"controller": "teacher", "checkpoint": None, "step": 0, "skill": {"skill": x}, "reason": x}),
+        ("error", {"error": x}),
+        ("validation", {"task_success": True, "physics_valid": True, "reason": x}),
+        ("episode_started", {**start, "episode_id": f"h1{x}", "round": 1}),
+        ("decision", {"controller": "student", "checkpoint": x, "step": 0, "skill": {"skill": x}, "reason": x}),
+        ("validation", {"task_success": True, "physics_valid": True, "reason": x}),
+        ("evaluation_result", {"checkpoint": x, "round": 1, "successes": 1, "n": 1, "errored": 0}),
+    ]
+    return [{**e, "run_id": f"r{x}"} for e in stream(*events)]
+
+
+REPLAY = """
+const [source] = sources;
+source.onopen();
+for (const e of events) source.onmessage({ data: JSON.stringify(e) });
+source.listeners.replayed();
+flush();
+"""
+
+
+# A tag's quoted values are escaped text, so only what lies outside them could be injected markup.
+MARKUP = """
+const tags = writes.flatMap(([, html]) => html.replace(/"[^"]*"/g, '""').match(/<[^>]+>/g) || []);
+return {
+  injected: tags.filter((t) => /onerror|^<img src=x/i.test(t)),
+  escaped: writes.filter(([, html]) => html.includes("&lt;img src=x onerror=alert(1)&gt;")).map(([id]) => id),
+};
+"""
+
+
+def test_no_value_from_an_event_or_the_runs_list_becomes_markup_in_any_view() -> None:
+    script = """
+    // Every place the page can show: Results' list, the seed, its episodes, Teaching with its Move, and Now.
+    vm.runInContext(`
+      MomState.visit(view, { seed: 7, focus: 7 }); render();
+      MomState.visit(view, { opened: MomState.results(MomState.shown(view)).seeds[0].episodes[0].id }); render();
+      MomState.visit(view, { tab: "teaching", selected: null }); render();
+      MomState.keydown(view, { key: "m" }, Date.now() / 1000); render();
+      MomState.keydown(view, { key: "d" }, Date.now() / 1000); render();
+      MomState.visit(view, { tab: "now" }); render();
+      const reasons = [${JSON.stringify(events[0].data.text)}];
+      teaching = MomState.teachAnswer(200, { run_id: "r", started: false, reasons });
+      renderTeach();
+    `, context);
+    """
+    runs = [{"run_id": "r", "instruction": HOSTILE, "status": "not_started", "reason": HOSTILE, "started_t": 0}]
+    out = app(REPLAY + script + MARKUP, hostile_run(), runs)
+    assert out["injected"] == []
+    # the markup reached every panel as text
+    assert {"run-list", "results", "control", "stage", "log", "p-rounds", "p-diagnosis", "teach-said"} <= set(
+        out["escaped"]
+    )
+    # A run that did not start shows why in Results and on Now's stage, and Argon's answer can steer that text.
+    events = stream(
+        ("instruction", {"text": HOSTILE, "source": "teach"}), ("error", {"error": f"not started: {HOSTILE}"})
+    )
+    script = 'vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);'
+    out = app(REPLAY + script + MARKUP, [{**e, "run_id": f"r{HOSTILE}"} for e in events])
+    assert out["injected"] == []
+    assert {"results", "stage"} <= set(out["escaped"])
+
+
+def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_settles() -> None:
+    script = """
+    const [source] = sources;
+    const before = writes.map(([id]) => id);
+    source.onopen();
+    for (const e of events) source.onmessage({ data: JSON.stringify(e) });
+    const replaying = { frames: frames.length, written: writes.map(([id]) => id).slice(before.length) };
+    const announced = doc.getElementById("announce").textContent;
+    source.listeners.replayed();
+    flush();
+    const heard = doc.getElementById("announce").textContent;
+    return { before, replaying, announced, after: new Set(writes.map(([id]) => id)).size, heard };
+    """
+    events = stream(started("a"), decision(0), executed(0), verdict(False), started("b"), decision(0))
+    out = app(script, events)
+    # only the runs list, which is not the event stream's, is written before the replay settles
+    assert set(out["before"]) <= {"run-list"}
+    assert out["replaying"] == {"frames": 0, "written": []}
+    assert out["announced"] == ""
+    assert out["after"] > 5 and out["heard"]
+
+
+def test_after_a_move_the_stage_marks_it_on_every_later_frame_and_only_icons_carry_the_results_mark_class() -> None:
+    script = """
+    vm.runInContext(`MomState.visit(view, { tab: "teaching" }); render();`, context);
+    // `.mark` sizes the Results icons, so anything else in that class is squeezed into an icon's box.
+    const marked = writes.flatMap(([, html]) => html.match(/<\\w+[^>]*class="[^"]*\\bmark\\b[^"]*"/g) || []);
+    const stage = writes.filter(([id]) => id === "stage").pop()[1];
+    return { stage, notIcons: marked.filter((t) => !t.startsWith("<svg")) };
+    """
+    out = app(REPLAY + script, stream(*TAKE))
+    assert "Box moved at step 1" in out["stage"]
+    assert out["notIcons"] == []
+
+
+def test_the_now_tabs_dot_shows_only_while_the_run_is_live_never_recorded_paused_or_disconnected() -> None:
+    script = """
+    const dot = () => doc.getElementById("now-dot").hidden;
+    const seen = { live: dot() };
+    vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);
+    seen.now = dot();
+    vm.runInContext(`MomState.keydown(view, { key: " " }, Date.now() / 1000); render();`, context);
+    seen.paused = dot();
+    vm.runInContext(`MomState.keydown(view, { key: " " }, Date.now() / 1000); render();`, context);
+    seen.resumed = dot();
+    sources[0].onerror();
+    flush();
+    seen.lost = dot();
+    return seen;
+    """
+    fresh = "for (const e of events) e.t = Date.now() / 1000;"
+    live = app(fresh + REPLAY + script, stream(started("a"), decision(0)))
+    assert live == {"live": False, "now": False, "paused": True, "resumed": False, "lost": True}
+    recorded = app(REPLAY + script, stream(started("a"), decision(0)))
+    assert set(recorded.values()) == {True}
+
+
+def test_a_click_on_previous_or_next_in_results_takes_the_focus_to_the_seed_as_the_arrow_key_does() -> None:
+    script = """
+    const button = (key) => ({ closest: () => ({ dataset: { key } }) });
+    const click = (key) => () => doc.querySelector(".presenter").listeners.click[0]({ target: button(key) });
+    const key = (k) => () => doc.listeners.keydown[0]({ key: k, target: doc.body, preventDefault() {} });
+    const seen = [];
+    for (const act of [click("ArrowRight"), click("ArrowRight"), key("ArrowRight"), click("ArrowLeft")]) {
+      act();
+      flush();
+      seen.push(doc.activeElement.selector || null);
+    }
+    return seen;
+    """
+    # sorted ↓ 2, ↑ 1, ✗ 3
+    assert app(REPLAY + script, stream(*TWO_EVALUATIONS)) == [f'.seeds [data-seed="{n}"]' for n in [2, 1, 3, 1]]
+
+
+def test_a_run_that_did_not_start_says_why_once_in_each_tab() -> None:
+    script = """
+    const last = (id) => writes.filter(([at]) => at === id).pop()[1];
+    const seen = [{ control: last("control"), shown: last("results") }];
+    for (const tab of ["teaching", "now"]) {
+      vm.runInContext(`MomState.visit(view, { tab: "${tab}" }); render();`, context);
+      seen.push({ control: last("control"), shown: last("stage") });
+    }
+    return seen;
+    """
+    refused = ("error", {"error": "not started: Not yet: the loop teaches one task"})
+    out = app(REPLAY + script, stream(("instruction", {"text": "juggle", "source": "teach"}), refused))
+    for tab in out:
+        assert "Not started" in tab["control"] and "Not yet" not in tab["control"]
+        assert "Not yet: the loop teaches one task" in tab["shown"]
+
+
+HEARD = """
+const heard = [];
+const said = { get: () => heard.at(-1) || "", set: (t) => heard.push(t) };
+Object.defineProperty(doc.getElementById("announce"), "textContent", said);
+"""
+
+
+def test_a_new_episode_elsewhere_in_the_run_never_re_announces_the_episode_shown() -> None:
+    later = [e for seed in (5, 6, 7) for e in held_out(1, seed, "failed")]
+    script = f"""
+    const later = events.splice(events.length - {len(later)});
+    {REPLAY}
+    vm.runInContext(`MomState.visit(view, {{ tab: "teaching" }}); render();`, context);
+    const shown = heard.length;
+    for (const e of later) {{ sources[0].onmessage({{ data: JSON.stringify(e) }}); flush(); }}
+    return heard.slice(shown - 1);
+    """
+    out = app(HEARD + script, stream(started("a"), decision(0), executed(0), verdict(False), *later))
+    assert len(out) == 1 and out[0].startswith("Episode 1 of 1, student trial.")
+
+
+def test_results_list_is_announced_with_the_seeds_it_shows_and_the_mark_it_is_filtered_to() -> None:
+    script = """
+    vm.runInContext(`
+      MomState.visit(view, { only: "up" }); render();
+      MomState.visit(view, { seed: 1, focus: 1 }); render();
+      MomState.keydown(view, { key: "Escape" }, Date.now() / 1000); render();
+      MomState.visit(view, { only: null }); render();
+    `, context);
+    return heard;
+    """
+    assert app(HEARD + REPLAY + script, stream(*TWO_EVALUATIONS)) == [
+        "Results: 3 held-out seeds.",
+        "Results: 1 of 3 held-out seeds, marked improved.",
+        "Seed 1, improved: Failed → Succeeded.",
+        "Results: 1 of 3 held-out seeds, marked improved.",
+        "Results: 3 held-out seeds.",
+    ]
+
+
+@pytest.mark.parametrize("n", [199, 200, 201])
+def test_past_200_characters_the_count_says_so_and_teach_stays_off_until_the_text_is_shortened(n: int) -> None:
+    script = f"""
+    const field = doc.getElementById("instruction");
+    field.value = "\N{ROBOT FACE}".repeat({n});
+    field.listeners.input[0]();
+    const [count, go, status] = ["teach-count", "teach-go", "teach-status"].map((id) => doc.getElementById(id));
+    return [count.textContent, go.disabled, status.textContent];
+    """
+    status = "At most 200 characters." if n > 200 else ""
+    assert app(REPLAY + script, stream(started("a"))) == [f"{n}/200", n > 200, status]
+
+
+def test_the_run_picker_closes_when_the_focus_moves_past_it_or_on_escape_and_not_for_a_click_on_its_own_text() -> None:
+    script = """
+    const picker = doc.getElementById("runs");
+    const link = {};
+    picker.contains = (el) => el === link;
+    const left = (relatedTarget) => {
+      picker.open = true;
+      picker.listeners.focusout[0]({ relatedTarget });
+      return picker.open;
+    };
+    picker.open = true;
+    doc.listeners.keydown[0]({ key: "Escape", target: doc.body, preventDefault() {} });
+    return { escape: picker.open, link: left(link), text: left(null), past: left(doc.getElementById("tabs")) };
+    """
+    assert app(REPLAY + script, stream(started("a"))) == {"escape": False, "link": True, "text": True, "past": False}
+
+
+def test_a_panel_reads_back_the_html_written_to_it() -> None:
+    script = 'return doc.getElementById("p-rounds").innerHTML;'
+    assert "Held-out success" in app(REPLAY + script, stream(started("a")))
+
+
+def test_the_runs_list_is_asked_for_every_3_s_and_again_right_after_a_teach() -> None:
+    script = """
+    const every = intervals.filter(([name]) => name === "loadRuns").map(([, ms]) => ms);
+    const field = doc.getElementById("instruction");
+    field.value = "juggle three boxes";
+    const asked = fetched.length;
+    doc.getElementById("teach").listeners.submit[0]({ preventDefault() {} });
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+    return { every, after: fetched.slice(asked) };
+    """
+    assert app(REPLAY + script, stream(started("a"))) == {"every": [3000], "after": ["/teach", "/runs"]}
+
+
+def test_a_run_file_the_server_says_is_not_written_yet_reads_as_not_in_the_runs_files() -> None:
+    script = """
+    for (let i = 0; i < 5; i++) await new Promise((resolve) => setImmediate(resolve));
+    flush();
+    const shown = writes.filter(([id]) => id === "p-training").pop()[1];
+    return { asked: fetched.filter((url) => url.startsWith("/run-files/")), shown };
+    """
+    out = app(REPLAY + script, stream(started("a"), ("finetune_started", {"round": 1})))
+    assert out["asked"] == ["/run-files/r/training_r1.summary.json", "/run-files/r/replay_report.json"]
+    assert out["shown"].count("Not in the run's files.") == 2
+
+
+def test_an_errored_held_out_episode_reads_errored_not_counted_in_its_own_view_never_failed() -> None:
+    script = """
+    vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);
+    const last = (id) => writes.filter(([at]) => at === id).pop()[1];
+    return { control: last("control"), log: last("log"), heard: heard.at(-1) };
+    """
+    episode = ("episode_started", {**started("h")[1], "split": "heldout"})
+    out = app(HEARD + REPLAY + script, stream(episode, decision(0), executed(0), RECORDING_REFUSED))
+    for html in (out["control"], out["log"]):
+        assert "Errored, not counted" in html and "#m-error" in html and "Failed" not in html
+    assert 'class="verdict warn"' in out["control"]
+    assert 'class="event warn"' in out["log"]
+    assert out["heard"].endswith("Verdict: Errored, not counted.")
+
+
+def test_a_fine_tuned_checkpoint_shows_by_its_short_id_and_the_names_tooltip_keeps_the_full_ids() -> None:
+    script = """
+    vm.runInContext(`
+      MomState.visit(view, { seed: 1, focus: 1 }); render();
+      MomState.visit(view, { tab: "now" }); render();
+    `, context);
+    const last = (id) => writes.filter(([at]) => at === id).pop()[1];
+    // A tooltip may carry the full id; nothing else on the page does.
+    const shown = writes.map(([, html]) => html.replace(/title="[^"]*"/g, "")).filter((h) => h.includes("r/ckpt-r"));
+    return { shown, rounds: last("p-rounds"), seed: last("results"), control: last("control") };
+    """
+    events = [*evaluated(0, (1, "failed")), started("trial"), *evaluated(1, (1, "succeeded")), *held_out(2, 1, None)]
+    out = app(REPLAY + script, stream(*events, executed(0)))
+    assert out["shown"] == []
+    assert 'title="ckpt-r0 → r/ckpt-r1"' in out["rounds"]
+    assert 'Testing <span class="mono">ckpt-r2</span>' in out["rounds"]
+    assert (
+        '<span class="mono note">ckpt-r1</span>' in out["seed"] and '<span class="mono">ckpt-r2</span>' in out["seed"]
+    )
+    assert 'Student <span class="mono">ckpt-r2</span>' in out["control"]
+
+
+def test_a_run_reads_live_on_the_servers_clock_when_the_viewers_runs_30_s_ahead() -> None:
+    script = """
+    // The server's clock, as its /runs answer's Date header gives it, is 30 s behind this one.
+    const behind = new Date(Date.now() - 30000).toUTCString();
+    context.fetch = async () => ({ ok: true, status: 200, headers: new Map([["date", behind]]), json: async () => [] });
+    await vm.runInContext("loadRuns()", context);
+    for (const e of events) e.t = Date.now() / 1000 - 30;
+    """
+    script += REPLAY + 'return doc.getElementById("status").innerHTML;'
+    assert 'class="chip live"' in app(script, stream(started("a"), decision(0)))
+
+
+def test_a_crash_carrying_another_seed_never_lands_in_the_current_episodes_log() -> None:
+    crash = ("error", {"seed": 105, "split": "heldout", "round": 0, "error": "RuntimeError: reset failed"})
+    own = ("error", {"seed": 104, "split": "heldout", "round": 0, "error": "recorder refused step 1"})
+    stopped = ("error", {"error": "mom run stopped (exit 1)"})
+    out = fold(*held_out(0, 104, "failed"), crash, own, stopped)
+    assert [r.get("text") or r["kind"] for r in out["ep"]["rows"]] == [
+        "decision",
+        "verdict",
+        "recorder refused step 1",
+        "mom run stopped (exit 1)",
+    ]
+    assert [c["seed"] for c in out["state"]["crashes"]] == [105, 104]
+
+
+def test_a_paused_view_stays_put_when_the_run_stops_while_it_is_paused() -> None:
+    stopped = ("error", {"error": "mom run stopped (exit 1)"})
+    events = stream(started("a"), verdict(True), ("finetune_started", {"round": 1}), stopped)
+    out = presenter(
+        """
+        feed(3);
+        press(" ");
+        const paused = [S.finetuning(v, now), S.following(v, now)];
+        feed(1);
+        const stopped = [S.finetuning(v, now), S.following(v, now)];
+        press(" ");
+        return [paused, stopped, [S.finetuning(v, now), S.following(v, now)]];
+        """,
+        events,
+    )
+    # finetune_started was written at t=2 and the view paused as it arrived, at t=3
+    assert out == [[1, True], [1, True], [None, False]]
+
+
+def test_the_filmstrip_ends_on_the_stage_frame_so_a_strip_that_drops_its_earliest_keeps_it() -> None:
+    steps = [x for step in range(8) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))]
+    script = """
+    const s = S.initial();
+    for (const e of events) S.reduce(s, e);
+    const strip = (focus) => S.filmstrip(S.current(s), focus).map((f) => (f.now ? `[${f.step}]` : f.step)).join(" ");
+    return [null, 0, 1, 4].map(strip);
+    """
+    assert run(script, stream(started("a"), *steps)) == ["2 3 4 5 6 [7]", "[0]", "0 [1]", "0 1 2 3 [4]"]
