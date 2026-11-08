@@ -42,6 +42,8 @@
 
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
   const text = (v) => (typeof v === "string" ? v : "");
+  // Every value from an event reaches the page's innerHTML through this, as inert text.
+  const esc = (v) => String(v).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
   const controllerOf = (v) => (CONTROLLERS.includes(v) ? v : null);
   const current = (s) => s.episodes[s.episodes.length - 1] || null;
 
@@ -413,7 +415,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

@@ -76,6 +76,39 @@ def test_a_decision_keeps_its_reach_distance_or_turn_angle() -> None:
     assert [(r["skill"], r["distance"], r["angle"]) for r in rows] == [("turn_left", None, 30), ("reach_left", 5, None)]
 
 
+def test_esc_turns_markup_quotes_and_non_strings_into_inert_text() -> None:
+    script = """
+    const markup = ["<img src=x onerror=alert(1)>", '"', "'", "&", "&lt;"];
+    const other = [5, null, undefined, ["<b>"], { toString: () => "<script>" }];
+    return [...markup, ...other].map((v) => S.esc(v));
+    """
+    assert run(script, []) == [
+        "&lt;img src=x onerror=alert(1)&gt;",
+        "&quot;",
+        "&#39;",
+        "&amp;",
+        "&amp;lt;",
+        "5",
+        "null",
+        "undefined",
+        "&lt;b&gt;",
+        "&lt;script&gt;",
+    ]
+
+
+def test_event_text_that_is_not_a_string_reads_as_none() -> None:
+    out = fold(
+        ("episode_started", {"episode_id": 7, "split": ["heldout"], "sim_version": {"v": 1}, "acting_on": 3}),
+        ("decision", {"controller": "student", "checkpoint": 5, "step": 0, "skill": {"skill": 1}, "reason": ["<b>"]}),
+        ("error", {"message": 4, "error": {"why": "<b>"}}),
+    )
+    ep = out["ep"]
+    assert (ep["id"], ep["split"], ep["sim"], ep["actingOn"]) == ("", "", None, None)
+    decided, error = ep["rows"]
+    assert (decided["checkpoint"], decided["skill"], decided["reason"]) == (None, None, "")
+    assert error["text"] == "error event"
+
+
 def test_median_latency_carries_its_sample_size_per_controller() -> None:
     out = fold(
         ("episode_started", {"episode_id": "e"}),
