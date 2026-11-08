@@ -176,6 +176,7 @@ class TrainingSetSummary(BaseModel):
     episodes_scanned: int
     demonstrations: int
     accepted: int
+    carried: int = 0  # of the accepted, demonstrations another run recorded (`mom run --from-run`)
     rejected: int
     unfinished: int
     rejected_by: dict[str, int]

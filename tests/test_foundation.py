@@ -9,14 +9,25 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, SkillCall, SkillTarget
+from isaacs_mom.contracts import (
+    Controller,
+    EpisodeManifest,
+    Observation,
+    Perturbation,
+    SkillCall,
+    SkillTarget,
+    TrainingExample,
+    TrainingSetSummary,
+    Validation,
+)
 from isaacs_mom.orchestrator import cli, loop
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import evaluate, run_loop
+from isaacs_mom.orchestrator.loop import carry_over, check_carry_over, evaluate, run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
+from isaacs_mom.student.checkpoints import ADAPTER_FILES
 from isaacs_mom.teacher import choose_scenes
 from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
 from isaacs_mom.validator import replay, validate
@@ -656,3 +667,240 @@ def test_the_run_reports_the_bin_moves_that_happened_not_the_share_asked_for(tmp
     expected = "the bin moved right after the lift in 1 of 3 teacher demonstrations (2 scheduled)"
     assert loop.bin_moves(tmp_path / "events.jsonl") == expected
     assert loop.bin_moves(tmp_path / "missing.jsonl").startswith("the bin moved right after the lift in 0 of 0")
+
+
+class StopsAtOnce:
+    """A teacher whose demonstration leaves the box on the table: recorded, rejected."""
+
+    controller: Controller = "teacher"
+    checkpoint: str | None = None
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        return SkillCall(skill="reobserve") if obs.step == 0 else None
+
+
+class SolvesAlone(ScriptedPolicy):
+    controller: Controller = "student"
+
+
+def _finished(checkpoint: Path) -> Path:
+    checkpoint.mkdir(parents=True)
+    for name in ADAPTER_FILES:
+        (checkpoint / name).write_text("{}")
+    return checkpoint
+
+
+def _earlier_run(runs: Path, *policies: str) -> Path:
+    """A finished run beside the next one: a demonstration per named policy on its own dev seed, and its checkpoint."""
+    prev = runs / "prev"
+    sim, events = FakeSim(), EventLog(prev, "prev")
+    make = {"taught": ScriptedPolicy, "rejected": lambda _sim: StopsAtOnce(), "alone": SolvesAlone}
+    for i, name in enumerate(policies):
+        run_episode(sim, make[name](sim), run_dir=prev, events=events, seed=1500 + i, split="dev", round_=1,
+                    instruction="hug")  # fmt: skip
+    _finished(prev / "checkpoints" / "ckpt-r1")
+    return prev
+
+
+def _manifests(run: Path) -> dict[str, EpisodeManifest]:
+    return {
+        p.parent.name: EpisodeManifest.model_validate_json(p.read_text()) for p in run.glob("episodes/*/manifest.json")
+    }
+
+
+def _rewrite(run: Path, index: int, **update: Any) -> None:
+    path = sorted(run.glob("episodes/*/manifest.json"))[index]
+    manifest = EpisodeManifest.model_validate_json(path.read_text())
+    path.write_text(manifest.model_copy(update=update).model_dump_json())
+
+
+def _from_run(tmp_path: Path, prev: Path, name: str = "next") -> tuple[Path, list[str], list[tuple[str, list[str]]]]:
+    evaluated: list[str] = []
+    trained: list[tuple[str, list[str]]] = []
+
+    def make_student(checkpoint: str) -> StubStudent:
+        evaluated.append(checkpoint)
+        return StubStudent(checkpoint)
+
+    def train_student(training_set: Path, previous_checkpoint: str, round_: int) -> str:
+        images = [TrainingExample.model_validate_json(line).image for line in training_set.read_text().splitlines()]
+        trained.append((previous_checkpoint, [Path(image).parents[1].name for image in images]))
+        _finished(training_set.parent / "checkpoints" / f"ckpt-r{round_}")
+        return f"{training_set.parent.name}/ckpt-r{round_}"
+
+    run_dir = tmp_path / "runs" / name
+    run_loop(FakeSim(), run_dir, name, max_rounds=1, demos=1, dev_trials=1, argon=silent_argon(run_dir, name),
+             make_student=make_student, train_student=train_student, from_run=prev)  # fmt: skip
+    return run_dir, evaluated, trained
+
+
+def _refused(run_dir: Path, prev: Path) -> BaseException:
+    with pytest.raises(Exception) as refused:
+        run_loop(FakeSim(), run_dir, run_dir.name, argon=silent_argon(run_dir, "x"), make_student=StubStudent,
+                 train_student=stub_finetune, from_run=prev)  # fmt: skip
+    assert not (run_dir / "episodes").exists() and not (run_dir / "from_run.json").exists()  # nothing copied
+    return refused.value
+
+
+def test_round_0_is_the_earlier_runs_checkpoint_evaluated_afresh_with_its_demonstrations_still_training(
+    tmp_path: Path,
+) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    (demo,) = _manifests(prev)
+    run_dir, evaluated, trained = _from_run(tmp_path, prev)
+    assert evaluated[0] == "prev/ckpt-r1"
+    logged = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    results = [e["data"] for e in logged if e["type"] == "evaluation_result"]
+    assert results[0]["round"] == 0 and results[0]["n"] == len(heldout_seeds())  # measured in this run
+    assert results[0]["from_run"] == {"run": "prev", "checkpoint": "prev/ckpt-r1", "carried": 1}  # rule 6
+    assert "from_run" not in results[1]
+    held_out = [m for m in _manifests(run_dir).values() if m.split == "heldout" and m.round == 0]
+    assert len(held_out) == len(heldout_seeds())
+    assert trained and trained[0][0] == "prev/ckpt-r1" and demo in trained[0][1]  # the old demonstration still trains
+    summary = TrainingSetSummary.model_validate_json((run_dir / "training_r1.summary.json").read_text())
+    assert summary.carried == 1 and summary.accepted >= 1  # not counted as this run's teaching
+    record = run_dir / "from_run.json"
+    assert record.exists()
+    assert json.loads(record.read_text()) == {"from_run": "prev", "checkpoint": "prev/ckpt-r1", "episodes": [demo],
+                                              "left_behind": []}  # fmt: skip
+
+
+def test_copied_demonstrations_stay_apart_from_this_runs_own(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    (demo,) = _manifests(prev)
+    run_dir, _, _ = _from_run(tmp_path, prev)
+    copied = _manifests(run_dir)[demo]
+    assert copied == _manifests(prev)[demo]  # its run id and controller labels are the earlier run's
+    assert copied.run_id == "prev" and {s.controller for s in copied.steps} == {"teacher"}
+    logged = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    assert demo not in {e["data"].get("episode_id") for e in logged}  # nothing in this run's events claims it
+
+
+def test_only_accepted_teacher_demonstrations_come_in(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught", "rejected", "alone")
+    by_seed = {m.seed: name for name, m in _manifests(prev).items()}
+    run_dir, _, trained = _from_run(tmp_path, prev)
+    assert set(json.loads((run_dir / "from_run.json").read_text())["episodes"]) == {by_seed[1500]}
+    assert not {by_seed[1501], by_seed[1502]} & set(_manifests(run_dir))  # rule 3: never reach the training set
+    assert not {by_seed[1501], by_seed[1502]} & set(trained[0][1])
+
+
+def test_a_real_mom_run_is_a_source_its_exams_stay_behind_and_runs_chain_without_copying_twice(tmp_path: Path) -> None:
+    runs = tmp_path / "runs"
+    first, _, _ = _from_run(tmp_path, _earlier_run(runs, "taught"), name="first")  # a mom run with its own exams
+    exams = {i for i, m in _manifests(first).items() if m.split == "heldout"}
+    assert len(exams) == 2 * len(heldout_seeds())  # round 0 and round 1
+    second, evaluated, _ = _from_run(tmp_path, first, name="second")
+    record = json.loads((second / "from_run.json").read_text())
+    assert set(record["left_behind"]) == exams and not exams & set(_manifests(second))  # rule 2: listed, not copied
+    assert evaluated[0] == "first/ckpt-r1"
+    taught = {i for i, m in _manifests(first).items() if m.split == "dev" and m.validation and m.validation.accepted
+              and any(s.controller == "teacher" for s in m.steps)}  # fmt: skip
+    copied = [i for i, m in _manifests(second).items() if m.run_id != "second" and m.split == "dev"]
+    assert sorted(copied) == sorted(taught)  # each demonstration once, however many runs it came through
+
+
+def test_a_dev_episode_on_a_held_out_seed_stops_the_run(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught", "taught")
+    _rewrite(prev, 1, seed=min(heldout_seeds()))
+    assert isinstance(_refused(tmp_path / "runs" / "next", prev), SealedSeedError)  # rule 2
+
+
+def test_a_held_out_episode_on_a_seed_that_isnt_sealed_is_refused(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught", "taught")
+    _rewrite(prev, 1, split="heldout", seed=900001)
+    assert "isn't sealed" in str(_refused(tmp_path / "runs" / "next", prev))
+
+
+@pytest.mark.parametrize("split", ["dev", "heldout"])
+def test_a_source_on_another_task_is_refused_even_by_an_exam_it_leaves_behind(split: str, tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught", "taught")
+    seed = 1501 if split == "dev" else min(heldout_seeds())
+    _rewrite(prev, 1, sim_version="mujoco-4.0.0 task=across_room", split=split, seed=seed)
+    assert "was recorded on" in str(_refused(tmp_path / "runs" / "next", prev))
+
+
+def test_a_source_with_no_episodes_is_refused(tmp_path: Path) -> None:
+    prev = tmp_path / "runs" / "prev"
+    _finished(prev / "checkpoints" / "ckpt-r1")
+    assert "no episodes" in str(_refused(tmp_path / "runs" / "next", prev))
+
+
+def test_round_0_starts_from_the_earlier_runs_last_finished_checkpoint(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    run_dir = tmp_path / "runs" / "next"
+    (prev / "checkpoints" / "ckpt-r3").mkdir()  # empty: not finished
+    assert check_carry_over(prev, run_dir, FakeSim().sim_version).checkpoint == "prev/ckpt-r1"
+    for name in ("ckpt-r2", "ckpt-r10", "ckpt-r01", "ckpt-r11.tmp", "ckpt-r\u00b2"):
+        _finished(prev / "checkpoints" / name)
+    (prev / "checkpoints" / "ckpt-r12").write_text("a file, not a checkpoint")
+    assert check_carry_over(prev, run_dir, FakeSim().sim_version).checkpoint == "prev/ckpt-r10"  # numbered, not text
+
+
+def test_starting_twice_into_one_run_is_refused(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    run_dir = tmp_path / "runs" / "next"
+    carry_over(check_carry_over(prev, run_dir, FakeSim().sim_version), run_dir)
+    with pytest.raises(Exception) as refused:
+        check_carry_over(prev, run_dir, FakeSim().sim_version)
+    assert "already holds episodes" in str(refused.value)
+
+
+def test_a_copy_that_fails_halfway_leaves_nothing_and_can_be_retried(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught", "taught")
+    run_dir = tmp_path / "runs" / "next"
+    carry = check_carry_over(prev, run_dir, FakeSim().sim_version)
+    copies: list[Path] = []
+    real = loop.shutil.copytree
+
+    def fails_second(src: Path, dst: Path, *nested: Any) -> Any:
+        if nested:  # copytree's own call for a subfolder
+            return real(src, dst, *nested)
+        copies.append(dst)
+        if len(copies) == 2:
+            raise OSError("disk full")
+        return real(src, dst)
+
+    monkeypatch.setattr(loop.shutil, "copytree", fails_second)
+    with pytest.raises(OSError):
+        carry_over(carry, run_dir)
+    assert not (run_dir / "episodes").exists() and not (run_dir / "from_run.json").exists()
+    monkeypatch.setattr(loop.shutil, "copytree", real)
+    carry_over(check_carry_over(prev, run_dir, FakeSim().sim_version), run_dir)
+    assert len(_manifests(run_dir)) == 2
+
+
+def test_what_was_checked_is_what_is_copied(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    run_dir = tmp_path / "runs" / "next"
+    carry = check_carry_over(prev, run_dir, FakeSim().sim_version)
+    rejected = Validation(task_success=False, physics_valid=True, reason="changed after the check")
+    _rewrite(prev, 0, validation=rejected)
+    carry_over(carry, run_dir)
+    (copied,) = _manifests(run_dir).values()
+    assert copied == carry.episodes[0][1] and copied.validation and copied.validation.accepted
+
+
+@pytest.mark.parametrize("where", ["elsewhere", "no checkpoint"])
+def test_a_run_refuses_to_start_from_a_run_it_cannot_continue(where: str, tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / ("runs" if where == "no checkpoint" else "other"), "taught")
+    if where == "no checkpoint":
+        for name in ADAPTER_FILES:
+            (prev / "checkpoints" / "ckpt-r1" / name).unlink()
+    refused = _refused(tmp_path / "runs" / "next", prev)
+    assert "must sit beside" in str(refused) or "no finished checkpoint" in str(refused)
+
+
+def test_a_refused_from_run_is_a_usage_error_that_writes_nothing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "runs" / "prev" / "checkpoints" / "ckpt-r1").mkdir(parents=True)  # not finished
+    argv = ["mom", "run", "--sim", "fake", "--student", "stub", "--run-id", "next", "--from-run", "runs/prev"]
+    monkeypatch.setattr(sys, "argv", argv)
+    with pytest.raises(BaseException) as stopped:
+        cli.main()
+    assert isinstance(stopped.value, SystemExit) and stopped.value.code == 2
+    assert not (tmp_path / "runs" / "next").exists()

@@ -1,8 +1,10 @@
 """The teach -> fine-tune loop (SPEC §3.6)."""
 
 import json
+import shutil
 import time
 from collections.abc import Callable
+from dataclasses import dataclass
 from functools import partial
 from pathlib import Path
 from typing import Any
@@ -11,11 +13,13 @@ from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult
 from isaacs_mom.orchestrator.episode import HEARTBEAT_SECONDS, heartbeat, run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
-from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
+from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, adapter_dir, finetune
+from isaacs_mom.student.checkpoints import ADAPTER_FILES, CHECKPOINT_ID
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.validator.recorder import write_atomically, write_manifest
 from isaacs_mom.validator.rules import RECORDING_ERROR
 from isaacs_mom.validator.training import build_training_set
 
@@ -37,6 +41,7 @@ def evaluate(
     run_dir: Path,
     events: EventLog,
     make_student: StudentFactory = StudentPolicy,
+    from_run: dict[str, Any] | None = None,
 ) -> EvaluationResult:
     seeds = sorted(heldout_seeds())
     successes = errored = 0
@@ -63,7 +68,9 @@ def evaluate(
         elif verdict.accepted:
             successes += 1
     result = EvaluationResult(checkpoint=checkpoint, round=round_, successes=successes, n=len(seeds), errored=errored)
-    events.emit("evaluation_result", **result.model_dump(), rate=result.rate)
+    events.emit(
+        "evaluation_result", **result.model_dump(), rate=result.rate, **({"from_run": from_run} if from_run else {})
+    )
     return result
 
 
@@ -91,6 +98,72 @@ def bin_moves(events_path: Path) -> str:
     )
 
 
+@dataclass(frozen=True)
+class CarryOver:
+    source: Path
+    checkpoint: str
+    episodes: tuple[tuple[Path, EpisodeManifest], ...]
+    left_behind: tuple[str, ...]  # the source's own held-out exams
+
+
+def check_carry_over(from_run: Path, run_dir: Path, sim_version: str) -> CarryOver:
+    """What `--from-run` would copy, found without writing anything: a ValueError for a source this run can't take."""
+    source = from_run.resolve()
+    if source.parent != run_dir.resolve().parent:
+        raise ValueError(f"{from_run} must sit beside {run_dir}, where the student finds its checkpoints")
+    if any((run_dir / "episodes").glob("*")):
+        raise ValueError(f"{run_dir} already holds episodes: only a new run starts from another")
+    finished = [
+        p
+        for p in (source / "checkpoints").glob("ckpt-r*")
+        if CHECKPOINT_ID.fullmatch(f"{source.name}/{p.name}") and all((p / f).is_file() for f in ADAPTER_FILES)
+    ]
+    if not finished:
+        raise ValueError(f"{from_run} has no finished checkpoint to start from")
+    last = max(finished, key=lambda p: int(p.name.removeprefix("ckpt-r")))
+    paths = sorted((source / "episodes").glob("*/manifest.json"))
+    if not paths:
+        raise ValueError(f"{from_run} has no episodes, so its task can't be checked")
+    taught, left_behind = [], []
+    for path in paths:
+        manifest = EpisodeManifest.model_validate_json(path.read_text())
+        if manifest.sim_version != sim_version:
+            raise ValueError(f"{path.parent.name} was recorded on {manifest.sim_version!r}, not {sim_version!r}")
+        if manifest.split == "heldout":
+            if manifest.seed not in heldout_seeds():
+                raise ValueError(
+                    f"{path.parent.name} is a held-out episode on seed {manifest.seed}, which isn't sealed"
+                )
+            left_behind.append(manifest.episode_id)
+            continue
+        assert_not_heldout(manifest.seed)  # rule 2
+        accepted = manifest.validation is not None and manifest.validation.accepted
+        if accepted and any(step.controller == "teacher" for step in manifest.steps):  # rule 3
+            taught.append((path.parent, manifest))
+    return CarryOver(source, f"{source.name}/{last.name}", tuple(taught), tuple(left_behind))
+
+
+def carry_over(carry: CarryOver, run_dir: Path) -> None:
+    """Copy the checked episodes in with one rename, each manifest as checked, and record where they came from."""
+    staging = run_dir / "episodes.tmp"
+    shutil.rmtree(staging, ignore_errors=True)
+    staging.mkdir(parents=True)
+    for directory, manifest in carry.episodes:
+        shutil.copytree(directory, staging / directory.name)
+        write_manifest(staging / directory.name / "manifest.json", manifest)
+    episodes = run_dir / "episodes"
+    if episodes.exists():
+        episodes.rmdir()  # empty: check_carry_over refuses one that isn't
+    staging.rename(episodes)
+    record = {
+        "from_run": carry.source.name,
+        "checkpoint": carry.checkpoint,
+        "episodes": [directory.name for directory, _ in carry.episodes],
+        "left_behind": list(carry.left_behind),
+    }
+    write_atomically(run_dir / "from_run.json", json.dumps(record, indent=2))
+
+
 def run_loop(
     sim: TruthSim,
     run_dir: Path,
@@ -103,16 +176,23 @@ def run_loop(
     make_student: StudentFactory | None = None,
     train_student: StudentTrainer = finetune,
     move_bin_share: float = MOVE_BIN_SHARE,
+    from_run: Path | None = None,
 ) -> list[EvaluationResult]:
     if not 0 <= move_bin_share <= 1:
         raise ValueError(f"move_bin_share is a share of the demonstrations, not {move_bin_share}")
     # finetune writes checkpoints beside the run dir, so the default student looks there too.
     make_student = make_student or partial(StudentPolicy, runs_dir=run_dir.parent)
+    carry = check_carry_over(from_run, run_dir, sim.sim_version) if from_run is not None else None
     events = EventLog(run_dir, run_id)
-    checkpoint = BASE_CHECKPOINT
+    if carry is not None:
+        carry_over(carry, run_dir)
+    checkpoint = carry.checkpoint if carry is not None else BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):
-        results.append(evaluate(sim, checkpoint, round_, run_dir, events, make_student))
+        source = None
+        if carry is not None and round_ == 0:
+            source = {"run": carry.source.name, "checkpoint": carry.checkpoint, "carried": len(carry.episodes)}
+        results.append(evaluate(sim, checkpoint, round_, run_dir, events, make_student, from_run=source))
         if results[-1].rate >= TARGET_RATE or round_ == max_rounds:
             break
         trial_start = DEV_SEED_START + 1000 * round_
