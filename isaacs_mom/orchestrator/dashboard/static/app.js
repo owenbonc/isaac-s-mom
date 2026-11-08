@@ -202,15 +202,23 @@ function fineTuneStage(seconds) {
   const shown = l.frames.slice(-SHEET);
   // A lost stream can't tell whether the fine-tune still runs, so the clock says only when it started.
   const clock = `${view.lost ? "Connection lost · " : ""}${elapsed(seconds)} since the fine-tune started`;
+  // A run from an earlier run also learns from that run's accepted demonstrations (SPEC §3.6), counted with these.
+  const carried = l.carried ? l.carried.count : 0;
+  const from = carried ? `, ${carried} carried from <span class="mono">${esc(l.carried.run)}</span>` : "";
+  const total = l.accepted + carried;
+  const here = carried ? `this run's ${l.accepted} accepted, ${l.rejected} rejected, n=${l.n}` : `${l.rejected} rejected, n=${l.n}`;
   const sheet = shown.length
     ? `<div class="frame"><div class="cell"><div class="shot sheet"><ol style="--n:${Math.ceil(Math.sqrt(shown.length))}" aria-label="The last frame of each accepted teacher demonstration">${shown
         .map((f) => `<li${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="Episode ${f.number}'s last frame">` : ""}</li>`)
         .join("")}</ol></div></div></div>`
-    : slate("No accepted demonstration to learn from", `${clock}. Teacher demonstrations: ${l.accepted} accepted · ${l.rejected} rejected (n=${l.n}).`);
+    : slate(
+        carried ? `Learning from ${carried} demonstration${carried === 1 ? "" : "s"} carried from <span class="mono">${esc(l.carried.run)}</span>` : "No accepted demonstration to learn from",
+        `${clock}. Teacher demonstrations in this run: ${l.accepted} accepted · ${l.rejected} rejected (n=${l.n}).`,
+      );
   const latest = l.frames.length > shown.length ? `, the latest ${shown.length} of ${l.frames.length} shown` : "";
   // The counts lead and the line wraps, so no width ever cuts a number off.
   const caption = shown.length
-    ? `<p class="caption wrap" title="The last frame of each accepted teacher demonstration${latest}.">Learning from ${l.accepted} accepted teacher demonstration${l.accepted === 1 ? "" : "s"} (${l.rejected} rejected, n=${l.n}) · ${clock}</p>`
+    ? `<p class="caption wrap" title="The last frame of each accepted teacher demonstration in this run${latest}.">Learning from ${total} accepted teacher demonstration${total === 1 ? "" : "s"}${from} (${here}) · ${clock}</p>`
     : "";
   return sheet + foot(caption, panelChip());
 }
@@ -474,7 +482,8 @@ function cardVerdict(e, ep) {
 }
 // One checkpoint's episode for the seed: its last frame, with its controller, and its verdict; it opens the episode.
 function seedCard(c, e, ep) {
-  const head = `<span class="card-head"><span class="what">${esc(cap(c.name))}</span>${c.checkpoint ? `<span class="mono note">${esc(c.checkpoint)}</span>` : ""}</span>`;
+  const id = c.checkpoint && !c.name.endsWith(c.checkpoint) ? `<span class="mono note">${esc(c.checkpoint)}</span>` : "";
+  const head = `<span class="card-head"><span class="what">${esc(cap(c.name))}</span>${id}</span>`;
   const f = ep && ep.frames[ep.frames.length - 1];
   const shot = f
     ? `<span class="shot"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="The episode's last head-camera frame${f.step === null ? "" : `, step ${esc(f.step)}`}">` : ""}${tag(f.controller, f.checkpoint)}</span>`

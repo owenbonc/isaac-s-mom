@@ -1117,6 +1117,55 @@ def test_an_evaluation_whose_episodes_all_errored_says_so_in_words() -> None:
     )
 
 
+FROM = """
+const s = S.initial();
+for (const e of events) S.reduce(s, e);
+const c = S.claim(s);
+const checkpoints = S.results(s).checkpoints.map((x) => x.name);
+return { names: c && c.names, spoken: c && c.spoken, checkpoints, carried: S.lessons(s).carried };
+"""
+
+
+def from_run(value: object) -> tuple[str, dict]:
+    return "evaluation_result", {**evaluation("ckpt-r1", 0, 4, 20)[1], "from_run": value}
+
+
+def test_a_run_started_from_an_earlier_run_names_round_0_by_that_run_and_counts_its_carried_demonstrations() -> None:
+    source = {"run": "fixed-v2", "checkpoint": "ckpt-r1", "carried": 8}
+    out = run(FROM, stream(*held_out(0, 1, "failed"), from_run(source), *evaluated(1, (1, "succeeded"))))
+    assert out["names"] == "from fixed-v2, ckpt-r1 → after\u00a0round\u00a01"
+    assert out["spoken"].endswith("20%, 4 of 20, from fixed-v2, ckpt-r1, then 100%, 1 of 1, after\u00a0round\u00a01")
+    assert out["checkpoints"] == ["from fixed-v2, ckpt-r1", "after\u00a0round\u00a01"]
+    assert out["carried"] == {"count": 8, "run": "fixed-v2"}
+    # before its result says where round 0 came from, a round 0 tested on another checkpoint than the base isn't
+    # called before fine-tuning
+    started_from = [
+        ("episode_started", held_out(0, 1, None)[0][1]),
+        ("decision", {**decision(0)[1], "checkpoint": "x"}),
+    ]
+    assert run(FROM, stream(*started_from))["checkpoints"] == ["the\u00a0evaluation\u00a0under\u00a0way"]
+    assert run(FROM, stream(*held_out(0, 1, None)))["checkpoints"] == ["before\u00a0fine-tuning"]
+
+
+@pytest.mark.parametrize(
+    "value",
+    [
+        None,
+        {"run": "fixed-v2", "checkpoint": "ckpt-r1"},
+        {"run": 5, "checkpoint": "ckpt-r1", "carried": 8},
+        {"run": "", "checkpoint": "ckpt-r1", "carried": 8},
+        {"run": "fixed-v2", "checkpoint": ["ckpt-r1"], "carried": 8},
+        {"run": "fixed-v2", "checkpoint": "ckpt-r1", "carried": -1},
+        {"run": "fixed-v2", "checkpoint": "ckpt-r1", "carried": 1.5},
+        "fixed-v2",
+    ],
+)
+def test_a_run_without_a_well_formed_from_run_reads_round_0_as_before_fine_tuning(value: object) -> None:
+    out = run(FROM, stream(from_run(value)))
+    assert out["names"] == out["checkpoints"][0] == "before\u00a0fine-tuning"
+    assert out["carried"] is None
+
+
 def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_evaluations_n() -> None:
     _, first = run(CLAIM, stream(*heldout("h1", "ckpt-r0"), *heldout("h2", "ckpt-r0", judged=False)))
     assert first == {"checkpoint": "ckpt-r0", "run": 1, "of": None}  # nothing in the events says 20 yet
@@ -1447,6 +1496,7 @@ def test_the_fine_tune_shows_each_accepted_demonstrations_last_frame_and_counts_
         "accepted": 3,
         "rejected": 1,
         "n": 4,
+        "carried": None,
     }
 
 

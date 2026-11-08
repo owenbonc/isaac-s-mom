@@ -70,6 +70,13 @@
     return null;
   }
 
+  // Where a run started with `mom run --from-run` began (SPEC §3.6): the earlier run, its checkpoint and the accepted
+  // demonstrations carried over; null for anything else, so a malformed one reads as a run from the base model.
+  function fromRun(f) {
+    if (!f || typeof f !== "object" || !text(f.run) || !text(f.checkpoint) || !Number.isInteger(f.carried) || f.carried < 0) return null;
+    return { run: f.run, checkpoint: f.checkpoint, carried: f.carried };
+  }
+
   function reduce(s, event) {
     const d = event.data || {};
     s.lastT = event.t;
@@ -159,8 +166,9 @@
         break;
       }
       case "evaluation_result":
-        // `after` is where the next evaluation's held-out episodes start.
-        if ([d.round, d.successes, d.n, d.errored].every((v) => num(v) !== null)) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: d.errored, after: s.episodes.length });
+        // `after` is where the next evaluation's held-out episodes start; `from` is where a run's round 0 came from.
+        if ([d.round, d.successes, d.n, d.errored].every((v) => num(v) !== null))
+          s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: d.errored, after: s.episodes.length, from: d.round === 0 ? fromRun(d.from_run) : null });
         break;
       case "finetune_started":
         s.finetune.pending = { round: num(d.round), t: event.t };
@@ -320,8 +328,14 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
-  // A checkpoint by the evaluation that tested it, in words; no-break spaces keep each name on one line when a pair wraps.
-  const roundName = (round) => (round === 0 ? "before\u00a0fine-tuning" : round === null ? "the\u00a0evaluation\u00a0under\u00a0way" : `after\u00a0round\u00a0${round}`);
+  // A checkpoint by the evaluation that tested it, in words: round 0 from an earlier run names that run and checkpoint;
+  // no-break spaces keep each other name on one line when a pair wraps.
+  function roundName(r) {
+    if (r.from) return `from ${r.from.run}, ${r.from.checkpoint}`;
+    return r.round === 0 ? "before\u00a0fine-tuning" : r.round === null ? "the\u00a0evaluation\u00a0under\u00a0way" : `after\u00a0round\u00a0${r.round}`;
+  }
+  // The base model's checkpoint (student/checkpoints.py): a round 0 tested on another came from an earlier run.
+  const BASE_CHECKPOINT = "ckpt-r0";
 
   // The Results marks (SPEC §3.5) in their sort order: the changes, the unchanged, then errored and pending.
   const MARKS = ["down", "up", "fail", "pass", "error", "pending"];
@@ -348,11 +362,13 @@
     // An evaluation's held-out episodes follow the previous evaluation's result, as testing() reads them.
     const ends = s.rounds.map((r) => r.after);
     const tail = s.episodes.slice(ends.length ? ends[ends.length - 1] : 0).find((e) => e.split === "heldout");
-    const checkpoints = s.rounds.map((r) => ({ round: r.round, checkpoint: r.checkpoint, name: roundName(r.round), done: true }));
+    const checkpoints = s.rounds.map((r) => ({ round: r.round, checkpoint: r.checkpoint, name: roundName(r), done: true }));
     if (tail || s.crashes.some((c) => c.evaluation === ends.length)) {
-      const round = tail ? tail.round : null;
       const test = testing(s);
-      checkpoints.push({ round, checkpoint: test ? test.checkpoint : null, name: roundName(round), done: false });
+      const checkpoint = test ? test.checkpoint : null;
+      // Until its result says where it came from, a round 0 on another checkpoint than the base is only under way.
+      const round = tail && !(tail.round === 0 && checkpoint !== null && checkpoint !== BASE_CHECKPOINT) ? tail.round : null;
+      checkpoints.push({ round, checkpoint, name: roundName({ round, from: null }), done: false });
     }
     const rows = new Map();
     const cell = (seed, k) => {
@@ -384,7 +400,7 @@
     const first = s.rounds[0];
     const last = s.rounds[s.rounds.length - 1];
     const pair = first === last ? [first] : [first, last];
-    const name = (r) => roundName(r.round);
+    const name = roundName;
     const scored = (r) => r.n - r.errored;
     // Whole percentages of the scored episodes; the change is taken between the rates as shown, so the figures agree.
     const rate = (r) => (scored(r) > 0 ? Math.round((100 * r.successes) / scored(r)) : null);
@@ -447,15 +463,18 @@
   }
 
   // What a fine-tune learns from (SPEC §3.5): the last frame of each accepted teacher demonstration so far, with its
-  // number in the run, and how many demonstrations were judged and how. One with no frame is counted, not shown.
+  // number in the run, how many demonstrations were judged and how, and those carried from an earlier run (null for a
+  // run from the base model). One with no frame is counted, not shown.
   function lessons(s) {
     const judged = s.episodes.filter((e) => kind(e) === "demonstration" && e.verdict);
     const kept = judged.filter(accepted);
+    const from = s.rounds.length ? s.rounds[0].from : null;
     return {
       frames: kept.filter((e) => e.frames.length).map((e) => ({ url: e.frames[e.frames.length - 1].url, number: s.episodes.indexOf(e) + 1 })),
       accepted: kept.length,
       rejected: judged.length - kept.length,
       n: judged.length,
+      carried: from && { count: from.carried, run: from.run },
     };
   }
 
