@@ -322,10 +322,11 @@ function renderEpisode() {
   $("episode-line").innerHTML = (ep ? `Episode ${at + 1} of ${s.episodes.length}` : "") + lost;
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) < 0;
   $("b-m").setAttribute("aria-pressed", String(view.compare !== null));
-  // The visible label is the name; the key stays inverse while paused.
+  // The key's label is its name; while paused it shows its play icon and the count of events waiting beside it.
   PAUSE.classList.toggle("on", view.frozen !== null);
-  PAUSE.lastElementChild.textContent = MomState.pauseLabel(view);
-  PAUSE.dataset.tip = `${view.frozen ? "Resume" : "Pause"} · Space`;
+  PAUSE.setAttribute("aria-label", MomState.pauseLabel(view));
+  PAUSE.dataset.tip = `${MomState.pauseLabel(view)} · Space`;
+  PAUSE.lastElementChild.textContent = view.frozen ? MomState.buffered(view) : "";
   // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when it failed or was rejected.
   $("rail").style.setProperty("--n", s.episodes.length);
   $("rail").innerHTML = s.episodes
@@ -578,7 +579,7 @@ function renderTeach() {
   $("teach-count").textContent = MomState.teachCount(FIELD.value) || "";
   FIELD.readOnly = checking;
   $("teach-go").disabled = checking;
-  $("teach-go").lastElementChild.textContent = checking ? "Checking…" : "Teach";
+  $("teach-go").dataset.tip = checking ? "Checking the instruction…" : "Teach · Enter";
   TEACH.setAttribute("aria-busy", String(checking));
   const said =
     teaching.state === "refused"

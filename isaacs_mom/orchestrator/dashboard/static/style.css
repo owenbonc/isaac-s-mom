@@ -89,10 +89,11 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .run-why{grid-area:why;font-size:var(--t-label);overflow-wrap:anywhere}
 
 /* Presenter keys, grouped as the presenter tells the story: where in the run, the story's beats, the view. Each key is
-   a bare icon and its name, filled only under the pointer or the focus; its shortcut is in its tooltip and in Labels. */
+   a bare icon at least 32 px square, filled only under the pointer or the focus; its name, what it does and its
+   shortcut are in its tooltip and in Labels. */
 .presenter{display:flex;align-items:center;gap:.9rem;margin-left:auto;flex:none}
-.presenter .group{display:inline-flex;gap:2px}
-.presenter button{position:relative;font:450 1rem/1 var(--sans);color:var(--ink);background:none;border:0;border-radius:7px;height:1.95rem;padding:0 .6rem 0 .5rem;display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;transition:background-color .15s,transform .12s var(--ease-out)}
+.presenter .group{display:inline-flex;gap:.15rem}
+.presenter button{position:relative;font:600 1rem/1 var(--sans);color:var(--ink);background:none;border:0;border-radius:7px;min-width:2.3rem;height:2.3rem;padding:0;display:inline-flex;align-items:center;justify-content:center;gap:.3rem;cursor:pointer;transition:background-color .15s,transform .12s var(--ease-out)}
 @media (hover:hover){.presenter button:hover:not(:disabled){background:var(--raised)}}
 .presenter button:focus-visible{background:var(--raised)}
 .presenter button:active:not(:disabled){transform:scale(.96)}
@@ -102,13 +103,14 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .presenter button[aria-pressed="true"]::before,#b-pause.on::before{content:"";position:absolute;left:.45rem;right:.45rem;bottom:0;height:2px;border-radius:1px;background:var(--accent)}
 #b-pause .on,#b-pause.on .off{display:none}
 #b-pause.on .on{display:block}
-/* Wide enough for "Resume · 999 new", so pausing never reflows the header above the frame. */
-#b-pause{min-width:10.8rem;justify-content:center}
-/* The tooltip names the key and its shortcut: after a beat on hover, at once on keyboard focus. */
-.presenter button::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
-.presenter .group:last-child button::after{left:auto;right:0;--tx:0%}
-@media (hover:hover){.presenter button:hover::after{opacity:1;translate:var(--tx) 0;transition-delay:.3s}}
-.presenter button:focus-visible::after{opacity:1;translate:var(--tx) 0}
+/* While paused, the events waiting: a plain number beside the play icon. */
+#b-pause.on{padding:0 .55rem 0 .45rem}
+/* A tooltip names the key, what it does and its shortcut: after a beat on hover, at once on keyboard focus. */
+:is(.presenter,.teach) button::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
+/* Keys past the first group sit near the window's right edge, so their tooltips open leftwards and stay on screen. */
+:is(.presenter .group:not(:first-child),.teach) button::after{left:auto;right:0;--tx:0%}
+@media (hover:hover){:is(.presenter,.teach) button:hover::after{opacity:1;translate:var(--tx) 0;transition-delay:.3s}}
+:is(.presenter,.teach) button:focus-visible::after{opacity:1;translate:var(--tx) 0}
 
 /* A label is a mark and a word, never a capsule: a filled dot while live, a ring once recorded, the word alone for a
    placeholder or a configured value. */
@@ -143,23 +145,29 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .control .kind{display:flex;align-items:baseline;gap:.5rem;flex:none}
 .control .what{font-weight:600}
 .control .kind .note{font-size:var(--t-label)}
-.control>.note{flex:1 1 9rem;min-width:9rem;text-wrap:pretty;line-height:1.3}
+/* The sentence gives way first, to two lines, so the kind, the controller and the verdict stay on one row. */
+.control>.note{flex:1 1 0;min-width:5rem;text-wrap:pretty;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .control .verdict{margin-left:auto;flex:none}
 /* The Teach box at the bar's end, the page's one capsule, with its button inside as in a chat composer; the button
    stays quiet until there is something to teach, so the stage keeps the brightest pixels. */
 .teach{position:relative;flex:none;display:flex;align-items:center;gap:.2rem;padding:2px;border-radius:999px;border:1px solid var(--edge-strong);background:var(--well)}
 .teach:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .teach .field{position:relative;display:flex}
-.teach input{font:inherit;color:var(--ink);width:16rem;height:1.85rem;padding:0 .4rem 0 .75rem;border:0;background:none;caret-color:var(--accent);outline:none}
+.teach input{font:inherit;color:var(--ink);width:16rem;height:2.3rem;padding:0 .4rem 0 .75rem;border:0;background:none;caret-color:var(--accent);outline:none}
 .teach .field:has(.count:not(:empty)) input{padding-right:4.8rem}
 .teach input::placeholder{color:var(--muted)}
 .teach input:read-only{color:var(--muted)}
 .teach .count{position:absolute;right:.6rem;top:50%;translate:0 -50%;font-size:var(--t-label);color:var(--muted);pointer-events:none}
-.teach button{font:600 1rem/1 var(--sans);height:1.85rem;padding:0 .75rem 0 .6rem;border:0;border-radius:999px;background:var(--accent);color:var(--on-accent);display:inline-flex;align-items:center;gap:.3rem;cursor:pointer;transition:transform .12s var(--ease-out)}
+/* Teach is its enter icon alone, a 32 px circle inside the box; it turns to a spinner while the instruction is judged. */
+.teach button{position:relative;flex:none;width:2.3rem;height:2.3rem;padding:0;border:0;border-radius:50%;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;transition:transform .12s var(--ease-out)}
+.teach .wait,.teach[aria-busy="true"] .go{display:none}
+.teach[aria-busy="true"] .wait{display:block}
+@media (prefers-reduced-motion:no-preference){.teach .wait{animation:spin .8s linear infinite}}
+@keyframes spin{to{rotate:1turn}}
 .teach button:active:not(:disabled){transform:scale(.96)}
 .teach:has(input:placeholder-shown) button,.teach button:disabled{background:var(--raised);color:var(--ink)}
 .teach button:disabled{cursor:progress}
-.teach .i{width:1rem;height:1rem}
+.teach .i{width:1.1rem;height:1.1rem}
 /* What came back from a Teach, dropped from the box over the panels' top, never over the frame. */
 .answer{right:0;width:min(26rem,calc(100vw - 1.5rem));transform-origin:top right}
 .answer p{margin:0}
@@ -283,14 +291,14 @@ footer.models .v{color:var(--muted)}
   /* The pair is as wide as the window allows; the height it leaves sits above and below it, not in one band. */
   .stage:has(.cell + .cell){margin-block:auto}
 }
-/* Narrower than the projector's 1280 px the band has no room for two panels side by side, so they stack, and the
-   episode keys show their icons alone (their names stay for screen readers and in their tooltips). */
+/* Narrower than the projector's 1280 px the band has no room for two panels side by side, so they stack. */
 @media (min-width:1001px) and (max-width:1279px){
   .side{grid-template-columns:minmax(0,1fr);grid-template-areas:"rounds" "diag" "train"}
   .side>#p-diagnosis{border-left:0;border-top:1px solid var(--edge)}
-  .teach input{width:13.5rem}
-  .presenter .name{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
-  .presenter button:has(.name){width:1.95rem;padding:0;justify-content:center}
+  /* The control bar keeps one row: the episode's kind stands over its seed, and the Teach box narrows. */
+  .control .kind{flex-direction:column;align-items:flex-start;gap:0;line-height:1.25}
+  .teach input{width:12.5rem}
+  .teach input::placeholder{font-size:var(--t-label)}
 }
 /* The box or bin move is the take's peak: the frame that first shows it stays ringed in white, and the ring flashes once on arrival. */
 .shot.moved{outline:2px solid var(--accent);outline-offset:3px}

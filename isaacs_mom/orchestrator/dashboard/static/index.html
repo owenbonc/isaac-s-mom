@@ -7,7 +7,7 @@
 <link rel="stylesheet" href="/static/style.css">
 <body>
 <!-- Icons drawn once, used by reference. Lucide (ISC licence, lucide.dev): chevron-left, chevron-right, skip-forward,
-     stethoscope, graduation-cap, pause, play, chevron-down, corner-down-left; for the skills, move-left, move-right,
+     stethoscope, graduation-cap, pause, play, chevron-down, corner-down-left, loader-circle; for the skills, move-left, move-right,
      arrow-up, arrow-down, rotate-ccw, rotate-cw, fold-horizontal, arrow-up-from-line, arrow-down-to-line, eye and ban.
      Hand-drawn: i-move. -->
 <svg class="sprite" aria-hidden="true">
@@ -22,6 +22,7 @@
   <symbol id="i-play" viewBox="0 0 24 24"><path d="M6 3l14 9-14 9z" fill="currentColor"/></symbol>
   <symbol id="i-choose" viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></symbol>
   <symbol id="i-enter" viewBox="0 0 24 24"><path d="M9 10l-5 5 5 5"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/></symbol>
+  <symbol id="i-wait" viewBox="0 0 24 24"><path d="M21 12a9 9 0 1 1-6.219-8.56"/></symbol>
   <!-- One per skill (contracts.Skill), shown with its name on the frame; s-stop for a step that chose none. -->
   <symbol id="s-reach_left" viewBox="0 0 24 24"><path d="M6 8l-4 4 4 4M2 12h20"/></symbol>
   <symbol id="s-reach_right" viewBox="0 0 24 24"><path d="M18 8l4 4-4 4M2 12h20"/></symbol>
@@ -47,21 +48,21 @@
       </div>
     </details>
     <span id="status"></span>
-    <!-- Grouped as the presenter tells the story: where in the run, the story's beats, the view. Each key's shortcut
-         is in its tooltip and in Labels. -->
+    <!-- Grouped as the presenter tells the story: where in the run, the story's beats, the view. Each key is its icon;
+         its name is its label, and its name, what it does and its shortcut are in its tooltip and in Labels. -->
     <nav class="presenter" aria-label="Presenter keys">
       <span class="group" role="group" aria-label="Episodes">
-        <button type="button" id="b-prev" data-key="ArrowLeft" aria-keyshortcuts="ArrowLeft" data-tip="Previous episode · ←"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg><span class="name">Previous</span></button>
-        <button type="button" id="b-next" data-key="ArrowRight" aria-keyshortcuts="ArrowRight" data-tip="Next episode · →"><svg class="i" aria-hidden="true"><use href="#i-next"/></svg><span class="name">Next</span></button>
-        <button type="button" id="b-end" data-key="End" aria-keyshortcuts="End" data-tip="Latest episode · End"><svg class="i" aria-hidden="true"><use href="#i-latest"/></svg><span class="name">Latest</span></button>
+        <button type="button" id="b-prev" data-key="ArrowLeft" aria-keyshortcuts="ArrowLeft" aria-label="Previous" data-tip="Previous episode · ←"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>
+        <button type="button" id="b-next" data-key="ArrowRight" aria-keyshortcuts="ArrowRight" aria-label="Next" data-tip="Next episode · →"><svg class="i" aria-hidden="true"><use href="#i-next"/></svg></button>
+        <button type="button" id="b-end" data-key="End" aria-keyshortcuts="End" aria-label="Latest" data-tip="Latest episode, following the run · End"><svg class="i" aria-hidden="true"><use href="#i-latest"/></svg></button>
       </span>
       <span class="group" role="group" aria-label="Story">
-        <button type="button" id="b-d" data-key="d" aria-keyshortcuts="D" data-tip="Nearest diagnosis · D"><svg class="i" aria-hidden="true"><use href="#i-diag"/></svg>Diagnosis</button>
-        <button type="button" id="b-t" data-key="t" aria-keyshortcuts="T" data-tip="Nearest teacher demonstration · T"><svg class="i" aria-hidden="true"><use href="#i-teacher"/></svg>Teacher</button>
-        <button type="button" id="b-m" data-key="m" aria-keyshortcuts="M" aria-pressed="false" data-tip="The move, before and after · M"><svg class="i" aria-hidden="true"><use href="#i-move"/></svg>Move</button>
+        <button type="button" id="b-d" data-key="d" aria-keyshortcuts="D" aria-label="Diagnosis" data-tip="Diagnosis: the nearest diagnosed episode · D"><svg class="i" aria-hidden="true"><use href="#i-diag"/></svg></button>
+        <button type="button" id="b-t" data-key="t" aria-keyshortcuts="T" aria-label="Teacher" data-tip="Teacher: the nearest teacher demonstration · T"><svg class="i" aria-hidden="true"><use href="#i-teacher"/></svg></button>
+        <button type="button" id="b-m" data-key="m" aria-keyshortcuts="M" aria-label="Move" aria-pressed="false" data-tip="Move: the frames before and after the move · M"><svg class="i" aria-hidden="true"><use href="#i-move"/></svg></button>
       </span>
       <span class="group" role="group" aria-label="View">
-        <button type="button" id="b-pause" data-key=" " aria-keyshortcuts="Space" data-tip="Pause · Space"><svg class="i off" aria-hidden="true"><use href="#i-pause"/></svg><svg class="i on" aria-hidden="true"><use href="#i-play"/></svg><span>Pause</span></button>
+        <button type="button" id="b-pause" data-key=" " aria-keyshortcuts="Space" aria-label="Pause" data-tip="Pause · Space"><svg class="i off" aria-hidden="true"><use href="#i-pause"/></svg><svg class="i on" aria-hidden="true"><use href="#i-play"/></svg><span class="count"></span></button>
       </span>
     </nav>
   </div>
@@ -107,7 +108,7 @@
       <input id="instruction" name="instruction" type="text" maxlength="200" autocomplete="off" dir="auto" placeholder="Tell the robot what to learn" aria-label="Tell the robot what to learn" aria-describedby="teach-count">
       <span class="count" id="teach-count"></span>
     </span>
-    <button type="submit" id="teach-go"><svg class="i" aria-hidden="true"><use href="#i-enter"/></svg><span>Teach</span></button>
+    <button type="submit" id="teach-go" aria-label="Teach" data-tip="Teach · Enter"><svg class="i go" aria-hidden="true"><use href="#i-enter"/></svg><svg class="i wait" aria-hidden="true"><use href="#i-wait"/></svg></button>
     <div class="pop answer" id="teach-said" aria-hidden="true" hidden></div>
   </form>
 </div>
