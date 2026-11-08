@@ -1810,13 +1810,29 @@ def hostile_run() -> list[dict]:
     return [{**e, "run_id": f"r{x}"} for e in stream(*events)]
 
 
+# Replays `events` through the stub stream and lets the replay settle, as a page opening a run does.
+REPLAY = """
+const [source] = sources;
+source.onopen();
+for (const e of events) source.onmessage({ data: JSON.stringify(e) });
+source.listeners.replayed();
+flush();
+"""
+
+
+# What the page wrote: the tags outside quoted values that an event could have injected, and the elements that show
+# HOSTILE as escaped text. A tag's quoted values are escaped text, so only what lies outside them could be markup.
+MARKUP = """
+const tags = writes.flatMap(([, html]) => html.replace(/"[^"]*"/g, '""').match(/<[^>]+>/g) || []);
+return {
+  injected: tags.filter((t) => /onerror|^<img src=x/i.test(t)),
+  escaped: writes.filter(([, html]) => html.includes("&lt;img src=x onerror=alert(1)&gt;")).map(([id]) => id),
+};
+"""
+
+
 def test_no_value_from_an_event_or_the_runs_list_becomes_markup_in_any_view() -> None:
     script = """
-    const [source] = sources;
-    source.onopen();
-    for (const e of events) source.onmessage({ data: JSON.stringify(e) });
-    source.listeners.replayed();
-    flush();
     // Every place the page can show: Results' list, the seed, its episodes, Teaching with its Move, and Now.
     vm.runInContext(`
       MomState.visit(view, { seed: 7, focus: 7 }); render();
@@ -1829,20 +1845,22 @@ def test_no_value_from_an_event_or_the_runs_list_becomes_markup_in_any_view() ->
       teaching = MomState.teachAnswer(200, { run_id: "r", started: false, reasons });
       renderTeach();
     `, context);
-    // A tag's quoted values are escaped text, so only what lies outside them could be markup an event injected.
-    const tags = writes.flatMap(([, html]) => html.replace(/"[^"]*"/g, '""').match(/<[^>]+>/g) || []);
-    return {
-      injected: tags.filter((t) => /onerror|^<img src=x/i.test(t)),
-      escaped: writes.filter(([, html]) => html.includes("&lt;img src=x onerror=alert(1)&gt;")).map(([id]) => id),
-    };
     """
     runs = [{"run_id": "r", "instruction": HOSTILE, "status": "not_started", "reason": HOSTILE, "started_t": 0}]
-    out = app(script, hostile_run(), runs)
+    out = app(REPLAY + script + MARKUP, hostile_run(), runs)
     assert out["injected"] == []
     # the markup reached every panel as text
     assert {"run-list", "results", "control", "stage", "log", "p-rounds", "p-diagnosis", "teach-said"} <= set(
         out["escaped"]
     )
+    # A run that did not start shows why in Results and in Now, and Argon's answer can steer that text.
+    events = stream(
+        ("instruction", {"text": HOSTILE, "source": "teach"}), ("error", {"error": f"not started: {HOSTILE}"})
+    )
+    script = 'vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);'
+    out = app(REPLAY + script + MARKUP, [{**e, "run_id": f"r{HOSTILE}"} for e in events])
+    assert out["injected"] == []
+    assert {"results", "control", "stage"} <= set(out["escaped"])
 
 
 def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_settles() -> None:
@@ -1865,16 +1883,6 @@ def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_set
     assert out["replaying"] == {"frames": 0, "written": []}
     assert out["announced"] == ""
     assert out["after"] > 5 and out["heard"]
-
-
-# Replays `events` through the stub stream and lets the replay settle, as a page opening a run does.
-REPLAY = """
-const [source] = sources;
-source.onopen();
-for (const e of events) source.onmessage({ data: JSON.stringify(e) });
-source.listeners.replayed();
-flush();
-"""
 
 
 def test_after_a_move_the_stage_marks_it_on_every_later_frame_and_only_icons_carry_the_results_mark_class() -> None:
