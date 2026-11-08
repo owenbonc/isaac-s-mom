@@ -2,8 +2,9 @@ import argparse
 import time
 from pathlib import Path
 
+from isaacs_mom.orchestrator import evaluation
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, run_loop
+from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, MOVE_BIN_SHARE, bin_moves, run_loop
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -25,6 +26,13 @@ def run_id(text: str) -> str:
             f"{text!r}: use ASCII letters, digits, '.', '_' or '-', not starting or ending with '.'"
         )
     return text
+
+
+def share(text: str) -> float:
+    value = float(text)
+    if not 0 <= value <= 1:
+        raise argparse.ArgumentTypeError(f"{text}: must be from 0 to 1")
+    return value
 
 
 def at_least_one(text: str) -> int:
@@ -53,9 +61,17 @@ def main() -> None:
     run.add_argument("--demos", type=at_least_one, default=DEMOS_PER_ROUND, help="teacher demonstrations per round")
     run.add_argument("--dev-trials", type=at_least_one, default=DEV_TRIALS, help="student trials the teacher diagnoses")
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
+    run.add_argument(
+        "--move-bin-share",
+        type=share,
+        default=MOVE_BIN_SHARE,
+        help="the share of teacher demonstrations where the bin moves right after the lift (SPEC §3.5)",
+    )
     dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a run directory")
     dashboard.add_argument("--run", type=Path, required=True)
     dashboard.add_argument("--port", type=int, default=8200)
+    evaluate = commands.add_parser("eval", help="the student evaluation report in three conditions (SPEC §6.10)")
+    evaluation.add_arguments(evaluate)
     demo = commands.add_parser("demo", help="the judged single take, recorded to an MP4")
     demo.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     demo.add_argument("--ckpt", required=True)
@@ -76,6 +92,9 @@ def main() -> None:
             "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)"
         )
     args = parser.parse_args()
+    if args.command == "eval":
+        evaluation.run_from_args(evaluate, args)
+        return
     if args.command == "dashboard":
         from isaacs_mom.orchestrator.dashboard.server import serve
 
@@ -128,7 +147,9 @@ def main() -> None:
         argon=argon,
         make_student=make_student,
         train_student=train_student,
+        move_bin_share=args.move_bin_share,
     )
+    print(bin_moves(run_dir / "events.jsonl"))
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"
         print(f"round {r.round} {r.checkpoint}: {scored}")

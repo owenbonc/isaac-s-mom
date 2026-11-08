@@ -122,3 +122,40 @@ def test_a_recording_replays_only_on_the_task_it_was_recorded_in(
     path = tmp_path / "episodes" / manifest.episode_id / "manifest.json"
     assert replay(near, path)
     assert not replay(MujocoSim(TASKS["across_room"]), path)
+
+
+class UpToTheLift(OraclePolicy):
+    """The scripted policy until it has lifted the box, then done: the lift trigger is what is under test."""
+
+    def __init__(self, sim: MujocoSim) -> None:
+        super().__init__(sim)
+        self.lifted = False
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> Any:
+        if self.lifted:
+            return None
+        call = super().act(obs, instruction, feedback)
+        self.lifted = call is not None and call.skill == "lift"
+        return call
+
+
+def test_on_the_real_scene_the_bin_moves_after_the_lift_and_not_after_the_hug(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    sim = _blind(MujocoSim(TASKS["across_room"]), monkeypatch)
+    manifest = run_episode(
+        sim,
+        UpToTheLift(sim),
+        run_dir=tmp_path,
+        events=EventLog(tmp_path, "t"),
+        seed=1000,
+        split="dev",
+        round_=0,
+        instruction="hug",
+        move_bin_after_lift=True,
+    )
+    skills = [s.skill_call.skill for s in manifest.steps]
+    hug, lift = skills.index("hug"), skills.index("lift")
+    assert lift == hug + 1 and manifest.steps[hug].ok and manifest.steps[lift].ok
+    # A hug raises the box a few millimetres; only the lift clears LIFTED_M.
+    assert [(p.before_step, p.perturbation.kind) for p in manifest.perturbations] == [(lift + 1, "move_bin")]
