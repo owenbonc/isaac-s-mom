@@ -12,7 +12,7 @@
 --r:10px;--r-sm:6px;
 /* Type roles at the Claude desktop app's density: labels 12 px and body 14 px at 1280x720; the skill on the frame
    and the held-out figure stay large enough for the back of the room. */
---t-label:.857rem;--t-code:.93rem;--t-title:1.07rem;--t-slate:1.29rem;--t-skill:2.2rem;--t-fig:2.8rem}
+--t-label:calc(12rem / 14);--t-code:.93rem;--t-title:1.07rem;--t-slate:1.29rem;--t-skill:2.2rem;--t-fig:2.8rem}
 *{box-sizing:border-box}
 html{scrollbar-color:rgb(255 255 255 / .22) transparent;color-scheme:dark}
 /* 14px at 1280x720, growing with the smaller viewport side to 16px, so the layout keeps its proportions. */
