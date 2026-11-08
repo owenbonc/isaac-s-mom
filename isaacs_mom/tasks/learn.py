@@ -22,6 +22,7 @@ import shutil
 import time
 from collections.abc import Callable, Collection, Sequence
 from concurrent.futures import ProcessPoolExecutor
+from functools import partial
 from multiprocessing import get_context
 from pathlib import Path
 from typing import Literal
@@ -41,14 +42,16 @@ from isaacs_mom.tasks.generate import Propose, argon_proposer, generate_task
 from isaacs_mom.tasks.rules import judge
 from isaacs_mom.tasks.spec import Refusal, TaskSpec
 from isaacs_mom.teacher import ArgonPolicy
-from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.teacher.argon import Argon, ArgonUnavailable, MissingKey
 from isaacs_mom.validator.recorder import write_atomically, write_manifest
-from isaacs_mom.validator.replay import replay
+from isaacs_mom.validator.replay import REPLAY_ERRORS, replay
 from isaacs_mom.validator.training import build_training_set
 
 DEMO_SEED_START = DEV_SEED_START + 5000  # clear of the loop's trials and choices and of the readiness trial's seeds
 ROUND = 1  # a batch fine-tunes once
 MOVE_BIN_SHARE = 0.5  # of the demonstrations, when the spec lets the bin move: half show it found again
+# One lost demonstration raises one of these; a fatal Argon error (any other 4xx) is none, so it stops the batch (§3.3).
+EPISODE_ERRORS = (ArgonUnavailable, *REPLAY_ERRORS)
 MakePolicy = Callable[[MujocoSim], Policy]
 Train = Callable[[Path, str, int], str]  # (training set, previous checkpoint, round) -> new checkpoint
 
@@ -61,6 +64,7 @@ class Collected(BaseModel):
     move_bin_share: float  # 0 when the spec doesn't let the bin move
     moved_seeds: list[int]  # where the move was due; it applies only once the box is lifted
     generator_calls: int
+    stopped_early: dict[str, str] = {}  # teacher process -> the error that stopped it; what it didn't record errored
 
 
 class ExamResult(BaseModel):
@@ -99,15 +103,6 @@ class LearnReport(BaseModel):
     exam_bin_moved: dict[str, ExamResult]  # empty when the spec doesn't let the bin move
 
 
-def teacher_instruction(spec: TaskSpec) -> str:
-    """The person's words, plus the one fact the teacher's skill guide needs: its feedback calls the destination
-    the bin, whatever the spec calls it."""
-    kind = spec.scene.destination.kind
-    if kind == "bin":
-        return spec.instruction
-    return f"{spec.instruction} (the {kind} is the grey stand with a green top; feedback calls it the bin)"
-
-
 def demonstrate(
     spec_json: str,
     seeds: Sequence[int],
@@ -115,9 +110,11 @@ def demonstrate(
     make_teacher: MakePolicy | None = None,
     moved: Collection[int] = (),
 ) -> None:
-    """One teacher process: a demonstration on each seed, its manifest's verdict the spec's, and each accepted one
-    replayed against that rule. Argon by default. A demonstration that crashes is logged and the rest go on."""
+    """One teacher process: a demonstration on each seed, judged by the spec's rule, and each accepted one replayed
+    by it; Argon by default. A lost demonstration or replay is logged and the rest go on; a missing key or a fatal
+    Argon error raises."""
     spec = TaskSpec.model_validate_json(spec_json)
+    rule = partial(judge, spec)
     out_dir = Path(out)
     sim = MujocoSim(spec.task_config())
     events = EventLog(out_dir, out_dir.name)
@@ -135,17 +132,24 @@ def demonstrate(
                 seed=seed,
                 split="dev",
                 round_=ROUND,
-                instruction=teacher_instruction(spec),
+                instruction=spec.instruction,
                 move_bin_after_lift=seed in moved,
+                verdict=rule,
             )
-        except Exception as error:  # one lost demonstration mustn't cost the batch the others
+        except MissingKey:
+            raise  # a RuntimeError, but every later demonstration would need the key too
+        except EPISODE_ERRORS as error:
             events.emit("error", seed=seed, split="dev", error=f"{type(error).__name__}: {error}")
             continue
-        manifest.validation = judge(spec, sim.ground_truth())
-        path = out_dir / "episodes" / manifest.episode_id / "manifest.json"
-        write_manifest(path, manifest)
-        if manifest.validation.accepted:
-            replay(sim, path, verdict=lambda gt: judge(spec, gt))
+        if manifest.validation and manifest.validation.accepted:
+            path = out_dir / "episodes" / manifest.episode_id / "manifest.json"
+            try:
+                replay(sim, path, verdict=rule)
+            except REPLAY_ERRORS as error:
+                manifest.replay_valid = False
+                write_manifest(path, manifest)
+                reason = f"replay raised {type(error).__name__}: {error}"
+                events.emit("error", episode_id=manifest.episode_id, seed=seed, split="dev", error=reason)
 
 
 def collect(
@@ -158,20 +162,28 @@ def collect(
     generator_calls: int = 0,
 ) -> Collected:
     """`demos` demonstrations over `workers` teacher processes (this one when 1), gathered into run_dir/episodes.
-    Across processes `make_teacher` must be picklable: a top-level function or class."""
+    Across processes `make_teacher` must be picklable: a top-level function or class. When a teacher process stops
+    early, what every process recorded is still gathered and `collected.json` written, so `--resume` can finish the
+    run; then its error is raised."""
     seeds = list(range(DEMO_SEED_START, DEMO_SEED_START + demos))
     share = move_bin_share if "move_bin" in spec.perturbation_kinds() else 0.0
     moved = sorted(seeds[i] for i in moves_bin(demos, share))
     shares = [seeds[i::workers] for i in range(workers) if seeds[i::workers]]
     outs = [str(run_dir / "workers" / f"w{i}") for i in range(len(shares))]
     spec_json = spec.model_dump_json()
+    errors: dict[str, BaseException] = {}
     if len(shares) == 1:
-        demonstrate(spec_json, shares[0], outs[0], make_teacher, moved)
+        try:
+            demonstrate(spec_json, shares[0], outs[0], make_teacher, moved)
+        except Exception as error:
+            errors[Path(outs[0]).name] = error
     else:
-        n = len(shares)
-        with ProcessPoolExecutor(n, mp_context=get_context("spawn")) as pool:
-            # Drained, so a worker's exception raises here instead of vanishing with its unread result.
-            list(pool.map(demonstrate, [spec_json] * n, shares, outs, [make_teacher] * n, [moved] * n))
+        with ProcessPoolExecutor(len(shares), mp_context=get_context("spawn")) as pool:
+            futures = {
+                Path(out).name: pool.submit(demonstrate, spec_json, share_seeds, out, make_teacher, moved)
+                for share_seeds, out in zip(shares, outs, strict=True)
+            }
+        errors = {name: error for name, future in futures.items() if (error := future.exception()) is not None}
     episodes = run_dir / "episodes"
     episodes.mkdir(parents=True, exist_ok=True)
     for out in outs:
@@ -183,8 +195,11 @@ def collect(
         move_bin_share=share,
         moved_seeds=moved,
         generator_calls=generator_calls,
+        stopped_early={name: f"{type(error).__name__}: {error}" for name, error in errors.items()},
     )
     write_atomically(run_dir / "collected.json", collected.model_dump_json(indent=2))
+    if errors:
+        raise next(iter(errors.values()))
     return collected
 
 
@@ -211,8 +226,9 @@ def exam(
     make_student: Callable[[str], Policy],
     move_bin: bool = False,
 ) -> ExamResult:
-    """The student alone on the held-out seeds, each judged by the spec's rule; a crash counts as errored (§3.5).
-    With `move_bin`, the bin moves once right after the lift, and the scored episodes are split as §6.10 says."""
+    """The student alone on the held-out seeds, each counted by the spec's verdict its manifest was saved with; a
+    crash counts as errored (§3.5). With `move_bin`, the bin moves once right after the lift, and the scored episodes
+    are split as §6.10 says."""
     sim = MujocoSim(spec.task_config())
     out = run_dir / ("exam-bin-moved" if move_bin else "exam") / checkpoint.replace("/", "_")
     events = EventLog(out, out.name)
@@ -221,7 +237,7 @@ def exam(
     for seed in seeds:
         start = events.path.stat().st_size if events.path.exists() else 0
         try:
-            run_episode(
+            manifest = run_episode(
                 sim,
                 make_student(checkpoint),
                 run_dir=out,
@@ -229,14 +245,15 @@ def exam(
                 seed=seed,
                 split="heldout",
                 round_=ROUND,
-                instruction=teacher_instruction(spec),
+                instruction=spec.instruction,
                 move_bin_after_lift=move_bin,
+                verdict=partial(judge, spec),
             )
         except Exception as error:  # the system's fault, not the student's: reported apart
             errored += 1
             events.emit("error", seed=seed, split="heldout", error=f"{type(error).__name__}: {error}")
             continue
-        accepted = judge(spec, sim.ground_truth()).accepted
+        accepted = manifest.validation is not None and manifest.validation.accepted
         successes += accepted
         if move_bin:
             bucket = adaptation_of(events.path, start)

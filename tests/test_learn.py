@@ -4,12 +4,15 @@ held-out seeds. No network and no GPU: scripted teachers, a fake fine-tune and a
 
 import itertools
 import json
+import os
 import sys
+from concurrent.futures.process import BrokenProcessPool
 from functools import partial
 from pathlib import Path
 from typing import Any
 
 import pytest
+from google.genai import errors
 
 from isaacs_mom.contracts import (
     Controller,
@@ -26,6 +29,8 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.seeds import heldout_seeds
 from isaacs_mom.sim.mujoco import MujocoSim
 from isaacs_mom.sim.mujoco.preview import OraclePolicy
+from isaacs_mom.sim.mujoco.scene import BIN_WALL
+from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF
 from isaacs_mom.student import BASE_CHECKPOINT
 from isaacs_mom.tasks import Refusal, TaskSpec, judge
 from isaacs_mom.tasks.example import OFFLINE_PROPOSAL, DropShortPolicy
@@ -44,8 +49,8 @@ from isaacs_mom.tasks.learn import (
     start,
     summary,
 )
-from isaacs_mom.teacher.argon import Argon, ArgonUnavailable, Part, Purpose
-from isaacs_mom.validator import validate
+from isaacs_mom.teacher.argon import Argon, ArgonUnavailable, MissingKey, Part, Purpose
+from isaacs_mom.validator import replay, validate
 from isaacs_mom.validator.rules import JOINT_LIMIT, PENETRATION, ROBOT_FELL, SEPARATOR
 
 INSTRUCTION = "put the box on the shelf"
@@ -176,6 +181,10 @@ def test_a_generated_task_trains_on_its_accepted_demonstrations_and_is_examined_
     assert [m.seed for m in demos] == [DEMO_SEED_START, DEMO_SEED_START + 1, DEMO_SEED_START + 2]
     assert all(m.split == "dev" and m.seed not in heldout_seeds() for m in demos)  # rule 2
     assert [m.validation for m in demos] == [ON_THE_SHELF, OFF_THE_SHELF, ON_THE_SHELF]  # the spec's verdicts
+    logged = map(Event.model_validate_json, (run_dir / "workers" / "w0" / "events.jsonl").read_text().splitlines())
+    assert [e.data["reason"] for e in logged if e.type == "validation"] == [
+        m.validation.reason for m in demos if m.validation
+    ]
 
     accepted = [demos[0], demos[2]]
     lines = (run_dir / "training_r1.jsonl").read_text().splitlines()
@@ -276,6 +285,33 @@ def test_the_batch_counts_every_argon_call_of_every_teacher_process(tmp_path: Pa
     assert argon_calls(tmp_path) == 3
 
 
+def test_the_exam_counts_the_specs_verdict_that_each_held_out_manifest_was_saved_with(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    on_the_shelf_past_the_bins_inner_half = GroundTruth(
+        box_xyz=(BIN_INNER_HALF + BIN_WALL / 2, 1.2, 0.45 + 0.125),
+        bin_xy=(0.0, 1.2),
+        bin_yaw=0.0,
+        bin_inner_half=BIN_INNER_HALF,
+        box_on_bin_floor=True,
+        box_at_rest=True,
+        robot_fallen=False,
+        joint_limit_violation=False,
+        penetration=False,
+        robot_xy=(0.0, 0.0),
+        robot_yaw=0.0,
+    )
+    verdict = judge(_spec(), on_the_shelf_past_the_bins_inner_half)
+    assert verdict.accepted and not validate(on_the_shelf_past_the_bins_inner_half).accepted  # the rules disagree
+    monkeypatch.setattr(MujocoSim, "ground_truth", lambda _sim: on_the_shelf_past_the_bins_inner_half)
+    seeds = sorted(heldout_seeds())[:2]
+    assert exam(_spec(), tmp_path, "run/ckpt-r1", seeds, Stops) == ExamResult(successes=2, errored=0, n=2)
+    out = tmp_path / "exam" / "run_ckpt-r1"
+    assert [m.validation for m in _manifests(out / "episodes")] == [verdict, verdict]  # rule 6: the report's source
+    logged = map(Event.model_validate_json, (out / "events.jsonl").read_text().splitlines())
+    assert [e.data["reason"] for e in logged if e.type == "validation"] == [verdict.reason] * 2
+
+
 def test_a_held_out_episode_that_crashes_counts_as_errored_not_as_a_failure(tmp_path: Path) -> None:
     students = itertools.cycle([Crashes, Stops])
     result = exam(_spec(), tmp_path, "run/ckpt-r1", [1, 2], lambda checkpoint: next(students)(checkpoint))
@@ -366,6 +402,82 @@ def test_a_demonstration_that_crashes_is_counted_and_the_batch_goes_on(tmp_path:
     assert (report.demos_errored, report.accepted) == (1, 2)
     errors = [json.loads(line) for line in (run_dir / "workers" / "w0" / "events.jsonl").read_text().splitlines()]
     assert [e["data"]["seed"] for e in errors if e["type"] == "error"] == [DEMO_SEED_START + 1]
+
+
+def test_a_replay_that_raises_fails_that_demonstration_alone(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    replays = []
+
+    def raises_once(sim: MujocoSim, path: Path, verdict: Any) -> bool:
+        replays.append(path)
+        if len(replays) == 1:
+            raise RuntimeError("mj_stackAlloc: out of memory")
+        return replay(sim, path, verdict)
+
+    monkeypatch.setattr("isaacs_mom.tasks.learn.replay", raises_once)
+    collect(_spec(), tmp_path, demos=2, workers=1, make_teacher=OraclePolicy)
+    demos = _manifests(tmp_path / "episodes")
+    assert [m.validation for m in demos] == [ON_THE_SHELF] * 2 and [m.replay_valid for m in demos] == [False, True]
+    logged = map(Event.model_validate_json, (tmp_path / "workers" / "w0" / "events.jsonl").read_text().splitlines())
+    assert [(e.data["episode_id"], e.data["error"]) for e in logged if e.type == "error"] == [
+        (demos[0].episode_id, "replay raised RuntimeError: mj_stackAlloc: out of memory")
+    ]
+
+
+FORBIDDEN = errors.ClientError(
+    403, {"error": {"code": 403, "message": "API key not valid", "status": "PERMISSION_DENIED"}}
+)
+
+
+class StopsTheRunOnTheSecond(OraclePolicy):
+    def __init__(self, sim: MujocoSim, fatal: Exception) -> None:
+        super().__init__(sim)
+        self.fatal = fatal
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        if obs.episode_id.startswith(f"ep-{DEMO_SEED_START + 1}-"):
+            raise self.fatal
+        return super().act(obs, instruction, feedback)
+
+
+@pytest.mark.parametrize("fatal", [FORBIDDEN, MissingKey("GEMINI_API_KEY is not set")], ids=["4xx", "no key"])
+def test_a_fatal_argon_error_stops_the_batch_and_leaves_what_it_recorded_to_resume(
+    tmp_path: Path, fatal: Exception
+) -> None:
+    spec, run_dir, _ = _started(tmp_path)
+    with pytest.raises(type(fatal)):
+        collect(spec, run_dir, demos=3, workers=1, make_teacher=lambda sim: StopsTheRunOnTheSecond(sim, fatal))
+    assert [(m.seed, m.validation) for m in _manifests(run_dir / "episodes")] == [
+        (DEMO_SEED_START, ON_THE_SHELF),
+        (DEMO_SEED_START + 1, None),  # cut off at its first step; the third seed never ran
+    ]
+    collected = Collected.model_validate_json((run_dir / "collected.json").read_text())
+    assert collected.stopped_early == {"w0": f"{type(fatal).__name__}: {fatal}"}
+    report = finish(run_dir, exam_seeds=1, train=FakeFinetune(), make_student=Stops)
+    assert (report.demos, report.accepted, report.demos_errored) == (2, 1, 2)
+
+
+class DiesOnTheSecond(OraclePolicy):
+    """Ends its teacher process outright on the second seed, as a segfault or the OOM killer would."""
+
+    def __init__(self, sim: MujocoSim) -> None:
+        sim.observe = partial(_blank, sim)
+        super().__init__(sim)
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        if obs.episode_id.startswith(f"ep-{DEMO_SEED_START + 1}-"):
+            os._exit(1)
+        return super().act(obs, instruction, feedback)
+
+
+def test_a_teacher_process_that_dies_leaves_a_run_that_resumes(tmp_path: Path) -> None:
+    spec, run_dir, _ = _started(tmp_path)
+    with pytest.raises(BrokenProcessPool):
+        collect(spec, run_dir, demos=3, workers=2, make_teacher=DiesOnTheSecond)
+    collected = Collected.model_validate_json((run_dir / "collected.json").read_text())
+    assert collected.stopped_early["w1"].startswith("BrokenProcessPool")
+    assert not list((run_dir / "workers").glob("*/episodes/*"))  # whatever any process recorded is in the run
+    report = finish(run_dir, exam_seeds=1, train=FakeFinetune(), make_student=Stops)
+    assert report.demos_errored >= 1 and report.accepted + report.demos_errored == 3
 
 
 def _started(tmp_path: Path, proposal: dict[str, Any] = OFFLINE_PROPOSAL) -> tuple[TaskSpec, Path, int]:
