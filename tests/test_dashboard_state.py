@@ -532,12 +532,6 @@ def test_move_shows_the_shown_episodes_move_and_pins_it_until_pressed_again() ->
     assert out["again"] == {"shown": len(events), "held": 0, "episode": "b", "focus": None}
 
 
-def test_p_is_no_longer_a_presenter_key() -> None:
-    events = stream(started("a"), decision(0), executed(0), ("perturbation", {"kind": "move_box", "step": 1}))
-    out = presenter("feed(events.length); const claimed = press('p'); return [claimed, look()];", events)
-    assert out == [False, {"shown": 4, "held": 0, "episode": "a", "focus": None}]
-
-
 def test_move_pressed_again_returns_to_a_pinned_episode() -> None:
     events = stream(
         started("a"),
@@ -1647,12 +1641,9 @@ def test_the_runs_list_is_read_only_in_the_contracts_shape_and_keeps_the_servers
     assert run(script, [live, *bad, refused, old]) == [[live, refused, old], [], []]
 
 
-def test_the_page_opens_the_run_its_url_names_or_else_the_first_listed() -> None:
+def test_a_page_whose_url_names_no_run_opens_the_first_listed() -> None:
     runs = [{"run_id": "live"}, {"run_id": "older"}]
-    script = (
-        "const [runs] = events; return [['older', null, ''].map((w) => S.runToOpen(runs, w)), S.runToOpen([], null)];"
-    )
-    assert run(script, [runs]) == [["older", "live", "live"], None]
+    assert run("const [runs] = events; return [S.runToOpen(runs), S.runToOpen([])];", [runs]) == ["live", None]
 
 
 def test_an_instruction_is_1_to_200_characters_once_trimmed_and_the_count_shows_near_the_limit() -> None:

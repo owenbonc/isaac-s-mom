@@ -46,11 +46,11 @@ const MOVE = '<svg class="i" aria-hidden="true"><use href="#i-move"/></svg>';
 // /runs answer's Date header shows (1 s resolution against a 20 s window).
 let skew = 0;
 const now = () => Date.now() / 1000 + skew;
-const label = (kind) => kind[0].toUpperCase() + kind.slice(1);
-const chip = (kind, text = label(kind)) => `<span class="chip ${kind}">${text}</span>`;
+const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
+const chip = (kind, text = cap(kind)) => `<span class="chip ${kind}">${text}</span>`;
 const panelChip = (ep = null) => {
   const { kind, spelled } = MomState.panelLabel(view, now(), ep);
-  const word = label(kind);
+  const word = cap(kind);
   return spelled ? `<span class="chip quiet ${kind}" title="${word}">${word}</span>` : `<span class="chip quiet ${kind}" role="img" aria-label="${word}" title="${word}"></span>`;
 };
 const WHO = { student: "Student", teacher: "Teacher (Argon)" };
@@ -74,7 +74,6 @@ const kindOf = (ep) => {
   const [name, seed] = KINDS[MomState.kind(ep)];
   return [name, `${seed} ${esc(ep.seed ?? "")}`];
 };
-const cap = (t) => t.charAt(0).toUpperCase() + t.slice(1);
 // An errored held-out test takes Results' yellow ! wherever it shows, never a failure's red ✗ (rule 6).
 const verdictLook = (ep) => (MomState.errored(ep) ? ["warn", markIcon("error")] : MomState.accepted(ep) ? ["good", CHECK] : ["bad", X]);
 const verdictChip = (ep) => {
@@ -102,7 +101,7 @@ function renderHeader() {
       ? chip("refused", "Not started")
       : s.eventCount === 0
         ? chip("placeholder", runId ? "Waiting" : "No run")
-        : chip(kind, `${label(kind)}${sim && sim.name ? ` · ${esc(sim.name)}` : ""}`);
+        : chip(kind, `${cap(kind)}${sim && sim.name ? ` · ${esc(sim.name)}` : ""}`);
   $("status").innerHTML = status;
   const robot = s.episodes.length && s.episodes[s.episodes.length - 1].sim;
   const task = sim && sim.task ? `, the ${sim.task === "fixed_feet" ? "fixed-feet" : "walking"} task (<span class="mono">${esc(sim.task)}</span>)` : "";
@@ -436,10 +435,6 @@ function heldOut() {
   return `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}${taught}</div>`;
 }
 
-function renderRounds() {
-  $("p-rounds").innerHTML = heldOut();
-}
-
 const MARK = { down: "Regressed", up: "Improved", fail: "Still fails", pass: "Always passed", error: "Errored", pending: "Pending" };
 const markIcon = (m) => `<svg class="i mark ${m}" aria-hidden="true"><use href="#m-${m}"/></svg>`;
 const OUTCOME = { succeeded: "Succeeded", failed: "Failed", errored: "Errored", pending: "not run yet" };
@@ -635,7 +630,7 @@ function render() {
   renderEpisode();
   renderCamera();
   announce(said);
-  renderRounds();
+  $("p-rounds").innerHTML = heldOut();
   renderModels();
   renderDiagnosis();
   renderTraining();
@@ -722,7 +717,7 @@ async function loadRuns() {
   const date = Date.parse(response.headers.get("date"));
   if (date) skew = date / 1000 - Date.now() / 1000;
   runs = MomState.runsOf(await response.json().catch(() => null));
-  if (opened && !runId && runs.length) location.replace(`?run=${encodeURIComponent(runs[0].run_id)}`);
+  if (opened && !runId && runs.length) location.replace(`?run=${encodeURIComponent(MomState.runToOpen(runs))}`);
   renderRuns();
   return runs;
 }
@@ -891,7 +886,7 @@ let opened = false;
 (async () => {
   const listed = await loadRuns();
   if (!runId) {
-    runId = MomState.runToOpen(listed || [], null);
+    runId = MomState.runToOpen(listed || []);
     if (runId) history.replaceState(null, "", `?run=${encodeURIComponent(runId)}`);
     if (listed) renderRuns();
   }
