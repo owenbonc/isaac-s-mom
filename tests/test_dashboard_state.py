@@ -2444,8 +2444,11 @@ def test_the_finetune_progress_is_the_latest_report_of_the_round_under_way_in_wh
 @pytest.mark.parametrize(
     "step,total", [(None, 300), (1.5, 3), ("1", 3), (1, "3"), (1, 0), (1, -3), (4, 3), (-1, 3), (True, 3)]
 )
-def test_a_malformed_finetune_progress_report_reads_starting_never_a_guess(step: object, total: object) -> None:
-    assert progress(tick(1, 1, 3), tick(1, step, total)) is None
+def test_a_malformed_finetune_progress_report_keeps_the_last_good_percentage_or_starting_never_a_guess(
+    step: object, total: object
+) -> None:
+    assert progress(tick(1, 1, 3), tick(1, step, total)) == 33
+    assert progress(tick(1, step, total)) is None
 
 
 def test_a_finetune_progress_ends_with_its_finetune_and_a_new_round_starts_from_starting() -> None:
