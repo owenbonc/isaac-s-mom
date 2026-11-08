@@ -20,6 +20,7 @@ from isaacs_mom.student.checkpoints import ADAPTER_FILES, CHECKPOINT_ID
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator.recorder import write_atomically, write_manifest
+from isaacs_mom.validator.replay import replay_accepted
 from isaacs_mom.validator.rules import RECORDING_ERROR
 from isaacs_mom.validator.training import build_training_set
 
@@ -265,4 +266,5 @@ def run_loop(
             duration_s=duration_s,
             checkpoint_path=str(path) if path else None,
         )
+    replay_accepted(sim, run_dir)  # SPEC §3.6 step 6
     return results
