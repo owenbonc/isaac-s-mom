@@ -6,6 +6,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
+from fastapi.middleware.trustedhost import TrustedHostMiddleware
 from fastapi.responses import FileResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import ValidationError
@@ -88,6 +89,8 @@ async def tail_events(
 
 def create_app(run_dir: Path) -> FastAPI:
     app = FastAPI(title="Isaac's Mom dashboard")
+    # A DNS-rebinding page reaches 127.0.0.1 under its own host name, so only a local name is served.
+    app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
 
     @app.get("/")
     def page() -> FileResponse:

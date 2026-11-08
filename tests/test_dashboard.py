@@ -29,8 +29,24 @@ def make_run(tmp_path: Path) -> Path:
     return run_dir
 
 
-def test_frames_are_served_from_inside_the_run_directory(tmp_path: Path) -> None:
+def local(run_dir: Path, raise_server_exceptions: bool = True) -> TestClient:
+    """A client at the address the dashboard serves on, which its host check lets through."""
+    return TestClient(
+        create_app(run_dir), base_url="http://127.0.0.1:8200", raise_server_exceptions=raise_server_exceptions
+    )
+
+
+def test_a_request_naming_another_host_is_refused_so_a_rebinding_page_reads_nothing(tmp_path: Path) -> None:
     client = TestClient(create_app(make_run(tmp_path)))
+    frame = "/frames/episodes/ep-1/frames/0000.jpg"
+    for host in ["127.0.0.1:8200", "localhost:8200"]:
+        assert [client.get(path, headers={"Host": host}).status_code for path in ["/", frame]] == [200, 200]
+    for path in ["/", frame, "/events"]:  # the event stream last: let through, it never ends
+        assert client.get(path, headers={"Host": "evil.example"}).status_code == 400
+
+
+def test_frames_are_served_from_inside_the_run_directory(tmp_path: Path) -> None:
+    client = local(make_run(tmp_path))
     response = client.get("/frames/episodes/ep-1/frames/0000.jpg")
     assert response.status_code == 200
     assert response.content == JPEG
@@ -38,14 +54,14 @@ def test_frames_are_served_from_inside_the_run_directory(tmp_path: Path) -> None
 
 
 def test_frames_are_cached_for_good_because_a_recorded_frame_never_changes(tmp_path: Path) -> None:
-    client = TestClient(create_app(make_run(tmp_path)))
+    client = local(make_run(tmp_path))
     response = client.get("/frames/episodes/ep-1/frames/0000.jpg")
     assert response.headers["cache-control"] == "public, max-age=31536000, immutable"
     assert "cache-control" not in client.get("/frames/episodes/ep-1/frames/missing.jpg").headers
 
 
 def test_frames_reject_traversal_and_non_frames(tmp_path: Path) -> None:
-    client = TestClient(create_app(make_run(tmp_path)))
+    client = local(make_run(tmp_path))
     for path in ["../../secret.jpg", "%2e%2e/%2e%2e/secret.jpg", "notes.txt", "episodes/ep-1/frames/missing.jpg"]:
         assert client.get(f"/frames/{path}").status_code == 404
     assert client.get("/frames//etc/passwd").status_code == 404
@@ -54,7 +70,7 @@ def test_frames_reject_traversal_and_non_frames(tmp_path: Path) -> None:
 def test_frames_that_cannot_resolve_are_not_found(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     (run_dir / "episodes" / "ep-1" / "frames" / "loop.jpg").symlink_to("loop.jpg")
-    client = TestClient(create_app(run_dir), raise_server_exceptions=False)
+    client = local(run_dir, raise_server_exceptions=False)
     for path in ["episodes/ep-1/frames/loop.jpg", "episodes/ep-1/frames/0000%00.jpg", "%00"]:
         assert client.get(f"/frames/{path}").status_code == 404
 
@@ -189,7 +205,7 @@ def test_frame_paths_find_the_same_file_whatever_directory_the_dashboard_starts_
     monkeypatch.chdir(tmp_path / "elsewhere")
     served = tmp_path / "loop" / "runs" / "r1"
     urls = [e["data"]["frame"] for e in collect(served) if e["type"] == "action_executed"]
-    client = TestClient(create_app(served))
+    client = local(served)
     assert urls and all(client.get(url).content == (served / url.removeprefix("/frames/")).read_bytes() for url in urls)
 
 
@@ -237,7 +253,7 @@ def test_each_teacher_demonstration_names_the_failed_episode_whose_diagnosis_it_
 
 
 def test_page_and_its_scripts_are_served_without_caching(tmp_path: Path) -> None:
-    client = TestClient(create_app(make_run(tmp_path)))
+    client = local(make_run(tmp_path))
     page = client.get("/")
     assert "/static/app.js" in page.text and page.headers["cache-control"] == "no-cache"
     assert "new EventSource" in client.get("/static/app.js").text
