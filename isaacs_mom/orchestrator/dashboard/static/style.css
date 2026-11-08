@@ -403,6 +403,7 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 @media (max-width:1000px){
   body{height:auto;overflow:auto}
   .controlbar{flex-wrap:wrap}
+  .teach{flex-shrink:1;min-width:0}
   main{grid-template-columns:minmax(0,1fr)}
   .col{overflow:visible}
   .cell{container-type:normal}
