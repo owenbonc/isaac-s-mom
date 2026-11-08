@@ -207,7 +207,7 @@ def _adaptation(events_path: Path, start: int) -> Adaptation:
     since = _events_since(events_path, start)
     if any(e["type"] == "perturbation" and e["data"].get("kind") == "move_bin" for e in since):
         return "applied"
-    if any(e["type"] == "error" and str(e["data"].get("error", "")).startswith("move_bin not applied") for e in since):
+    if any(e["type"] == "error" and e["data"].get("kind") == "move_bin" for e in since):
         return "not applied"
     return "trigger not reached"
 

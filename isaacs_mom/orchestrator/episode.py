@@ -131,6 +131,7 @@ def run_episode(
                         "error",
                         episode_id=episode_id,
                         step=total_steps,
+                        kind=perturbation.kind,
                         error=f"{perturbation.kind} not applied: the sim refused it and nothing moved",
                     )
             obs = sim.observe()
