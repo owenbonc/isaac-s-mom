@@ -644,14 +644,14 @@ def modes(*explains: list[str], cite: str = "") -> str:
 
 
 def test_a_round_diagnosis_groups_the_failures_and_names_the_ones_each_mode_explains(tmp_path: Path) -> None:
-    a, fake = argon(tmp_path, modes(FAILED[:2], FAILED[2:]))
+    a, fake = argon(tmp_path, modes([*FAILED[:2], FAILED[0]], FAILED[2:]))  # a failure named twice counts once
     found = diagnose_round(ROUND, a)
     assert [(m.diagnosis.hypothesis, m.diagnosis.lesson, m.explains) for m in found] == [
         ("mode 0", "lesson 0", FAILED[:2]),
         ("mode 1", "lesson 1", FAILED[2:]),
     ]
     assert all(isinstance(m, FailureMode) and isinstance(m.diagnosis, Diagnosis) for m in found)
-    assert found[0].diagnosis.evidence == "seen in 2 trials" and len(events(tmp_path, "argon_call")) == 1  # rule 5
+    assert found[0].diagnosis.evidence == "seen in 3 trials" and len(events(tmp_path, "argon_call")) == 1  # rule 5
 
 
 def test_the_round_prompt_gives_each_trial_its_verdict_and_skill_calls_only(tmp_path: Path) -> None:
@@ -660,9 +660,8 @@ def test_the_round_prompt_gives_each_trial_its_verdict_and_skill_calls_only(tmp_
     prompt = str(fake.prompts[0][0])
     blocks = []
     for episode, _ in ROUND:
-        outcome, verdict = (
-            ("succeeded", "in the bin") if episode.validation.accepted else ("failed", "box right of the bin")
-        )
+        failed = episode.episode_id in FAILED
+        outcome, verdict = ("failed", "box right of the bin") if failed else ("succeeded", "in the bin")
         calls = [
             f"  step {s.step} [student] {s.skill_call.model_dump_json(exclude={'reason'})} -> "
             + ("ok" if s.ok else "refused: past the limit")
