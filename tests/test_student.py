@@ -398,19 +398,24 @@ class TinyVLM(torch.nn.Module):
         return SimpleNamespace(loss=self.text_model["q_proj"](input_ids.float().unsqueeze(-1)).pow(2).mean())
 
 
-def test_lora_training_reports_each_optimizer_step_out_of_every_epochs_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_lora_training_reports_each_optimizer_step_then_each_checked_reply_out_of_their_sum(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     from isaacs_mom.student import lora, vlm
 
+    reported: list[tuple[int, int] | str] = []
     monkeypatch.setattr(lora, "EPOCHS", 3)
     monkeypatch.setattr(lora, "GRAD_ACCUM", 4)
     monkeypatch.setattr(vlm, "load_processor", TinyProcessor)
     monkeypatch.setattr(vlm, "load_model", lambda adapter, device: TinyVLM())
     monkeypatch.setattr(vlm, "image_from_jpeg", lambda jpeg: jpeg)
-    monkeypatch.setattr(vlm, "reply", lambda *args: "")
+    monkeypatch.setattr(vlm, "reply", lambda *args: reported.append("reply") or "")
     examples = [{"image": "0.jpg", "instruction": "hug", "feedback": "start", "target": "{}"}] * 5
-    reported: list[tuple[int, int]] = []
     files = lora.lora_train(examples, {"0.jpg": b"jpeg"}, "cpu", lambda step, total: reported.append((step, total)))
-    assert reported == [(step, 6) for step in range(1, 7)]
+    # 3 epochs of ceil(5 / 4) = 2 steps, then the 5 sampled replies, each reported once it is checked
+    steps = [(step, 11) for step in range(1, 7)]
+    checks = [entry for step in range(7, 12) for entry in ("reply", (step, 11))]
+    assert reported == steps + checks
     assert set(ADAPTER_FILES) <= set(files)
 
 

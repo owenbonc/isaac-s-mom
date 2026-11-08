@@ -1890,7 +1890,7 @@ APP_DRIVER = r"""
 const vm = require("vm");
 const fs = require("fs");
 const [statePath, appPath] = process.argv.slice(1);
-const { events, runs, script } = JSON.parse(fs.readFileSync(0, "utf8"));
+const { events, runs, script, markup } = JSON.parse(fs.readFileSync(0, "utf8"));
 const writes = [];
 const elements = new Map();
 class FakeElement {
@@ -1924,6 +1924,7 @@ const IDS = ["status", "run-meta", "announce", "control", "stage", "strip", "log
   "teach", "instruction", "teach-count", "teach-go", "teach-said", "teach-status", "b-prev", "b-next", "b-end",
   "b-d", "b-t", "b-m", "b-pause"];
 for (const id of IDS) elements.set(id, new FakeElement(id, id === "instruction" ? "INPUT" : "DIV"));
+for (const [id, html] of Object.entries(markup)) elements.get(id).html = html;
 const body = new FakeElement("", "BODY");
 const doc = {
   body,
@@ -1986,14 +1987,15 @@ const settled = () => new Promise((resolve) => setImmediate(resolve));
 HOSTILE = "<img src=x onerror=alert(1)>"
 
 
-def app(script: str, events: list[dict], runs: list[dict] | None = None) -> Any:
-    """Run `script` (an async JS function body) against app.js loaded under the DOM stub, and return its result."""
+def app(script: str, events: list[dict], runs: list[dict] | None = None, markup: dict[str, str] | None = None) -> Any:
+    """Run `script` (an async JS function body) against app.js loaded under the DOM stub, whose elements start with
+    `markup` by id, and return its result."""
     listed = (
         runs
         if runs is not None
         else [{"run_id": "r", "instruction": None, "status": "recorded", "reason": None, "started_t": 0}]
     )
-    stdin = json.dumps({"events": events, "runs": listed, "script": script})
+    stdin = json.dumps({"events": events, "runs": listed, "script": script, "markup": markup or {}})
     command = ["node", "-e", APP_DRIVER, str(STATE_JS), str(APP_JS)]
     out = subprocess.run(command, input=stdin, capture_output=True, text=True, check=True)
     return json.loads(out.stdout)
@@ -2094,8 +2096,9 @@ def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_set
     const [source] = sources;
     const before = writes.map(([id]) => id);
     source.onopen();
+    const opened = writes.length;
     for (const e of events) source.onmessage({ data: JSON.stringify(e) });
-    const replaying = { frames: frames.length, written: writes.map(([id]) => id).slice(before.length) };
+    const replaying = { frames: frames.length, written: writes.map(([id]) => id).slice(opened) };
     const announced = doc.getElementById("announce").textContent;
     source.listeners.replayed();
     flush();
@@ -2441,8 +2444,11 @@ def test_the_finetune_progress_is_the_latest_report_of_the_round_under_way_in_wh
 @pytest.mark.parametrize(
     "step,total", [(None, 300), (1.5, 3), ("1", 3), (1, "3"), (1, 0), (1, -3), (4, 3), (-1, 3), (True, 3)]
 )
-def test_a_malformed_finetune_progress_report_reads_starting_never_a_guess(step: object, total: object) -> None:
-    assert progress(tick(1, 1, 3), tick(1, step, total)) is None
+def test_a_malformed_finetune_progress_report_keeps_the_last_good_percentage_or_starting_never_a_guess(
+    step: object, total: object
+) -> None:
+    assert progress(tick(1, 1, 3), tick(1, step, total)) == 33
+    assert progress(tick(1, step, total)) is None
 
 
 def test_a_finetune_progress_ends_with_its_finetune_and_a_new_round_starts_from_starting() -> None:
@@ -2500,8 +2506,9 @@ def test_a_run_shows_hidden_skeletons_and_says_loading_once_until_its_replay_set
     script = """
     const [source] = sources;
     source.onopen();
+    const opened = writes.length;
     for (const e of events) source.onmessage({ data: JSON.stringify(e) });
-    const replaying = writes.map(([id]) => id);
+    const replaying = writes.slice(opened).map(([id]) => id);
     source.listeners.replayed();
     flush();
     return { replaying, after: Object.fromEntries(writes) };
@@ -2510,3 +2517,30 @@ def test_a_run_shows_hidden_skeletons_and_says_loading_once_until_its_replay_set
     assert not set(out["replaying"]) & set(LOADING)
     for id_ in LOADING:
         assert id_ in out["after"] and not re.search(r'class="[^"]*\bskel', out["after"][id_]), id_
+
+
+def test_a_reconnect_shows_the_skeletons_again_while_it_replays_never_the_disconnected_view() -> None:
+    skeleton = {id_: f'<span class="skel" aria-hidden="true">{id_}</span>' for id_ in LOADING}
+    script = """
+    const [source] = sources;
+    const replay = () => { for (const e of events) source.onmessage({ data: JSON.stringify(e) }); };
+    source.onopen();
+    replay();
+    source.listeners.replayed();
+    flush();
+    source.onerror();
+    flush();
+    const lost = Object.fromEntries(writes);
+    const reopened = writes.length;
+    source.onopen();
+    replay();
+    const replaying = writes.slice(reopened);
+    source.listeners.replayed();
+    flush();
+    return { lost, replaying, after: Object.fromEntries(writes) };
+    """
+    out = app(script, stream(started("a"), decision(0), executed(0)), markup=skeleton)
+    assert "Disconnected" in out["lost"]["status"]
+    assert [tuple(write) for write in out["replaying"] if write[0] in LOADING] == list(skeleton.items())
+    for id_ in LOADING:
+        assert out["after"][id_] != skeleton[id_], id_
