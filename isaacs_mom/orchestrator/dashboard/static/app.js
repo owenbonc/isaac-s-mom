@@ -42,7 +42,10 @@ const BANG = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v5M6 9.6v
 const CHECK = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 6.5l2.6 2.6L10 3" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const MOVE = '<svg class="i" aria-hidden="true"><use href="#i-move"/></svg>';
 
-const now = () => Date.now() / 1000;
+// Events carry the serving machine's time, so the page reads the clock as the server's: its own plus the skew the
+// /runs answer's Date header shows (1 s resolution against a 20 s window).
+let skew = 0;
+const now = () => Date.now() / 1000 + skew;
 const label = (kind) => kind[0].toUpperCase() + kind.slice(1);
 const chip = (kind, text = label(kind)) => `<span class="chip ${kind}">${text}</span>`;
 const panelChip = (ep = null) => {
@@ -715,6 +718,8 @@ function renderRuns() {
 async function loadRuns() {
   const response = await fetch("/runs").catch(() => null);
   if (!response || !response.ok) return null;
+  const date = Date.parse(response.headers.get("date"));
+  if (date) skew = date / 1000 - Date.now() / 1000;
   runs = MomState.runsOf(await response.json().catch(() => null));
   if (opened && !runId && runs.length) location.replace(`?run=${encodeURIComponent(runs[0].run_id)}`);
   renderRuns();

@@ -1755,7 +1755,9 @@ const frames = [];
 const fetched = [];
 const intervals = [];
 // A body-less answer's json() throws, as a 204's does.
-const answer = (status, body) => ({ ok: status < 300, status, json: async () => body ?? JSON.parse("") });
+const answer = (status, body) => ({
+  ok: status < 300, status, headers: new Map(), json: async () => body ?? JSON.parse(""),
+});
 const refused = { run_id: "t", started: false, reasons: ["Not yet"] };
 const context = vm.createContext({
   document: doc, Element: FakeElement, EventSource, console, structuredClone, URLSearchParams,
@@ -2114,3 +2116,15 @@ def test_a_fine_tuned_checkpoint_shows_by_its_short_id_and_the_names_tooltip_kee
         '<span class="mono note">ckpt-r1</span>' in out["seed"] and '<span class="mono">ckpt-r2</span>' in out["seed"]
     )
     assert 'Student <span class="mono">ckpt-r2</span>' in out["control"]
+
+
+def test_a_run_reads_live_on_the_servers_clock_when_the_viewers_runs_30_s_ahead() -> None:
+    script = """
+    // The server's clock, as its /runs answer's Date header gives it, is 30 s behind this one.
+    const behind = new Date(Date.now() - 30000).toUTCString();
+    context.fetch = async () => ({ ok: true, status: 200, headers: new Map([["date", behind]]), json: async () => [] });
+    await vm.runInContext("loadRuns()", context);
+    for (const e of events) e.t = Date.now() / 1000 - 30;
+    """
+    script += REPLAY + 'return doc.getElementById("status").innerHTML;'
+    assert 'class="chip live"' in app(script, stream(started("a"), decision(0)))
