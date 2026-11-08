@@ -136,7 +136,7 @@ Every result is the **student alone** on sealed held-out scenes, against a contr
 5. **Check:** the student does it alone (10/20). Argon diagnoses its over-twist and demonstrates turning back and placing.
 6. **Fine-tune again, then check:** **10/20 → 18/20** per seed (p = 0.039). That meets the target, so the loop stops.
 
-An untargeted control round also reached 18/20, so the gain comes from the new demos and the retraining, not from the targeting; the video says so on its last card. Footage: students filmed on unseen video seeds, and Argon's demos re-executed from their records; numbers from the round reports ([sources](#where-the-numbers-come-from)).
+**The video joins two runs.** Steps 1–5 (0/20 → 10/20) are the untrained student and the fixed-feet student v2, trained on 117 demos in a separate run ([PR #22 6718403477](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6718403477)), not one loop round. Step 6 is one real loop round, `gate-e-1008` ([6721136914](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721136914)). An untargeted control with the same number of new demos also reached 18/20, so targeting added nothing measurable over the same number of untargeted demos (both 18/20; n = 20, possible ceiling; [6721840949](https://github.com/owenbonc/scaffld/pull/22#issuecomment-6721840949)); the video says so on its last card. Footage: students filmed on unseen video seeds, and Argon's demos re-executed from their records; numbers from the round reports ([sources](#where-the-numbers-come-from)).
 
 <table>
 <tr>
