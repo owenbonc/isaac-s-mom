@@ -63,6 +63,12 @@ def env_value(name: str, env_path: Path | None = None) -> str | None:
     return found
 
 
+def hide_key(text: str) -> str:
+    """The text with the Argon key shown as `[key]`: an SDK error can quote it, and events reach the dashboard."""
+    key = env_value("GEMINI_API_KEY")
+    return text.replace(key, "[key]") if key else text
+
+
 def _seconds(text: object) -> float | None:
     """A usable wait: finite and not negative (time.sleep raises on a negative one, and NaN slips past min)."""
     try:
@@ -174,6 +180,7 @@ class Argon:
         return text
 
     def _log_call(self, purpose: Purpose, started: float, error: str | None) -> None:
+        error = None if error is None else hide_key(error)
         self.failed += error is not None
         self.last_error = error
         self._emit(

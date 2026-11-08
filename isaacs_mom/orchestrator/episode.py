@@ -10,6 +10,8 @@ from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.validator import Recorder, validate
+from isaacs_mom.validator.recorder import RecordingError
+from isaacs_mom.validator.rules import recording_error_verdict
 
 MAX_STEPS = 20
 PERTURB_SEED_OFFSET = 7919
@@ -155,7 +157,13 @@ def run_episode(
                 break
             with heartbeat(events, episode_id, heartbeat_seconds):
                 result = sim.execute(call)
-            recorder.add_step(obs, call, result, active.controller, active.checkpoint)
+            try:
+                recorder.add_step(obs, call, result, active.controller, active.checkpoint)
+            except RecordingError as error:  # a simulator bug ends this episode, never the run (SPEC §3.5)
+                refused = recording_error_verdict(error)
+                events.emit("error", episode_id=episode_id, step=obs.step, error=refused.reason)
+                events.emit("validation", episode_id=episode_id, **refused.model_dump())
+                return recorder.finish(refused)
             events.emit(
                 "action_executed",
                 episode_id=episode_id,
