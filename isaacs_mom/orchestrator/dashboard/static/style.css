@@ -258,6 +258,16 @@ footer.models .v{color:var(--muted)}
 .sheet li{position:relative;overflow:hidden;background:var(--well)}
 .sheet img{display:block;width:100%;height:100%;object-fit:cover}
 
+/* The fine-tune's progress in the trainer's own steps; until its first report the bar is indeterminate and says Starting. */
+.progress{flex:none;display:flex;align-items:center;gap:.75rem;padding-inline:.1rem}
+.progress .track{flex:1;height:.375rem;border-radius:999px;background:var(--raised);overflow:hidden}
+.progress .fill{display:block;height:100%;border-radius:inherit;background:var(--ink);transform-origin:left;transform:scaleX(var(--p))}
+.progress .pct{min-width:4ch;font-weight:600;text-align:right}
+.progress:not([aria-valuenow]) .pct{color:var(--muted)}
+.progress:not([aria-valuenow]) .fill{transform:none;opacity:.3}
+@media (prefers-reduced-motion:no-preference){.progress:not([aria-valuenow]) .fill{width:30%;opacity:.7;animation:sweep 1.8s ease-in-out infinite}}
+@keyframes sweep{from{transform:translateX(-100%)}to{transform:translateX(340%)}}
+
 /* As many 4:3 thumbnails as fill the strip's height, 6 down to 3, earliest dropped first: n need an aspect ratio of n × 4/3. */
 .strip{--g:.4rem;list-style:none;margin:0;padding:.1rem .6rem .6rem;display:flex;align-items:flex-end;gap:var(--g);flex:1 1 0;min-height:0;container-type:size}
 /* Move's pair is the peak, so no thumbnail competes with it at any size. */
