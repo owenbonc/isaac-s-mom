@@ -732,9 +732,10 @@ def taught_run(tmp_path: Path, *, episode: bool) -> Path:
 
 def stop_with(run_dir: Path, script: str) -> list[tuple[str, dict]]:
     """Runs `script` as the run's `mom run` and waits for the dashboard to note how it ended; the run's events."""
-    watcher = launch_run([sys.executable, "-c", script], run_dir / "run.log")
+    child, watcher = launch_run([sys.executable, "-c", script], run_dir / "run.log")
+    assert watcher.daemon and watcher.ident is not None  # started, and stopping the dashboard never waits on it
     watcher.join(timeout=30)
-    assert not watcher.is_alive()
+    assert not watcher.is_alive() and child.returncode is not None  # reaped, so it's never left a zombie
     return [(event.type, event.data) for event in read_events(run_dir)]
 
 
@@ -767,9 +768,7 @@ def test_a_run_with_nothing_in_its_log_says_so(tmp_path: Path) -> None:
 def test_a_run_killed_mid_write_still_gets_its_error_on_a_line_of_its_own(tmp_path: Path) -> None:
     run_dir = taught_run(tmp_path, episode=True)
     half = "open('events.jsonl', 'a').write('{\"t\": 1, \"run_id\"'); print('killed'); raise SystemExit(1)"
-    watcher = launch_run([sys.executable, "-c", f"import os; os.chdir({str(run_dir)!r}); {half}"], run_dir / "run.log")
-    watcher.join(timeout=30)
-    events = [(event.type, event.data) for event in read_events(run_dir)]
+    events = stop_with(run_dir, f"import os; os.chdir({str(run_dir)!r}); {half}")
     assert events[-1] == ("error", {"error": "mom run stopped (exit 1): killed"})
 
 
@@ -781,10 +780,26 @@ def test_a_stopped_runs_reason_hides_the_key_and_is_cut_to_300_characters(
     events = stop_with(run_dir, f"print('400 key {KEY} rejected, ' + 'x' * 1000); raise SystemExit(1)")
     error = str(events[-1][1]["error"])
     assert error == "not started: mom run stopped: " + ("400 key [key] rejected, " + "x" * 1000)[:300]
-    # Replaced before the cut, so a key that straddles it leaves no part of itself.
     (run_dir / "run.log").unlink()
     events = stop_with(run_dir, f"print('y' * 297 + {KEY!r}); raise SystemExit(1)")
     assert events[-1][1]["error"] == "not started: mom run stopped: " + "y" * 297 + "[ke"
+
+
+def test_only_the_logs_last_64_kib_are_read_and_a_key_they_cut_leaves_no_part_of_itself(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", KEY)
+    run_dir = taught_run(tmp_path, episode=False)
+    # The tail starts 3 characters into the key and holds only blank lines after it, so no whole line is left.
+    (run_dir / "run.log").write_text("loading the sim\n400 key " + KEY + "\n" * (64 * 1024 - len(KEY) + 3))
+    events = stop_with(run_dir, "raise SystemExit(1)")
+    assert events[-1] == ("error", {"error": "not started: mom run stopped: run.log is empty"})
+
+
+def test_a_run_whose_log_cannot_be_read_still_gets_its_error(tmp_path: Path) -> None:
+    run_dir = taught_run(tmp_path, episode=True)
+    events = stop_with(run_dir, f"import os; os.remove({str(run_dir / 'run.log')!r}); raise SystemExit(2)")
+    assert events[-1] == ("error", {"error": "mom run stopped (exit 2): run.log is empty"})
 
 
 def test_a_teach_with_no_key_says_argon_is_not_reachable_from_this_machine(
@@ -810,5 +825,8 @@ def test_a_task_generator_failure_hides_the_key_and_is_cut_to_300_characters(
 ) -> None:
     monkeypatch.setenv("GEMINI_API_KEY", KEY)
     client, _ = teach_client(tmp_path, RuntimeError(f"400 key {KEY} not valid " + "x" * 1000))
-    [reason] = teach(client, "put the box in the bin").json()["reasons"]
+    response = teach(client, "put the box in the bin")
+    [reason] = response.json()["reasons"]
     assert reason == ("task generator failed: RuntimeError: 400 key [key] not valid " + "x" * 1000)[:300]
+    run_dir = tmp_path / "runs" / response.json()["run_id"]
+    assert KEY not in (run_dir / "events.jsonl").read_text()

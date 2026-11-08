@@ -18,7 +18,7 @@ from isaacs_mom.orchestrator.events import EventLog, read_events
 from isaacs_mom.student import valid_run_id
 from isaacs_mom.tasks import Refusal, TaskSpec, argon_proposer, generate_task
 from isaacs_mom.tasks.spec import Bin, Inside
-from isaacs_mom.teacher.argon import Argon, Generate, MissingKey, env_value
+from isaacs_mom.teacher.argon import Argon, Generate, MissingKey, hide_key
 
 FRESH_SECONDS = 20.0
 FINETUNE_SECONDS = 30 * 60.0
@@ -82,16 +82,17 @@ def list_runs(runs_dir: Path, now: float) -> list[RunSummary]:
     return sorted(runs, key=lambda run: (run.status != "live", -run.started_t))
 
 
-def launch_run(command: list[str], log: Path) -> threading.Thread:
+def launch_run(command: list[str], log: Path) -> tuple[subprocess.Popen[bytes], threading.Thread]:
     """Starts the command in its own session, so a run outlives the dashboard and a Ctrl-C there never reaches it. A
-    daemon thread waits for it, so it's never left a zombie, and records why in its run if it fails."""
+    daemon thread waits for it, so it's never left a zombie, and records why in its run if it fails. Returns the child
+    and that thread."""
     with log.open("ab") as out:
         child = subprocess.Popen(
             command, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True
         )
     watcher = threading.Thread(target=_record_exit, args=(child, log), daemon=True)
     watcher.start()
-    return watcher
+    return child, watcher
 
 
 def _record_exit(child: subprocess.Popen[bytes], log: Path) -> None:
@@ -111,10 +112,17 @@ def _record_exit(child: subprocess.Popen[bytes], log: Path) -> None:
 
 
 def _last_line(log: Path) -> str:
-    """The log's last non-empty line, read from its tail only, since a long run's log is large."""
-    with log.open("rb") as f:
-        f.seek(max(0, f.seek(0, os.SEEK_END) - LOG_TAIL_BYTES))
-        lines = f.read().decode(errors="replace").splitlines()
+    """The log's last non-empty line, read from its tail only, since a long run's log is large; empty when it can't be
+    read, so the error is still written."""
+    try:
+        with log.open("rb") as f:
+            start = max(0, f.seek(0, os.SEEK_END) - LOG_TAIL_BYTES)
+            f.seek(start)
+            lines = f.read().decode(errors="replace").splitlines()
+    except OSError:
+        return ""
+    if start > 0:
+        lines = lines[1:]  # the tail can start mid-line, even mid-key, so its first line may be a fragment
     return next((line.strip() for line in reversed(lines) if line.strip()), "")
 
 
@@ -129,11 +137,9 @@ def _end_line(events_path: Path) -> None:
 
 
 def _readable(text: str) -> str:
-    """At most 300 characters, with the Argon key never shown (rule 5); it's replaced first, so a cut can't leave part
-    of it."""
-    if key := env_value("GEMINI_API_KEY"):
-        text = text.replace(key, "[key]")
-    return text[:REASON_CHARS]
+    """At most 300 characters, with the Argon key never shown (rule 5). It's replaced before the 300 cut, and the log's
+    tail drops its first, partial line, so neither cut leaves part of it."""
+    return hide_key(text)[:REASON_CHARS]
 
 
 def is_the_loops_task(spec: TaskSpec) -> bool:
