@@ -14,7 +14,15 @@ from typing import Literal
 
 from pydantic import BaseModel, ValidationError
 
-from isaacs_mom.contracts import Controller, Diagnosis, EpisodeManifest, Observation, SkillCall
+from isaacs_mom.contracts import (
+    MAX_ANGLE_DEG,
+    MAX_DISTANCE_CM,
+    Controller,
+    Diagnosis,
+    EpisodeManifest,
+    Observation,
+    SkillCall,
+)
 from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
 from isaacs_mom.teacher.argon import Argon, Part, Purpose
 
@@ -24,9 +32,37 @@ RAW_LOG_CHARS = 500
 
 SKILL_SCHEMA = json.dumps(SkillCall.model_json_schema())
 
-ROBOT = """You control a simulated Unitree G1 robot. Your only sensor is the head RGB camera image you are given.
-You act by choosing one whitelisted skill at a time; a controller turns it into joint motion.
-Skills are refused with a reason if they would go out of reach; the next feedback tells you."""
+# What the schema alone doesn't tell Argon: what each skill does, its parameters, and that up close the carried
+# box hides the bin. Without it, Argon walked and turned only by the defaults and let go short of the bin.
+ROBOT = f"""You control a simulated Unitree G1 humanoid. Your only sensor is the head RGB camera image you are
+given. It looks down and ahead, so once the box is lifted it fills the lower middle of the image and hides the floor
+just in front of you: when the bin is close enough to place into, the box hides it.
+You act by choosing one skill at a time; a controller turns it into motion. The skills and their parameters:
+- reach_left / reach_right {{"distance_cm": default 5}}: slide both open hands sideways, at most 12 cm off-centre
+  in all, to line them up with the box on the table.
+- hug: close both arms on the box between the hands. It only works on a box on the table: a box that falls to the
+  floor can't be picked up again, and the task has failed.
+- lift: raise the hugged box.
+- walk_forward / walk_back {{"distance_cm": 0-{MAX_DISTANCE_CM:.0f}, default 30}}: walk straight ahead or back,
+  the whole distance in one call. Refused when your feet stay put in this task.
+- turn_left / turn_right {{"angle_deg": 0-{MAX_ANGLE_DEG:.0f}, default 30}}: turn the whole body in place by that
+  angle, in one call. When your feet stay put, the waist twists instead: at most 45 degrees at a time and 150 in all.
+- place: lower the box about 40 cm in front of your chest and let go. Only when the bin is straight ahead and right
+  in front of you; anywhere else the box falls on the floor.
+- reobserve: look again without moving.
+A skill that would reach too far, or walk into the table or the bin, is refused with a reason and nothing moves.
+A good plan: line the hands up with the box, hug and lift it. If you can walk: walk_back 30 cm from the table, then
+turn to find the bin (it is beside or behind you, never ahead; turn 90 degrees at a time while it is out of view).
+Line it up only while the whole bin shows above the box: turn until its centre is straight above the box's centre.
+A bin at the box's top corner, partly behind it, is about 20 degrees to that side; one fully beside the box, about 40.
+If it shows only beside the box or partly behind it, it is too close to line up: walk_back 50 cm and look again.
+Judge its distance (from you to its centre) by where it sits on the lifted box: its grey stand showing with a gap above
+the box, 1.6 m or more; the whole bin resting on the box's top edge, 1.3 m; only its green inside showing over the
+edge, 1.1 m; only its far rim peeking over, 0.9 m; hidden behind the box, under 0.8 m. You place from 45 cm away, so
+walk_forward the distance minus 45 cm in one call (if that is refused, try 10 cm less). Then walk_forward 10: if it is
+refused because it would walk into the bin, you are right up to it, so place; if not, walk_forward 10 again.
+If the bin shows beside you instead of ahead, you have walked past it: walk_back 50 cm and line it up again.
+If your feet stay put, the bin is beside you within reach: twist toward it until it is straight ahead, then place."""
 
 Done = Literal["done"]
 OverBudget = Literal["over budget"]

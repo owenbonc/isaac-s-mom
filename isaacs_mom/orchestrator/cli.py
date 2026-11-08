@@ -4,7 +4,7 @@ from pathlib import Path
 
 from isaacs_mom.orchestrator import evaluation
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import run_loop
+from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, run_loop
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -28,6 +28,13 @@ def run_id(text: str) -> str:
     return text
 
 
+def at_least_one(text: str) -> int:
+    value = int(text)
+    if value < 1:
+        raise argparse.ArgumentTypeError(f"{value}: must be at least 1")
+    return value
+
+
 def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
     if name == "fake":
         from isaacs_mom.sim.fake import FakeSim
@@ -44,6 +51,8 @@ def main() -> None:
     run = commands.add_parser("run", help="the teach -> fine-tune loop (SPEC §3.6)")
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--rounds", type=int, default=3)
+    run.add_argument("--demos", type=at_least_one, default=DEMOS_PER_ROUND, help="teacher demonstrations per round")
+    run.add_argument("--dev-trials", type=at_least_one, default=DEV_TRIALS, help="student trials the teacher diagnoses")
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a run directory")
     dashboard.add_argument("--run", type=Path, required=True)
@@ -120,6 +129,8 @@ def main() -> None:
         run_dir,
         args.run_id,
         max_rounds=args.rounds,
+        demos=args.demos,
+        dev_trials=args.dev_trials,
         argon=argon,
         make_student=make_student,
         train_student=train_student,

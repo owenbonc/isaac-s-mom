@@ -528,6 +528,33 @@ def test_the_cli_refuses_a_run_id_a_checkpoint_id_could_not_carry(
     assert not (tmp_path / "runs").exists()
 
 
+def test_the_cli_sizes_a_round_with_demos_and_dev_trials(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sizes: dict[str, object] = {}
+
+    def run_loop_spy(*args: object, **kwargs: object) -> list[object]:
+        sizes.update(demos=kwargs["demos"], dev_trials=kwargs["dev_trials"])
+        return []
+
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(cli, "run_loop", run_loop_spy)
+    base = ["mom", "run", "--sim", "fake", "--student", "stub", "--rounds", "1"]
+    monkeypatch.setattr(sys, "argv", [*base, "--demos", "80", "--dev-trials", "15"])
+    cli.main()
+    assert sizes == {"demos": 80, "dev_trials": 15}
+    monkeypatch.setattr(sys, "argv", base)
+    cli.main()
+    assert sizes == {"demos": loop.DEMOS_PER_ROUND, "dev_trials": loop.DEV_TRIALS}
+
+
+@pytest.mark.parametrize("flag", ["--demos", "--dev-trials"])
+def test_the_cli_refuses_a_round_size_below_one(flag: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", flag, "0"])
+    with pytest.raises(SystemExit) as exit_:
+        cli.main()
+    assert exit_.value.code == 2
+
+
 def finetune_events(tmp_path: Path, train_student: Callable[[Path, str, int], str]) -> tuple[dict, dict]:
     run_dir = tmp_path / "some-run"
     run_loop(
