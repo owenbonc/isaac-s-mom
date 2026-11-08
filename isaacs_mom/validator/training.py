@@ -8,7 +8,8 @@ from isaacs_mom.validator.rules import failure_categories
 
 
 def training_examples(episode_dir: Path, manifest: EpisodeManifest) -> list[TrainingExample]:
-    """Teacher steps of one accepted dev episode (SPEC §2 rules 2 and 3); nothing otherwise."""
+    """Teacher steps of one accepted dev episode (SPEC §2 rules 2 and 3), plus the closing second `reobserve`
+    when the teacher's demo ended with one (§4.3); nothing otherwise."""
     if manifest.split != "dev" or manifest.validation is None or not manifest.validation.accepted:
         return []
     assert_not_heldout(manifest.seed)
@@ -25,6 +26,17 @@ def training_examples(episode_dir: Path, manifest: EpisodeManifest) -> list[Trai
                 )
             )
         feedback = f"{record.skill_call.skill}: {'ok' if record.ok else record.error}"
+    last = manifest.steps[-1] if manifest.steps else None
+    if last and last.controller == "teacher" and last.skill_call.skill == "reobserve":
+        # The demo stops after one reobserve; the student stops on a second (§3.2), so show it once, on the same frame.
+        examples.append(
+            TrainingExample(
+                image=str(episode_dir / last.frame),
+                instruction=manifest.instruction,
+                feedback=feedback,
+                target=SkillTarget(skill="reobserve", params={}),
+            )
+        )
     return examples
 
 
