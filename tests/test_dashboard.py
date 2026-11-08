@@ -236,7 +236,14 @@ def test_frames_that_cannot_resolve_are_not_found(tmp_path: Path) -> None:
     run_dir = make_run(tmp_path)
     (run_dir / "episodes" / "ep-1" / "frames" / "loop.jpg").symlink_to("loop.jpg")
     client = runs_client(tmp_path, raise_server_exceptions=False)
-    for path in ["r1/episodes/ep-1/frames/loop.jpg", "r1/episodes/ep-1/frames/0000%00.jpg", "r1/%00", "%00/x.jpg"]:
+    too_long = "r1/" + "a" * 5000 + ".jpg"
+    for path in [
+        "r1/episodes/ep-1/frames/loop.jpg",
+        "r1/episodes/ep-1/frames/0000%00.jpg",
+        "r1/%00",
+        "%00/x.jpg",
+        too_long,
+    ]:
         assert client.get(f"/frames/{path}").status_code == 404, path
 
 
@@ -668,6 +675,19 @@ def test_a_refused_instruction_starts_nothing_and_is_listed_as_not_started_with_
     assert (listed["run_id"], listed["instruction"], listed["status"]) == (run_id, text, "not_started")
     assert listed["reason"] == "Argon declined: it can only move boxes"
     assert launched == []
+
+
+def test_teach_refuses_a_body_over_4096_bytes_unread_and_only_from_its_own_page(tmp_path: Path) -> None:
+    client, launched = teach_client(tmp_path)
+    big = b" " * 4097
+    assert client.post("/teach", content=big, headers={"Origin": ORIGIN}).status_code == 413
+    assert client.post("/teach", content=big, headers={"Origin": "http://evil.example"}).status_code == 403
+    assert client.post("/teach", content=b" " * 4096, headers={"Origin": ORIGIN}).status_code == 400  # read, not JSON
+    assert not (tmp_path / "runs").exists() and launched == []
+
+
+def test_the_page_may_not_be_framed_by_another_page(tmp_path: Path) -> None:
+    assert runs_client(tmp_path).get("/").headers["content-security-policy"] == "frame-ancestors 'none'"
 
 
 def test_a_task_generator_that_fails_leaves_the_run_not_started_with_why(tmp_path: Path) -> None:

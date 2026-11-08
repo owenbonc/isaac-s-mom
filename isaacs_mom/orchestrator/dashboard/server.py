@@ -3,6 +3,7 @@ server-sent events, its frame JPEGs and its training and replay summaries; the T
 
 import asyncio
 import logging
+import os
 import re
 import time
 from collections.abc import AsyncIterator, Awaitable, Callable
@@ -31,6 +32,8 @@ FRAME_KEYS = {"frame", "before_frame"}
 REPLAYED = "event: replayed\ndata: {}\n\n"
 TRAINING_SUMMARY = re.compile(r"training_r[0-9]+\.summary\.json")
 LOCAL_CLIENTS = {"127.0.0.1", "::1"}
+# The page sends at most 200 characters; a body far past that is refused before it is read.
+TEACH_BODY_BYTES = 4096
 
 
 class TeachRequest(BaseModel):
@@ -118,7 +121,9 @@ def create_app(
 
     @app.get("/")
     def page() -> FileResponse:
-        return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
+        # Never framed, so no other page can lead a click into the Teach box under its own decoy.
+        headers = {"Cache-Control": "no-cache", "Content-Security-Policy": "frame-ancestors 'none'"}
+        return FileResponse(STATIC / "index.html", headers=headers)
 
     @app.get("/runs")
     def runs() -> list[RunSummary]:
@@ -139,7 +144,8 @@ def create_app(
             target = (run_dir / path).resolve()
         except (ValueError, OSError, RuntimeError):  # a NUL byte or a symlink loop
             raise HTTPException(status_code=404) from None
-        if not target.is_relative_to(run_dir) or target.suffix not in FRAME_SUFFIXES or not target.is_file():
+        # os.path.isfile is False on any OSError, where Path.is_file re-raises a name too long.
+        if not target.is_relative_to(run_dir) or target.suffix not in FRAME_SUFFIXES or not os.path.isfile(target):
             raise HTTPException(status_code=404)
         # The recorder writes each frame once under a unique episode id, so a URL's bytes never change.
         return FileResponse(
@@ -165,6 +171,9 @@ def create_app(
         client = request.client
         if client is None or client.host not in LOCAL_CLIENTS or request.headers.get("origin") not in own_origins:
             raise HTTPException(status_code=403, detail="Teach takes an instruction only from this dashboard's page")
+        # shortcut: a chunked body has no length to check and is read whole; only a local non-browser client sends one.
+        if int(request.headers.get("content-length") or 0) > TEACH_BODY_BYTES:
+            raise HTTPException(status_code=413, detail=f"send at most {TEACH_BODY_BYTES} bytes")
         try:
             instruction = instruction_text(TeachRequest.model_validate_json(await request.body()).instruction)
         except ValidationError:
