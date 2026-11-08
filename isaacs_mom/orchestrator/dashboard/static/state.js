@@ -23,6 +23,8 @@
       errorCount: 0,
       // Held-out episodes that crashed before a verdict, by seed and the evaluation they belong to (its index).
       crashes: [],
+      // Set by the error event the dashboard leaves when the `mom run` it launched exits non-zero (SPEC §3.5).
+      stopped: false,
     };
   }
 
@@ -194,6 +196,7 @@
         s.errorCount += 1;
         const said = text(d.message) || text(d.error) || "error event";
         const refusal = /^not started:\s*/.exec(said);
+        if (refusal || said.startsWith("mom run stopped")) s.stopped = true;
         if (refusal && !ep) s.refused = said.slice(refusal[0].length);
         else if (ep) ep.rows.push({ kind: "error", text: said });
         if (d.split === "heldout" && num(d.seed) !== null) s.crashes.push({ seed: d.seed, evaluation: s.rounds.length });
@@ -220,9 +223,10 @@
     return { name, version: sim.version, task: task ? task[1] : null };
   }
 
-  // SPEC §3.5: live while events arrive, or while a fine-tune started under 30 minutes ago has not completed.
+  // SPEC §3.5: live while events arrive, or while a fine-tune started under 30 minutes ago has not completed, and never
+  // once the run has stopped, as the runs list (orchestrator/runs.py) reads it.
   const running = (s, now) =>
-    now - s.lastT < FRESH_SECONDS || (s.finetune.pending !== null && now - s.finetune.pending.t < FINETUNE_SECONDS);
+    !s.stopped && (now - s.lastT < FRESH_SECONDS || (s.finetune.pending !== null && now - s.finetune.pending.t < FINETUNE_SECONDS));
 
   // Rule 6 for what the view shows: placeholder unless every shown episode ran on a real simulator; live while the
   // run is and its stream is connected, paused instead of live while the presenter holds the view, recorded

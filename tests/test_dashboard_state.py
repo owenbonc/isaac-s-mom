@@ -312,6 +312,20 @@ def test_a_panel_shows_its_provenance_as_a_dot_and_spells_it_only_where_it_diffe
     assert panel(stream(started("a", "fake-1")), now=1.0) == {"kind": "placeholder", "spelled": False}
 
 
+def test_a_run_whose_mom_run_stopped_mid_fine_tune_reads_recorded_at_once() -> None:
+    stopped = ("error", {"error": "mom run stopped (exit 1): torch.OutOfMemoryError: CUDA out of memory"})
+    events = stream(started("a"), verdict(True), ("finetune_started", {"round": 1}), stopped)
+    assert provenance(events, now=4.0) == "recorded"  # its last event is fresh and its fine-tune pending
+    assert run(VIEW + "feed(events.length); return S.following(v, now);", events) is False
+
+
+def test_a_run_that_stopped_before_its_first_episode_reads_not_started() -> None:
+    stopped = ("error", {"error": "not started: mom run stopped: ModuleNotFoundError: No module named 'mujoco'"})
+    events = stream(("instruction", {"text": "Put the box in the bin", "source": "teach"}), stopped)
+    out = run(VIEW + "feed(events.length); return [S.shown(v).refused, S.following(v, now)];", events)
+    assert out == ["mom run stopped: ModuleNotFoundError: No module named 'mujoco'", False]
+
+
 def test_a_run_stops_being_live_20_s_after_its_last_event() -> None:
     events = stream(started("a"))  # last event at t=0
     assert provenance(events, now=19.9) == "live"
