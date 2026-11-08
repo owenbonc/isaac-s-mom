@@ -10,6 +10,7 @@ target_fingerprint: "sha256:91125959b9ce6b0dc69abed656f1094e8a70c22debdefde04cbc
 target_path: /Users/owenyan/isaac-s-mom/.claude/worktrees/agent-a4b1bd315ceff52fa/isaacs_mom/orchestrator/dashboard/static/index.html
 timestamp: 2026-11-07T23-19-46Z
 slug: orchestrator-dashboard-static-index-html-f01a3df2
+closed: true
 ---
 Method: dual-agent (A: Opus design review · B: Sonnet detector + overlay), plus an Opus audit with break-ui and review-animations, live replays, and a heartbeat stall test. Target: the live dashboard on `fixtures/shot-mujoco` (real MuJoCo head-camera frames, fixed_feet task) at cff8641 (fix round 4 + phase-1 #10). First round on real frames.
 
