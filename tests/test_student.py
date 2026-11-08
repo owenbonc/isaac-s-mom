@@ -103,11 +103,12 @@ def test_prompt_gives_each_param_its_limit_and_describes_the_humanoid_task() -> 
     assert not {"arm", "block", "zone", "push"} & set(text.lower().replace(".", " ").replace(",", " ").split())
 
 
-def test_the_smoke_reports_a_process_peak_in_gigabytes_and_no_device_memory_on_cpu() -> None:
+def test_the_smoke_reports_a_process_peak_in_gib_and_no_device_memory_on_cpu() -> None:
     from isaacs_mom.student import smoke
 
-    assert smoke.device_memory_gb("cpu") is None
-    peak = smoke.process_peak_gb()
+    assert smoke.device_memory_gib("cpu") is None
+    assert smoke.gib(1.5) == "1.50 GiB"
+    peak = smoke.process_peak_gib()
     if sys.platform == "win32":
         assert peak is None
     else:
