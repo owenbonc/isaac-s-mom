@@ -21,7 +21,7 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 | **39.7 min** | **0/20 → 18/20** | **10/20 → 18/20** (untargeted demos: also 18/20) | **19/20 vs 0/20** | **0** |
 |:---:|:---:|:---:|:---:|:---:|
-| to teach the robot **one new skill** from a one sentence description | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic teaching round (diagnosis)** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image (no camera)** on a mac, a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
+| to teach the robot **one new skill** from a one sentence description | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic, targeted teaching round ** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image (no camera)** on a mac, a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
 
 [Technical summary (PDF)](docs/technical-summary.pdf) · [Pitch deck (PDF)](docs/deck/deck.pdf) · [How it works](#how-it-works) · [Repair loop](#the-repair-loop-test-diagnose-re-teach-until-its-good-enough) · [Results](#results) · [Impact](#impact) · [Videos](#videos) · [Live demo](#live-demo) · [Quickstart](#quickstart)
 
