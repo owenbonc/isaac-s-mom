@@ -56,14 +56,14 @@ def test_a_refused_take_checks_no_teacher_and_writes_nothing(
     seed: int, run_id: str, refusal: type[Exception], tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    EventLog(tmp_path / "runs" / "loop", "loop").emit("episode_started", seed=DEV_SEED_START)
-    written = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*"))
+    loop = EventLog(tmp_path / "runs" / "loop", "loop")
+    loop.emit("episode_started", seed=DEV_SEED_START)
+    written = sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")), loop.path.read_text()
     monkeypatch.setattr(cli, "Argon", UncheckedArgon)
     monkeypatch.setattr(sys, "argv", [*TAKE, "--teacher", "argon", "--seed", str(seed), "--run-id", run_id])
     with pytest.raises(refusal):
         cli.main()
-    assert sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")) == written
-    assert (tmp_path / "runs" / "loop" / "events.jsonl").read_text().count("\n") == 1
+    assert (sorted(p.relative_to(tmp_path) for p in tmp_path.rglob("*")), loop.path.read_text()) == written
 
 
 def test_an_unseen_take_records_into_a_run_directory_of_its_own(

@@ -288,8 +288,8 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
-  // The held-out claim (SPEC §3.5): the first and the latest evaluation, each scored out of the episodes that didn't
-  // error with the errored ones apart, named in words, with the checkpoint ids as a note. Null before the first evaluation.
+  // The held-out claim (SPEC §3.5): the first and the latest evaluation, each scored out of its n − errored with the
+  // errored apart, named in words, with the checkpoint ids as a note. Null before the first evaluation.
   function claim(s) {
     if (!s.rounds.length) return null;
     const first = s.rounds[0];
