@@ -178,9 +178,12 @@ def create_app(
             raise HTTPException(status_code=400, detail='send JSON: {"instruction": "<text>"}') from None
         except ValueError as error:
             raise HTTPException(status_code=400, detail=str(error)) from None
-        run_id, reasons = await run_in_threadpool(
-            teach, runs_dir, instruction, task=task, generate=generate, launch=launch
-        )
+        try:
+            run_id, reasons = await run_in_threadpool(
+                teach, runs_dir, instruction, task=task, generate=generate, launch=launch
+            )
+        except OSError as error:  # no run to list it as not started, so the page shows why instead
+            raise HTTPException(status_code=500, detail=f"A new run couldn't be written: {error}") from None
         if reasons:
             return JSONResponse({"run_id": run_id, "started": False, "reasons": reasons})
         return JSONResponse({"run_id": run_id, "started": True}, status_code=201)

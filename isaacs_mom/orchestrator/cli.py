@@ -26,7 +26,7 @@ from isaacs_mom.student import (
     stub_finetune,
     valid_run_id,
 )
-from isaacs_mom.teacher.argon import Argon, stub_generate
+from isaacs_mom.teacher.argon import Argon, hide_key, stub_generate
 
 
 def run_id(text: str) -> str:
@@ -40,9 +40,12 @@ def run_id(text: str) -> str:
 
 def instruction(text: str) -> str:
     try:
-        return instruction_text(text)
+        text = instruction_text(text)
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from None
+    if hide_key(text) != text:  # a run writes its instruction to events and manifests, and sends it to Argon
+        raise argparse.ArgumentTypeError("the instruction holds GEMINI_API_KEY, so it is refused: never stored or sent")
+    return text
 
 
 def share(text: str) -> float:
