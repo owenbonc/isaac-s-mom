@@ -155,7 +155,12 @@ function renderControl() {
     return "";
   }
   const [kind, where] = kindOf(ep);
-  const head = `<span class="kind"><span class="what">${kind}</span><span class="note">${where}</span></span>`;
+  // A seed's episode names its checkpoint and leads with the key back to the seed.
+  const row = place === "episode" && MomState.results(MomState.shown(view)).seeds.find((x) => x.seed === view.seed);
+  const k = row ? row.episodes.findIndex((x) => x.id === ep.id) : -1;
+  const at = k < 0 ? "" : `, ${esc(MomState.results(MomState.shown(view)).checkpoints[k].name)}`;
+  const back = place === "episode" ? `<button type="button" class="back" data-back aria-label="Back to seed ${esc(view.seed)}" data-tip="Back to seed ${esc(view.seed)} · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
+  const head = `${back}<span class="kind"><span class="what">${kind}</span><span class="note">${where}${at}</span></span>`;
   if (!ep.controller) {
     el.className = "control";
     el.innerHTML = `${head}<span class="note">Waiting for the first decision.</span>`;
@@ -452,10 +457,57 @@ function resultsList() {
   return `${head}<div class="filters" role="group" aria-label="Show only the seeds marked">${filters.join("")}</div>${rows.length ? `<ol class="seeds" aria-label="Held-out seeds">${rows.join("")}</ol>` : none}`;
 }
 
+// A seed's switch (SPEC §3.5): the first checkpoint, every one side by side, or the latest. Both is the default
+// where each frame keeps at least FRAME_MIN px; a choice holds from seed to seed.
+const SIDES = { before: ["Before", "The first checkpoint's episode"], both: ["Both", "Every checkpoint's episode, side by side"], after: ["After", "The latest checkpoint's episode"] };
+const FRAME_MIN = 360;
+let side = null;
+const sideFor = (count) => side || (innerWidth / count >= FRAME_MIN ? "both" : "after");
+// Why a checkpoint shows no episode for the seed, or how its verdict reads.
+function cardVerdict(e, ep) {
+  if (e.outcome === "pending") return `<span class="note">${ep ? "Running" : "Not run yet"}</span>`;
+  if (e.outcome === "errored") {
+    const why = !ep ? "It stopped before its episode started." : ep.verdict ? cap(ep.verdict.reason) : "No verdict before its evaluation ended.";
+    return `<span class="verdict warn">${markIcon("error")}Errored</span><span class="note clamped two" title="${esc(why)}">${esc(why)}</span>`;
+  }
+  return `${verdictChip(ep)}<span class="note clamped two" title="${esc(cap(ep.verdict.reason))}">${esc(cap(ep.verdict.reason))}</span>`;
+}
+// One checkpoint's episode for the seed: its last frame, with its controller, and its verdict; it opens the episode.
+function seedCard(c, e, ep) {
+  const head = `<span class="card-head"><span class="what">${esc(cap(c.name))}</span>${c.checkpoint ? `<span class="mono note">${esc(c.checkpoint)}</span>` : ""}</span>`;
+  const f = ep && ep.frames[ep.frames.length - 1];
+  const shot = f
+    ? `<span class="shot"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="The episode's last head-camera frame${f.step === null ? "" : `, step ${esc(f.step)}`}">` : ""}${tag(f.controller, f.checkpoint)}</span>`
+    : `<span class="shot slate"><span class="note">${ep ? "No frame yet." : e.outcome === "pending" ? "Not run yet." : "No episode."}</span></span>`;
+  const body = `${head}<span class="cell">${shot}</span><span class="card-verdict">${cardVerdict(e, ep)}</span>`;
+  return ep ? `<button type="button" class="card" data-open="${esc(ep.id)}" data-f="card:${esc(ep.id)}">${body}</button>` : `<div class="card">${body}</div>`;
+}
+// One seed (SPEC §3.5): its mark beside its number, the switch opposite, and its held-out episodes, one per checkpoint.
+function seedDetail() {
+  const s = MomState.shown(view);
+  const r = MomState.results(s);
+  const row = r.seeds.find((x) => x.seed === view.seed);
+  const back = `<button type="button" class="back" data-back data-f="back" aria-label="Back to the seeds" data-tip="Back to the seeds · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>`;
+  const title = `<h2>Seed ${esc(view.seed)}${row ? `${markIcon(row.mark)}<span class="sr">, ${MARK[row.mark].toLowerCase()}</span>` : ""}</h2>`;
+  if (!row) return `<header class="seed-head">${back}${title}</header><p class="empty note">This run's events hold no held-out episode on seed ${esc(view.seed)}.</p>`;
+  const count = r.checkpoints.length;
+  const shown = sideFor(count);
+  const switcher =
+    count < 2
+      ? ""
+      : `<div class="switch" role="group" aria-label="Checkpoints shown">${Object.entries(SIDES)
+          .map(([k, [name, tip]]) => `<button type="button" data-side="${k}" data-f="side:${k}" aria-pressed="${k === shown}" aria-label="${name}" data-tip="${name}: ${tip.toLowerCase()}"><svg class="i" aria-hidden="true"><use href="#i-${k}"/></svg></button>`)
+          .join("")}</div>`;
+  const picks = shown === "before" ? [0] : shown === "after" ? [count - 1] : r.checkpoints.map((_, k) => k);
+  const cards = picks.map((k) => seedCard(r.checkpoints[k], row.episodes[k], row.episodes[k].id === null ? null : s.episodes.find((x) => x.id === row.episodes[k].id)));
+  return `<header class="seed-head">${back}${title}<span class="note">${outcomes(row)}</span>${switcher}</header><div class="cards" style="--n:${picks.length}">${cards.join("")}</div>`;
+}
+
 function renderResults() {
   const place = MomState.where(view);
   $("main").dataset.view = place;
   if (place === "list") $("results").innerHTML = resultsList();
+  if (place === "seed") $("results").innerHTML = seedDetail();
 }
 
 // The tabs: Results, Teaching, and Now while the run is live or Now is shown.
@@ -592,18 +644,26 @@ function render() {
   for (const a of document.getAnimations()) if (a.animationName === "pulse") a.startTime = 0;
 }
 
-// A key that moved Results' focus, or a move to another place, takes the keyboard there: the focused seed in the list.
+// A key that moved Results' focus, or a move to another place, takes the keyboard there: the focused seed in the list,
+// or in a seed the card of the episode just left, else its latest.
 let renderedPlace = null;
 let seedMoved = false;
+let leftEpisode = null;
 function placeFocus() {
   const place = MomState.where(view);
   const moved = seedMoved || (renderedPlace !== null && place !== renderedPlace);
   renderedPlace = place;
   seedMoved = false;
-  if (!moved || place !== "list") return;
-  const rows = $("results").querySelector(".seeds");
-  const row = rows && (rows.querySelector(`[data-seed="${CSS.escape(String(view.focus))}"]`) || rows.querySelector(".seed"));
-  if (row) row.focus();
+  if (view.opened !== null) leftEpisode = view.opened;
+  if (!moved) return;
+  const at = (selector) => $("results").querySelector(selector);
+  const to =
+    place === "list"
+      ? at(`.seeds [data-seed="${CSS.escape(String(view.focus))}"]`) || at(".seeds .seed")
+      : place === "seed"
+        ? (leftEpisode !== null && at(`.card[data-open="${CSS.escape(leftEpisode)}"]`)) || [...$("results").querySelectorAll(".card")].pop() || at(".back")
+        : null;
+  if (to) to.focus();
 }
 
 // A key that disabled itself, or Move hiding a focused panel, would drop focus to <body>: the nearest enabled
@@ -748,7 +808,7 @@ document.addEventListener("keydown", (e) => {
   const place = MomState.where(view);
   if (!MomState.keydown(view, e, now())) return;
   e.preventDefault(); // also keeps a focused button from taking Space as a click
-  seedMoved = place === "list" && e.key.startsWith("Arrow");
+  seedMoved = (place === "list" || place === "seed") && e.key.startsWith("Arrow");
   schedule();
 });
 // Some browsers click a focused button on Space's keyup; the keydown above already acted.
@@ -760,13 +820,25 @@ $("tabs").addEventListener("click", (e) => {
   schedule();
 });
 $("results").addEventListener("click", (e) => {
-  const only = e.target.closest("button[data-only]");
-  const seed = e.target.closest("button[data-seed]");
-  if (only) MomState.visit(view, { only: view.only === only.dataset.only ? null : only.dataset.only });
-  else if (seed) MomState.visit(view, { seed: Number(seed.dataset.seed), focus: Number(seed.dataset.seed) });
+  const button = e.target.closest("button");
+  if (!button) return;
+  const { only, seed, side: chosen, open } = button.dataset;
+  if (only) MomState.visit(view, { only: view.only === only ? null : only });
+  else if (seed) MomState.visit(view, { seed: Number(seed), focus: Number(seed) });
+  else if (open) MomState.visit(view, { opened: open });
+  else if (chosen) side = chosen;
+  else if ("back" in button.dataset) MomState.keydown(view, { key: "Escape" }, now());
   else return;
   schedule();
 });
+// The control bar's back key leaves an episode for its seed.
+$("control").addEventListener("click", (e) => {
+  if (!e.target.closest("button[data-back]")) return;
+  MomState.keydown(view, { key: "Escape" }, now());
+  schedule();
+});
+// Both or After follows the window's width until a choice is made.
+addEventListener("resize", schedule);
 document.querySelector(".presenter").addEventListener("click", (e) => {
   const button = e.target.closest("button[data-key]");
   if (!button) return;
