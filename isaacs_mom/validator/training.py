@@ -25,6 +25,18 @@ def training_examples(episode_dir: Path, manifest: EpisodeManifest) -> list[Trai
                 )
             )
         feedback = f"{record.skill_call.skill}: {'ok' if record.ok else record.error}"
+    last = manifest.steps[-1] if manifest.steps else None
+    if last is not None and last.controller == "teacher" and last.skill_call.skill == "reobserve":
+        # The teacher stopped after its closing look. The student says "done" by looking a second time (SPEC §3.2),
+        # so that decision is taught too, on the same finished scene, or a trained student never stops.
+        examples.append(
+            TrainingExample(
+                image=str(episode_dir / last.frame),
+                instruction=manifest.instruction,
+                feedback=feedback,
+                target=SkillTarget(skill="reobserve", params={}),
+            )
+        )
     return examples
 
 

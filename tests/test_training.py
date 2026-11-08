@@ -148,3 +148,23 @@ def test_a_students_recording_error_is_not_counted_as_a_demonstration(tmp_path: 
     assert (summary.demonstrations, summary.rejected) == (0, 0)
     assert summary.rejected_by == {}
     assert summary.empty_dev_episodes == 1
+
+
+def test_a_demo_ending_with_its_closing_look_also_teaches_the_stop(tmp_path: Path) -> None:
+    demo = manifest(controllers=("teacher", "teacher"))
+    demo.steps[-1].skill_call = SkillCall(skill="reobserve")
+    examples = training_examples(tmp_path, demo)
+    assert [(e.feedback, e.target.skill) for e in examples] == [
+        ("start", "reach_left"),
+        ("reach_left: ok", "reobserve"),  # the closing look
+        ("reobserve: ok", "reobserve"),  # and the second look that ends the student's episode
+    ]
+    assert examples[-1].image == examples[-2].image  # the same finished scene
+
+
+def test_no_stop_is_taught_when_the_demo_did_not_end_with_a_look(tmp_path: Path) -> None:
+    cut_short = manifest(controllers=("teacher", "teacher"))  # e.g. it hit the step limit mid-task
+    assert [e.target.skill for e in training_examples(tmp_path, cut_short)] == ["reach_left", "reach_left"]
+    student_looked = manifest(controllers=("student", "teacher", "student"))
+    student_looked.steps[-1].skill_call = SkillCall(skill="reobserve")
+    assert [e.target.skill for e in training_examples(tmp_path, student_looked)] == ["reach_left"]
