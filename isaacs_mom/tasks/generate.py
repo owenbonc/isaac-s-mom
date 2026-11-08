@@ -62,7 +62,7 @@ Answer with exactly one JSON object of this shape (an example, not the answer):
                         {{"fact": "at_rest", "object": "box"}}, {{"fact": "robot_standing"}}]}},
  "perturbations": [{{"object": "bin"}}]}}
 
-- name and ids: lowercase letters, digits and underscores, starting with a letter.
+- name and ids: up to 24 lowercase letters, digits and underscores, starting with a letter.
 - box: half_m is half its depth, width and height, within {BOX_HALF_DEPTH_RANGE}, {BOX_HALF_WIDTH_RANGE} and
   {BOX_HALF_HEIGHT_RANGE} m; mass_kg up to {MAX_BOX_MASS_KG}; offset_m, how far off the table's centre line it may
   start, up to {MAX_START_OFFSET_M}.

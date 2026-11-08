@@ -263,6 +263,7 @@ def test_the_prompt_states_the_limits_the_checks_enforce() -> None:
         "up to 1.0.",
         "within 0.4 to\n  0.5 m",
         "within 85 to 112",
+        "up to 24 lowercase letters",
     ]
     for limit in limits:
         assert limit in PROMPT, limit
