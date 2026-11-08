@@ -164,6 +164,18 @@
 
   const isReal = (sim) => sim !== null && !sim.version.startsWith("fake");
 
+  // The run's simulator in words for the header, and its full version and task (a MuJoCo version's `task=` part) for
+  // the legend's run line. A run with any FakeSim or unnamed episode is named by that. Null before any episode.
+  function simulator(s) {
+    const sims = s.episodes.map((e) => e.sim);
+    if (!sims.length) return null;
+    if (sims.includes(null)) return { name: "simulator not stated", version: null, task: null };
+    const sim = sims.find((x) => !isReal(x)) || sims[sims.length - 1];
+    const task = /(?:^|\s)task=(\S+)/.exec(sim.version);
+    const name = !isReal(sim) ? "FakeSim" : sim.version.startsWith("mujoco") ? "MuJoCo" : sim.version;
+    return { name, version: sim.version, task: task ? task[1] : null };
+  }
+
   // SPEC §3.5: live while events arrive, or while a fine-tune started under 30 minutes ago has not completed.
   const running = (s, now) =>
     now - s.lastT < FRESH_SECONDS || (s.finetune.pending !== null && now - s.finetune.pending.t < FINETUNE_SECONDS);
@@ -380,7 +392,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, claim, testing, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

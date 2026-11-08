@@ -44,12 +44,6 @@ const panelChip = (ep = null) => {
   const kind = MomState.provenance(view, now(), ep);
   return `<span class="chip quiet ${kind}">${label(kind)}</span>`;
 };
-const simName = (s) => {
-  const sims = s.episodes.map((e) => e.sim);
-  if (sims.some((sim) => sim === null)) return "simulator not stated";
-  if (sims.some((sim) => sim.version.startsWith("fake"))) return "FakeSim";
-  return esc(sims[sims.length - 1].version);
-};
 const WHO = { student: "Student", teacher: "Teacher (Argon)" };
 const tag = (controller, checkpoint) => {
   const who = WHO[controller] || "Unknown controller";
@@ -86,11 +80,15 @@ const stat = (s) => (s ? `${duration(s.median)} <span class="note">n=${s.n}</spa
 function renderHeader() {
   const s = MomState.shown(view);
   const kind = MomState.provenance(view, now());
-  const status = s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)} · ${simName(s)}`);
+  const sim = MomState.simulator(s);
+  // The simulator in words keeps the header on one line; its version and task are in the legend's run line.
+  const status = s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)}${sim ? ` · ${esc(sim.name)}` : ""}`);
   $("status").innerHTML = status;
   const robot = s.episodes.length && s.episodes[s.episodes.length - 1].sim;
+  const task = sim && sim.task ? `, the ${sim.task === "fixed_feet" ? "fixed-feet" : "walking"} task (<span class="mono">${esc(sim.task)}</span>)` : "";
+  const on = sim && sim.version ? ` on <span class="mono">${esc(sim.version)}</span>${task}` : "";
   $("run-meta").innerHTML = s.eventCount
-    ? `Run <b class="mono">${esc(s.runId)}</b>${robot ? `, robot <span class="mono">${esc(robot.robot)}</span>` : ""}: ${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}, ${s.eventCount} events.`
+    ? `Run <b class="mono">${esc(s.runId)}</b>${on}${robot ? `, robot <span class="mono">${esc(robot.robot)}</span>` : ""}: ${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}, ${s.eventCount} events.`
     : "";
 }
 
@@ -162,18 +160,16 @@ function renderCamera() {
   // While the student fine-tunes no robot moves, so the stage shows the wait instead of the last episode's frame.
   const tuning = MomState.finetuning(view, now());
   if (tuning !== null) {
-    $("chip-camera").innerHTML = panelChip();
     // A lost stream can't tell whether the fine-tune still runs, so the stage says only what is known.
     const what = view.lost ? "Connection lost, retrying" : "Fine-tuning the student";
-    $("stage").innerHTML = `<div class="tuning"><p class="what">${what}</p><p class="fig">${elapsed(tuning)}</p><p class="note">since the fine-tune started</p></div>`;
+    $("stage").innerHTML = `<div class="tuning"><p class="what">${what}</p><p class="fig">${elapsed(tuning)}</p><p class="note">since the fine-tune started</p></div>${foot("", panelChip())}`;
     $("strip").innerHTML = "";
     return;
   }
   const ep = MomState.episode(view, now());
   const frames = MomState.filmstrip(ep, MomState.stageStep(view));
-  $("chip-camera").innerHTML = panelChip(ep);
   if (!frames.length) {
-    $("stage").innerHTML = `<div class="empty">${ep && finished(ep) ? "This episode recorded no head-camera frame." : "No head-camera frame yet. The latest frame appears here after each executed skill."}</div>`;
+    $("stage").innerHTML = `<div class="empty">${ep && finished(ep) ? "This episode recorded no head-camera frame." : "No head-camera frame yet. The latest frame appears here after each executed skill."}</div>${foot("", panelChip(ep))}`;
     $("strip").innerHTML = "";
     return;
   }
@@ -193,12 +189,12 @@ function renderCamera() {
   } else {
     // The move stays marked for the rest of its episode, so P still finds it after the moment has passed.
     const mark = last.after ? `<span class="tag ink">${what} at step ${esc(move.step)} · <kbd>P</kbd></span>` : "";
-    frame = cell(last, tag(last.controller, last.checkpoint) + mark, skillRow(ep, last), last.moved);
+    frame = cell(last, tag(last.controller, last.checkpoint), skillRow(ep, last), last.moved, mark);
     caption = last.moved
       ? `<p class="caption moved">${what} before step ${esc(move.step)}. This is the first frame after it.</p>`
       : `<p class="caption">${last.step === null ? "Head-camera frame." : `What the ${last.controller || "robot"} saw at step ${esc(last.step)}, before choosing.`}</p>`;
   }
-  $("stage").innerHTML = `<div class="frame">${frame}</div>${caption}`;
+  $("stage").innerHTML = `<div class="frame">${frame}</div>${foot(caption, panelChip(ep))}`;
   $("strip").innerHTML = frames
     .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (the scene moved before this frame)</span>' : ""}</span></li>`)
     .join("");
@@ -215,14 +211,19 @@ function renderCamera() {
   flashedFrame = last.moved ? key : flashedFrame;
 }
 
+// The stage's caption line, which also carries the camera panel's provenance label.
+const foot = (caption, provenance) => `<div class="foot">${caption}${provenance}</div>`;
+
 // The decision that chose a skill from frame `f`, or null.
 const skillRow = (ep, f) => (f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill)) || null;
 
-// One frame on the stage with its label and the skill `row` chose from it; a missing frame keeps its place, hatched.
-function cell(f, label, row, moved) {
+// One frame on the stage with its label, the skill `row` chose from it and any mark after them; a missing frame keeps
+// its place, hatched.
+function cell(f, label, row, moved, mark = "") {
   const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : ` at step ${esc(f.step)}`}">` : "";
+  // The skill joins the labels in the frame's top band, which shows floor; the hands, box and bin are in the bottom.
   const said = row ? `<span class="said ${row.controller || "unknown"}">${skillText(row)}</span>` : "";
-  return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}<div class="over">${label}</div>${said}</div></div>`;
+  return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}<div class="over">${label}${said}${mark}</div></div></div>`;
 }
 
 // Event rows carry a glyph where decisions carry their step, so the two never read as the same kind of row.

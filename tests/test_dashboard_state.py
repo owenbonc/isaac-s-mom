@@ -983,3 +983,18 @@ def test_an_episode_is_finished_once_judged_moved_past_or_its_run_has_stopped() 
         stream(started("a"), decision(0), started("b"), decision(0), verdict(False), started("c"), decision(0)),
     )
     assert out == [[True, True, False], True]
+
+
+def test_the_simulator_is_named_in_words_with_its_full_version_and_task_kept_for_the_legend() -> None:
+    script = "const s = S.initial(); for (const e of events) S.reduce(s, e); return S.simulator(s);"
+    walking = run(script, stream(started("a", "mujoco-4.0.0 task=across_room")))
+    assert walking == {"name": "MuJoCo", "version": "mujoco-4.0.0 task=across_room", "task": "across_room"}
+    assert run(script, stream(started("a", "mujoco-3.3.7")))["name"] == "MuJoCo"
+    assert run(script, stream(started("a", "fake-3"), started("b"))) == {
+        "name": "FakeSim",
+        "version": "fake-3",
+        "task": None,
+    }
+    assert run(script, stream(started("a", None)))["name"] == "simulator not stated"
+    assert run(script, stream(started("a", "isaac-1.2")))["name"] == "isaac-1.2"
+    assert run(script, []) is None
