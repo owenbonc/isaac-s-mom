@@ -71,7 +71,9 @@ BIN_KEEP_OUT_M = 0.42  # and this far from the bin's centre, so the toes stay cl
 SETTLE_STEP_S = 0.5
 MAX_SETTLE_S = 6.0  # a box that lands leaning on a wall can take several seconds to tip flat
 FALLEN_Z = 0.6
-PENETRATION_TOL_M = 0.03  # a box landing on a corner dips up to ~2 cm into the bin floor for a step
+# Read after each control tick, when an insertion has relaxed to ~75% of its depth. Normal contact reached 1.9 cm
+# deep over 160 episodes (2.1 cm on seed 23's corner landing); this flags a box pushed in ~3.4 cm or more.
+PENETRATION_TOL_M = 0.025
 AT_REST_SPEED_M_S = 0.02
 AT_REST_SPIN_RAD_S = 0.2
 AT_REST_WINDOW_S = 1.0
@@ -482,10 +484,12 @@ class MujocoSim:
         return False
 
     def _box_loose_on_table(self) -> bool:
-        """Resting on the table top and not held. Hands closed on it hold it; a missed hug or an open hand against
-        it doesn't, as in FakeSim, where `held` means a hug that caught the box."""
         touching = self._touching(self.data, {self._box_geom})
-        return self._table_top in touching and not (self.closed and touching & self._hand_pads)
+        return self._table_top in touching and not self._box_held(touching)
+
+    def _box_held(self, touching: set[int]) -> bool:
+        """Closed hands on the box hold it; a missed hug or an open hand against it doesn't (FakeSim's `held`)."""
+        return self.closed and bool(touching & self._hand_pads)
 
     def _touching(self, data: mujoco.MjData, geoms: set[int]) -> set[int]:
         """The geoms in contact with any of `geoms`, other than those."""

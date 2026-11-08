@@ -268,6 +268,18 @@ def test_a_save_failure_keeps_the_divergence_it_found(tmp_path: Path, monkeypatc
     )
 
 
+def test_a_refused_mid_run_perturbation_is_reported_before_the_step_is_read(tmp_path: Path) -> None:
+    path = _record(tmp_path, GreedyHugger, seed=1603)
+    assert _accepted(path)
+    manifest = _load(path)
+    lift = next(i for i, s in enumerate(manifest.steps) if s.skill_call.skill == "lift")
+    manifest.perturbations = [PerturbationRecord(before_step=lift, perturbation=Perturbation(kind="move_box", seed=1))]
+    path.write_text(manifest.model_dump_json())
+    (path.parent / manifest.steps[lift].actions).unlink()  # a missing file mustn't hide the real reason
+    report = replay_accepted(FakeSim(), tmp_path)
+    assert [f.reason for f in report.failures] == [f"step {lift}: a recorded perturbation no longer applies"]
+
+
 def test_replay_rejects_a_mid_run_perturbation_that_no_longer_applies(tmp_path: Path) -> None:
     path = _record(tmp_path, GreedyHugger, seed=1603)
     manifest = _load(path)
