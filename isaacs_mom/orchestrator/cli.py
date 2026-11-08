@@ -62,6 +62,11 @@ def main() -> None:
     run.add_argument("--dev-trials", type=at_least_one, default=DEV_TRIALS, help="student trials the teacher diagnoses")
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     run.add_argument(
+        "--from-run",
+        type=Path,
+        help="start from an earlier run in the same runs dir: its development episodes and its last checkpoint",
+    )
+    run.add_argument(
         "--move-bin-share",
         type=share,
         default=MOVE_BIN_SHARE,
@@ -92,6 +97,8 @@ def main() -> None:
             "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)"
         )
     args = parser.parse_args()
+    if getattr(args, "from_run", None) is not None and not (args.from_run / "checkpoints").is_dir():
+        run.error(f"--from-run {args.from_run} has no checkpoints/ to start from")
     if args.command == "eval":
         evaluation.run_from_args(evaluate, args)
         return
@@ -148,7 +155,10 @@ def main() -> None:
         make_student=make_student,
         train_student=train_student,
         move_bin_share=args.move_bin_share,
+        from_run=args.from_run,
     )
+    if args.from_run is not None:
+        print(f"started from {(run_dir / 'carried_over.json').read_text()}")
     print(bin_moves(run_dir / "events.jsonl"))
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"

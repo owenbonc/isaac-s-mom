@@ -1,6 +1,7 @@
 """The teach -> fine-tune loop (SPEC §3.6)."""
 
 import json
+import shutil
 import time
 from collections.abc import Callable
 from functools import partial
@@ -91,6 +92,26 @@ def bin_moves(events_path: Path) -> str:
     )
 
 
+def carry_over(from_run: Path, run_dir: Path) -> str:
+    """Start where an earlier run beside this one left off: its development episodes join this run, so every round's
+    cumulative training set still holds them, and its last checkpoint is the one round 0 evaluates."""
+    if from_run.resolve().parent != run_dir.resolve().parent:
+        raise ValueError(f"{from_run} must sit beside {run_dir}, where the student finds its checkpoints")
+    names = [p.name.removeprefix("ckpt-r") for p in (from_run / "checkpoints").glob("ckpt-r*")]
+    rounds = sorted(int(n) for n in names if n.isdigit())
+    if not rounds:
+        raise ValueError(f"{from_run} has no checkpoint to start from")
+    carried = 0
+    for path in sorted((from_run / "episodes").glob("*/manifest.json")):
+        if EpisodeManifest.model_validate_json(path.read_text()).split == "dev":  # held-out episodes never train
+            shutil.copytree(path.parent, run_dir / "episodes" / path.parent.name)
+            carried += 1
+    checkpoint = f"{from_run.name}/ckpt-r{rounds[-1]}"
+    record = {"from_run": from_run.name, "checkpoint": checkpoint, "dev_episodes": carried}
+    (run_dir / "carried_over.json").write_text(json.dumps(record, indent=2))
+    return checkpoint
+
+
 def run_loop(
     sim: TruthSim,
     run_dir: Path,
@@ -103,13 +124,14 @@ def run_loop(
     make_student: StudentFactory | None = None,
     train_student: StudentTrainer = finetune,
     move_bin_share: float = MOVE_BIN_SHARE,
+    from_run: Path | None = None,
 ) -> list[EvaluationResult]:
     if not 0 <= move_bin_share <= 1:
         raise ValueError(f"move_bin_share is a share of the demonstrations, not {move_bin_share}")
     # finetune writes checkpoints beside the run dir, so the default student looks there too.
     make_student = make_student or partial(StudentPolicy, runs_dir=run_dir.parent)
     events = EventLog(run_dir, run_id)
-    checkpoint = BASE_CHECKPOINT
+    checkpoint = carry_over(from_run, run_dir) if from_run is not None else BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):
         results.append(evaluate(sim, checkpoint, round_, run_dir, events, make_student))

@@ -656,3 +656,70 @@ def test_the_run_reports_the_bin_moves_that_happened_not_the_share_asked_for(tmp
     expected = "the bin moved right after the lift in 1 of 3 teacher demonstrations (2 scheduled)"
     assert loop.bin_moves(tmp_path / "events.jsonl") == expected
     assert loop.bin_moves(tmp_path / "missing.jsonl").startswith("the bin moved right after the lift in 0 of 0")
+
+
+def _earlier_run(runs: Path) -> Path:
+    """A finished run: one accepted teacher demonstration, one held-out episode and its checkpoint."""
+    prev = runs / "prev"
+    sim, events = FakeSim(), EventLog(prev, "prev")
+    common: dict[str, Any] = {"run_dir": prev, "events": events, "round_": 1, "instruction": "hug"}
+    run_episode(sim, ScriptedPolicy(sim), seed=1500, split="dev", **common)
+    run_episode(sim, GiveUp(), seed=min(heldout_seeds()), split="heldout", **common)
+    (prev / "checkpoints" / "ckpt-r1").mkdir(parents=True)
+    return prev
+
+
+def test_a_run_can_start_where_an_earlier_run_left_off(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs")
+    evaluated: list[str] = []
+    trained: list[tuple[str, int]] = []
+
+    def make_student(checkpoint: str) -> StubStudent:
+        evaluated.append(checkpoint)
+        return StubStudent(checkpoint)
+
+    def train_student(training_set: Path, previous_checkpoint: str, round_: int) -> str:
+        trained.append((previous_checkpoint, len(training_set.read_text().splitlines())))
+        return previous_checkpoint
+
+    run_dir = tmp_path / "runs" / "next"
+    run_loop(
+        FakeSim(),
+        run_dir,
+        "next",
+        max_rounds=1,
+        demos=1,
+        dev_trials=1,
+        argon=silent_argon(run_dir, "next"),
+        make_student=make_student,
+        train_student=train_student,
+        from_run=prev,
+    )
+    assert evaluated[0] == "prev/ckpt-r1"  # round 0 evaluates where the earlier run ended
+    carried = json.loads((run_dir / "carried_over.json").read_text())
+    assert carried == {"from_run": "prev", "checkpoint": "prev/ckpt-r1", "dev_episodes": 1}
+    before = {p.parent.name: EpisodeManifest.model_validate_json(p.read_text()) for p in prev.glob("episodes/*/*.json")}
+    now = {p.name for p in (run_dir / "episodes").iterdir()}
+    assert {i for i, m in before.items() if m.split == "dev"} <= now  # carried over
+    assert not {i for i, m in before.items() if m.split == "heldout"} & now  # the held-out one stays behind (rule 2)
+    demo_steps = len(next(m for m in before.values() if m.seed == 1500).steps)
+    assert trained and trained[0][0] == "prev/ckpt-r1" and trained[0][1] >= demo_steps  # the old demo still trains
+
+
+@pytest.mark.parametrize("where", ["elsewhere", "no checkpoint"])
+def test_a_run_refuses_to_start_from_a_run_it_cannot_continue(where: str, tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs" if where == "no checkpoint" else tmp_path / "other")
+    if where == "no checkpoint":
+        (prev / "checkpoints" / "ckpt-r1").rmdir()
+    run_dir = tmp_path / "runs" / "next"
+    with pytest.raises(ValueError, match="must sit beside|no checkpoint"):
+        run_loop(FakeSim(), run_dir, "next", argon=silent_argon(run_dir, "next"), make_student=StubStudent,
+                 train_student=stub_finetune, from_run=prev)  # fmt: skip
+
+
+def test_the_cli_refuses_a_from_run_with_no_checkpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", "--from-run", "runs/none"])
+    with pytest.raises(SystemExit) as exit_:
+        cli.main()
+    assert exit_.value.code == 2
