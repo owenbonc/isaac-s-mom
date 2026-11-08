@@ -33,7 +33,7 @@ RAW_LOG_CHARS = 500
 ROUND_FRAMES = 8  # decision points across a whole round, at a bounded cost
 ROUND_MODES = 3
 EPISODE_ID = re.compile(r"ep-\d+-[0-9a-f]+")
-EXPLAINS = re.compile(r" Explains: (ep-[^.]+)\.$")
+EXPLAINS = re.compile(r".* Explains: (ep-[^.]+)\.$", re.DOTALL)  # the last one: Argon's own evidence may say it too
 
 SKILL_SCHEMA = json.dumps(SkillCall.model_json_schema())
 

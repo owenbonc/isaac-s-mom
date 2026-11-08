@@ -404,6 +404,7 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
     assert all(r.n == len(heldout_seeds()) for r in results)
     event_types = {json.loads(line)["type"] for line in (tmp_path / "events.jsonl").read_text().splitlines()}
     assert {"evaluation_result", "finetune_completed", "validation"} <= event_types
+    assert "error" not in event_types  # the stub's round diagnosis is usable, so the skeleton run logs no error
 
 
 def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason(tmp_path: Path) -> None:

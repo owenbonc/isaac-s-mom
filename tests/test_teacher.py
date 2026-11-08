@@ -633,6 +633,14 @@ def test_a_round_diagnosis_groups_the_failures_and_names_the_ones_each_mode_expl
     assert "box right of the bin" in prompt and "refused: past the limit" in prompt
 
 
+def test_a_mode_names_the_trials_in_its_explains_even_when_its_own_evidence_says_explains(tmp_path: Path) -> None:
+    mode = {"hypothesis": "h", "evidence": f"as in Explains: {FAILED[0]}", "confidence": 0.5, "lesson": "l",
+            "explains": FAILED[1:]}  # fmt: skip
+    a, _ = argon(tmp_path, json.dumps({"modes": [mode]}))
+    (found,) = diagnose_round(ROUND, a)
+    assert explained_by(found) == FAILED[1:]
+
+
 def test_the_round_diagnosis_sees_frames_calls_and_verdicts_only_at_the_moments_trials_decided(tmp_path: Path) -> None:
     a, fake = argon(tmp_path, modes(FAILED))
     diagnose_round(ROUND, a)
