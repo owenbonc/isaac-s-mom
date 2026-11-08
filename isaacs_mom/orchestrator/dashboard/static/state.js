@@ -21,6 +21,8 @@
       trained: [],
       argon: { used: 0, budget: null, answers: [], failed: 0 },
       errorCount: 0,
+      // Held-out episodes that crashed before a verdict, by seed and the evaluation they belong to (its index).
+      crashes: [],
     };
   }
 
@@ -184,6 +186,7 @@
         const refusal = /^not started:\s*/.exec(said);
         if (refusal && !ep) s.refused = said.slice(refusal[0].length);
         else if (ep) ep.rows.push({ kind: "error", text: said });
+        if (d.split === "heldout" && num(d.seed) !== null) s.crashes.push({ seed: d.seed, evaluation: s.rounds.length });
         break;
       }
       default:
@@ -309,6 +312,62 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
+  // A checkpoint by the evaluation that tested it, in words; no-break spaces keep each name on one line when a pair wraps.
+  const roundName = (round) => (round === 0 ? "before\u00a0fine-tuning" : round === null ? "the\u00a0evaluation\u00a0under\u00a0way" : `after\u00a0round\u00a0${round}`);
+
+  // The Results marks (SPEC §3.5) in their sort order: the changes, the unchanged, then errored and pending.
+  const MARKS = ["down", "up", "fail", "pass", "error", "pending"];
+  const RECORDING_ERROR = "recording error";
+  // A held-out episode's outcome: errored on a recording error, a crash, or no verdict once its evaluation finished.
+  function outcome(cell, done) {
+    if (cell.crashed) return "errored";
+    if (!cell.ep || !cell.ep.verdict) return done ? "errored" : "pending";
+    if (cell.ep.verdict.reason.startsWith(RECORDING_ERROR)) return "errored";
+    return accepted(cell.ep) ? "succeeded" : "failed";
+  }
+  // The first evaluation against the latest; one that errored in either is counted apart.
+  function mark(outcomes) {
+    const first = outcomes[0];
+    const latest = outcomes[outcomes.length - 1];
+    if (first === "errored" || latest === "errored") return "error";
+    if (outcomes.length < 2 || latest === "pending") return "pending";
+    if (first === "succeeded") return latest === "succeeded" ? "pass" : "down";
+    return latest === "succeeded" ? "up" : "fail";
+  }
+  // Results (SPEC §3.5): each evaluation as a checkpoint, the one under way last; each held-out seed's episode and
+  // outcome per checkpoint and its mark, sorted by mark then seed, kept to the marks `only` names; and the count per mark.
+  function results(s, only = null) {
+    // An evaluation's held-out episodes follow the previous evaluation's result, as testing() reads them.
+    const ends = s.rounds.map((r) => r.after);
+    const tail = s.episodes.slice(ends.length ? ends[ends.length - 1] : 0).find((e) => e.split === "heldout");
+    const checkpoints = s.rounds.map((r) => ({ round: r.round, checkpoint: r.checkpoint, name: roundName(r.round), done: true }));
+    if (tail || s.crashes.some((c) => c.evaluation === ends.length)) {
+      const round = tail ? tail.round : null;
+      const test = testing(s);
+      checkpoints.push({ round, checkpoint: test ? test.checkpoint : null, name: roundName(round), done: false });
+    }
+    const rows = new Map();
+    const cell = (seed, k) => {
+      if (!rows.has(seed)) rows.set(seed, checkpoints.map(() => ({ ep: null, crashed: false })));
+      return rows.get(seed)[k];
+    };
+    s.episodes.forEach((ep, i) => {
+      if (ep.split !== "heldout" || ep.seed === null) return;
+      const k = ends.findIndex((end) => i < end);
+      const at = cell(ep.seed, k < 0 ? ends.length : k);
+      at.ep ??= ep; // a seed's first try in an evaluation is its episode there
+    });
+    for (const c of s.crashes) cell(c.seed, c.evaluation).crashed = true;
+    const seeds = [...rows]
+      .map(([seed, cells]) => {
+        const episodes = cells.map((c, k) => ({ id: c.ep ? c.ep.id : null, outcome: outcome(c, checkpoints[k].done) }));
+        return { seed, mark: mark(episodes.map((e) => e.outcome)), episodes };
+      })
+      .sort((a, b) => MARKS.indexOf(a.mark) - MARKS.indexOf(b.mark) || a.seed - b.seed);
+    const counts = Object.fromEntries(MARKS.map((m) => [m, seeds.filter((r) => r.mark === m).length]));
+    return { checkpoints, seeds: only === null ? seeds : seeds.filter((r) => r.mark === only), counts };
+  }
+
   // The held-out claim (SPEC §3.5): the change in percentage points between the first and the latest evaluation, and
   // each one's rate and successes out of the episodes that didn't error, with its n and errored count, named in words,
   // with the checkpoint ids as a note. Null before the first evaluation.
@@ -317,8 +376,7 @@
     const first = s.rounds[0];
     const last = s.rounds[s.rounds.length - 1];
     const pair = first === last ? [first] : [first, last];
-    // No-break spaces keep each name on one line when the pair wraps.
-    const name = (r) => (r.round === 0 ? "before\u00a0fine-tuning" : `after\u00a0round\u00a0${r.round}`);
+    const name = (r) => roundName(r.round);
     const scored = (r) => r.n - r.errored;
     // Whole percentages of the scored episodes; the change is taken between the rates as shown, so the figures agree.
     const rate = (r) => (scored(r) > 0 ? Math.round((100 * r.successes) / scored(r)) : null);
@@ -519,7 +577,7 @@
     return { state: "failed", message };
   }
 
-  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

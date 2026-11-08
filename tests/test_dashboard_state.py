@@ -1105,6 +1105,170 @@ def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_eva
     assert run(CLAIM, done)[1] is None
 
 
+VERDICTS = {
+    "succeeded": (True, "box at rest inside bin"),
+    "failed": (False, "box past the bin"),
+    "errored": (False, "recording error: joint limit"),
+}
+
+
+def held_out(round_: int, seed: object, outcome: str | None) -> list[tuple[str, dict]]:
+    """`round_`'s held-out episode on `seed`: succeeded, failed, a recording error, or (None) still running."""
+    start = ("episode_started", {**started(f"h{round_}-{seed}")[1], "seed": seed, "split": "heldout", "round": round_})
+    test = ("decision", {**decision(0)[1], "checkpoint": f"ckpt-r{round_}"})
+    if outcome is None:
+        return [start, test]
+    task, reason = VERDICTS[outcome]
+    return [start, test, ("validation", {"task_success": task, "physics_valid": True, "reason": reason})]
+
+
+def evaluated(round_: int, *outcomes: tuple[object, str | None]) -> list[tuple[str, dict]]:
+    """`round_`'s whole evaluation: each (seed, outcome)'s episode, then its result."""
+    episodes = [e for seed, outcome in outcomes for e in held_out(round_, seed, outcome)]
+    good = sum(outcome == "succeeded" for _, outcome in outcomes)
+    bad = sum(outcome in {"errored", None} for _, outcome in outcomes)
+    return [*episodes, evaluation(f"ckpt-r{round_}", round_, good, len(outcomes), errored=bad)]
+
+
+RESULTS = """
+const s = S.initial();
+for (const e of events) S.reduce(s, e);
+const r = S.results(s, ONLY);
+return {
+  checkpoints: r.checkpoints,
+  rows: r.seeds.map((x) => [x.seed, x.mark, x.episodes.map((e) => e.outcome)]),
+  ids: r.seeds.map((x) => x.episodes.map((e) => e.id)),
+  counts: r.counts,
+};
+"""
+
+
+def results(*events: tuple[str, dict], only: str | None = None) -> dict:
+    return run(RESULTS.replace("ONLY", json.dumps(only)), stream(*events))
+
+
+def test_each_seed_is_marked_by_how_its_held_out_episode_changed_from_the_first_to_the_latest_evaluation() -> None:
+    first = evaluated(0, (1, "failed"), (2, "succeeded"), (3, "succeeded"), (4, "failed"))
+    latest = evaluated(1, (1, "succeeded"), (2, "failed"), (3, "succeeded"), (4, "failed"))
+    out = results(*first, started("trial"), *latest)
+    # regressed and improved sort first, then still fails and always passed
+    assert out["rows"] == [
+        [2, "down", ["succeeded", "failed"]],
+        [1, "up", ["failed", "succeeded"]],
+        [4, "fail", ["failed", "failed"]],
+        [3, "pass", ["succeeded", "succeeded"]],
+    ]
+    assert out["ids"][0] == ["h0-2", "h1-2"]
+    assert out["checkpoints"] == [
+        {"round": 0, "checkpoint": "ckpt-r0", "name": "before fine-tuning", "done": True},
+        {"round": 1, "checkpoint": "ckpt-r1", "name": "after round 1", "done": True},
+    ]
+    assert out["counts"] == {"down": 1, "up": 1, "fail": 1, "pass": 1, "error": 0, "pending": 0}
+
+
+def test_a_seed_that_errored_in_the_first_or_the_latest_evaluation_is_marked_errored() -> None:
+    crash = ("error", {"seed": 4, "split": "heldout", "round": 0, "error": "RuntimeError: reset failed"})
+    first = [*held_out(0, 1, "errored"), *held_out(0, 2, "failed"), *held_out(0, 3, None), crash]
+    out = results(
+        *first,
+        evaluation("ckpt-r0", 0, 0, 4, errored=3),
+        *evaluated(1, (1, "succeeded"), (2, "errored"), (3, "succeeded"), (4, "succeeded")),
+    )
+    # a recording error, an episode with no verdict once its evaluation finished, and a crash before the episode started
+    assert out["rows"] == [
+        [1, "error", ["errored", "succeeded"]],
+        [2, "error", ["failed", "errored"]],
+        [3, "error", ["errored", "succeeded"]],
+        [4, "error", ["errored", "succeeded"]],
+    ]
+    assert out["ids"][3] == [None, "h1-4"]
+
+
+def test_with_one_evaluation_every_seed_is_pending_and_mid_evaluation_so_is_every_seed_not_yet_judged() -> None:
+    first = evaluated(0, (1, "failed"), (2, "succeeded"), (3, "errored"))
+    one = results(*first)
+    assert one["rows"] == [[3, "error", ["errored"]], [1, "pending", ["failed"]], [2, "pending", ["succeeded"]]]
+    mid = results(*first, started("trial"), *held_out(1, 1, "succeeded"), *held_out(1, 2, None))
+    assert mid["rows"] == [
+        [1, "up", ["failed", "succeeded"]],
+        [3, "error", ["errored", "pending"]],
+        [2, "pending", ["succeeded", "pending"]],
+    ]
+    assert mid["checkpoints"][1] == {"round": 1, "checkpoint": "ckpt-r1", "name": "after round 1", "done": False}
+    running = results(*held_out(0, 1, "failed"), *held_out(0, 2, None))
+    assert running["rows"] == [[1, "pending", ["failed"]], [2, "pending", ["pending"]]]
+
+
+def test_with_three_checkpoints_the_mark_compares_the_first_and_the_latest_and_lists_every_one() -> None:
+    out = results(
+        *evaluated(0, (1, "failed"), (2, "succeeded")),
+        *evaluated(1, (1, "succeeded"), (2, "failed")),
+        *evaluated(2, (1, "failed"), (2, "succeeded")),
+    )
+    assert out["rows"] == [
+        [1, "fail", ["failed", "succeeded", "failed"]],
+        [2, "pass", ["succeeded", "failed", "succeeded"]],
+    ]
+    assert [c["name"] for c in out["checkpoints"]] == [
+        "before fine-tuning",
+        "after round 1",
+        "after round 2",
+    ]
+
+
+def test_seeds_sort_by_mark_then_number_the_counts_sum_to_the_seeds_and_a_filter_keeps_one_mark() -> None:
+    first = evaluated(0, *[(seed, "failed") for seed in (9, 3, 5)], (7, "succeeded"), (8, "errored"), (2, "failed"))
+    latest = [
+        *held_out(1, 9, "succeeded"),
+        *held_out(1, 3, "succeeded"),
+        *held_out(1, 5, "failed"),
+        *held_out(1, 7, "failed"),
+    ]
+    out = results(*first, *latest)
+    assert [row[:2] for row in out["rows"]] == [
+        [7, "down"],
+        [3, "up"],
+        [9, "up"],
+        [5, "fail"],
+        [8, "error"],
+        [2, "pending"],
+    ]
+    assert out["counts"] == {"down": 1, "up": 2, "fail": 1, "pass": 0, "error": 1, "pending": 1}
+    assert sum(out["counts"].values()) == len(out["rows"])
+    only = results(*first, *latest, only="up")
+    assert [row[0] for row in only["rows"]] == [3, 9]
+    assert only["counts"] == out["counts"]
+
+
+def test_a_seed_missing_from_a_finished_evaluation_errored_and_one_the_running_evaluation_lacks_is_pending() -> None:
+    out = results(
+        *evaluated(0, (1, "failed")),
+        *evaluated(1, (1, "succeeded"), (2, "succeeded")),
+        *held_out(2, 1, "failed"),
+    )
+    # seed 1's latest is the running evaluation's verdict
+    assert out["rows"] == [
+        [1, "fail", ["failed", "succeeded", "failed"]],
+        [2, "error", ["errored", "succeeded", "pending"]],
+    ]
+    assert out["ids"][1] == [None, "h1-2", None]
+
+
+def test_hostile_seed_and_checkpoint_values_never_make_a_row_or_break_the_model() -> None:
+    hostile = [held_out(0, seed, "failed") for seed in ("7", None, "<img src=x onerror=alert(1)>", [1], {"n": 1})]
+    twice = [
+        *held_out(0, 1, "failed"),
+        ("episode_started", {**held_out(0, 1, None)[0][1], "episode_id": "again"}),
+        verdict(True),
+    ]
+    bad_round = ("evaluation_result", {"checkpoint": {"<b>": 1}, "round": 0, "successes": 0, "n": 1, "errored": 0})
+    out = results(*[e for h in hostile for e in h], *twice, bad_round)
+    # the first try of a seed in an evaluation is its episode; a checkpoint that is not text reads as none
+    assert out["rows"] == [[1, "pending", ["failed"]]]
+    assert out["checkpoints"] == [{"round": 0, "checkpoint": "", "name": "before fine-tuning", "done": True}]
+    assert results()["rows"] == [] and results()["checkpoints"] == []
+
+
 def test_an_episode_is_finished_once_judged_moved_past_or_its_run_has_stopped() -> None:
     out = presenter(
         """
