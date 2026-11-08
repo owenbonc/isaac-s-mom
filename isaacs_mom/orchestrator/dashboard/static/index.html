@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Isaac's Mom</title>
+<link rel="stylesheet" href="/static/style.css">
+<body>
+<header class="bar">
+  <div class="top">
+    <h1>Isaac's Mom</h1>
+    <span id="status"></span>
+    <nav class="presenter" aria-label="Presenter keys">
+      <span class="pair"><button type="button" id="b-prev" data-key="ArrowLeft" aria-label="Previous episode"><kbd>←</kbd></button><button type="button" id="b-next" data-key="ArrowRight" aria-label="Next episode"><kbd>→</kbd></button> Episode</span>
+      <button type="button" id="b-d" data-key="d"><kbd>D</kbd> Diagnosis</button>
+      <button type="button" id="b-t" data-key="t"><kbd>T</kbd> Teacher</button>
+      <button type="button" id="b-m" data-key="m"><kbd>M</kbd> Move</button>
+      <button type="button" id="b-p" data-key="p" aria-pressed="false"><kbd>P</kbd> Before/after</button>
+      <button type="button" id="b-end" data-key="End"><kbd>End</kbd> Latest</button>
+      <button type="button" id="b-pause" data-key=" "><kbd>Space</kbd> <span>Pause</span></button>
+    </nav>
+  </div>
+  <div class="where">
+    <p id="episode-line"></p>
+    <ol class="rail" id="rail" aria-hidden="true"></ol>
+    <details class="legend">
+      <summary>Labels</summary>
+      <div class="pop">
+        <dl>
+          <dt><span class="chip live">Live</span></dt><dd>Events are arriving (the last within 20 s), or a fine-tune started in the last 30 minutes is still running.</dd>
+          <dt><span class="chip recorded">Recorded</span></dt><dd>From the run's saved files; nothing new is arriving for it.</dd>
+          <dt><span class="chip lost">Disconnected</span></dt><dd>The page lost the run's event stream and is retrying; nothing shown is live until it returns.</dd>
+          <dt><span class="chip paused">Paused</span></dt><dd>Space is holding the view; new events wait until it resumes.</dd>
+          <dt><span class="chip placeholder">Placeholder</span></dt><dd>The run is on FakeSim, the stand-in simulator, or names no simulator. A panel with nothing to show says so in words.</dd>
+          <dt><span class="chip config">Configured</span></dt><dd>Set in the code, not measured.</dd>
+          <dt>Rail</dt><dd>One mark per episode: tall for the teacher, short for the student; filled when it succeeded or was accepted for training, hollow when it failed or was rejected. The outlined mark is the episode shown.</dd>
+        </dl>
+        <p class="note" id="run-meta"></p>
+      </div>
+    </details>
+  </div>
+</header>
+<div class="control" id="control"></div>
+<p class="sr" id="announce" aria-live="polite"></p>
+<main>
+  <section class="panel col camera">
+    <header><h2>Head camera</h2></header>
+    <div class="stage" id="stage"></div>
+    <ol class="strip" id="strip" aria-label="Recent head-camera frames"></ol>
+  </section>
+  <div class="col side" id="side" tabindex="0" role="region" aria-label="Did it work">
+    <section class="panel" id="p-rounds"></section>
+    <section class="panel" id="p-diagnosis"></section>
+  </div>
+  <section class="panel col decisions">
+    <header><h2>Decisions</h2><span id="chip-log"></span></header>
+    <ol class="log" id="log" tabindex="0" aria-label="Decision log"></ol>
+  </section>
+</main>
+<footer class="models" id="models" aria-label="Where models run"></footer>
+<script src="/static/state.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

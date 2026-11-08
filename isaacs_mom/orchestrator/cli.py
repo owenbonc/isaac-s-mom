@@ -49,30 +49,75 @@ def main() -> None:
     commands = parser.add_subparsers(dest="command", required=True)
     run = commands.add_parser("run", help="the teach -> fine-tune loop (SPEC §3.6)")
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
-    run.add_argument("--student", choices=["smolvlm", "stub"], default="smolvlm", help="stub: no model, no training")
-    run.add_argument(
-        "--teacher",
-        choices=["argon", "stub"],
-        help="stub: no Argon calls and no key; the default on --sim fake, so the skeleton run needs no key",
-    )
     run.add_argument("--rounds", type=int, default=3)
     run.add_argument("--demos", type=at_least_one, default=DEMOS_PER_ROUND, help="teacher demonstrations per round")
     run.add_argument("--dev-trials", type=at_least_one, default=DEV_TRIALS, help="student trials the teacher diagnoses")
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
-    run.add_argument("--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)")
+    dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a run directory")
+    dashboard.add_argument("--run", type=Path, required=True)
+    dashboard.add_argument("--port", type=int, default=8200)
+    demo = commands.add_parser("demo", help="the judged single take, recorded to an MP4")
+    demo.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
+    demo.add_argument("--ckpt", required=True)
+    demo.add_argument("--seed", type=int, required=True, help="an unseen scene; use >= 900000")
+    demo.add_argument("--perturb-at", type=int, required=True)
+    demo.add_argument("--out", type=Path, default=Path("demo.mp4"))
+    demo.add_argument("--run-id", type=run_id, default=time.strftime("demo-%Y%m%d-%H%M%S"))
+    for command in (run, demo):
+        command.add_argument(
+            "--student", choices=["smolvlm", "stub"], default="smolvlm", help="stub: no model, no training"
+        )
+        command.add_argument(
+            "--teacher",
+            choices=["argon", "stub"],
+            help="stub: no Argon calls and no key; the default on --sim fake, so the skeleton run needs no key",
+        )
+        command.add_argument(
+            "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)"
+        )
     args = parser.parse_args()
+    if args.command == "dashboard":
+        from isaacs_mom.orchestrator.dashboard.server import serve
+
+        serve(args.run, args.port)
+        return
     if args.sim == "fake" and args.task != DEFAULT_TASK.name:
         parser.error(f"--sim fake plays only the default task, {DEFAULT_TASK.name}")
-
-    if args.student == "smolvlm" and args.rounds > 0 and not has_cuda():
+    if args.command == "run" and args.student == "smolvlm" and args.rounds > 0 and not has_cuda():
         run.error(NO_CUDA)
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
     run_dir = Path("runs") / args.run_id
-    # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
-    argon = Argon(EventLog(run_dir, args.run_id), generate=stub_generate if teacher == "stub" else None)
-    if teacher == "argon":
-        argon.check()  # the stub has no key or model to check, so it spends nothing
+
+    def checked_argon(events: EventLog) -> Argon:
+        # One budget for the whole run (SPEC §2 rule 5); checked before any episode, so a bad key stops it in seconds.
+        argon = Argon(events, generate=stub_generate if teacher == "stub" else None)
+        if teacher == "argon":
+            argon.check()
+        return argon
+
+    if args.command == "demo":
+        from isaacs_mom.orchestrator.demo import refuse_seen_take, run_demo
+
+        try:
+            refuse_seen_take(args.seed, run_dir)
+        except ValueError as refused:
+            demo.error(str(refused))
+        manifest = run_demo(
+            make_sim(args.sim, args.task),
+            ckpt=args.ckpt,
+            seed=args.seed,
+            perturb_at=args.perturb_at,
+            out=args.out,
+            run_dir=run_dir,
+            run_id=args.run_id,
+            make_argon=checked_argon,
+            make_student=make_student,
+        )
+        verdict = manifest.validation.reason if manifest.validation else "no verdict"
+        print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
+        return
+    argon = checked_argon(EventLog(run_dir, args.run_id))
     results = run_loop(
         make_sim(args.sim, args.task),
         run_dir,
