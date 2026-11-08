@@ -1,6 +1,7 @@
 """Behaviour of the dashboard's event reducer (static/state.js), run under node."""
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -257,11 +258,14 @@ def provenance(
     return run(script, events)
 
 
-def test_a_fakesim_or_unstated_simulator_is_placeholder_even_while_events_arrive() -> None:
+def test_only_an_episode_naming_fakesim_makes_a_run_placeholder_and_one_with_no_episode_is_live_or_recorded() -> None:
     assert provenance(stream(started("a", "fake-1")), now=1.0) == "placeholder"
-    assert provenance(stream(started("a", None)), now=1.0) == "placeholder"
     assert provenance(stream(started("a", "fake-1"), started("b")), now=2.0) == "placeholder"
-    assert provenance([], now=1.0) == "placeholder"
+    assert provenance(stream(started("a", None)), now=1.0) == "live"
+    taught = stream(("instruction", {"text": "put the box in the bin", "source": "teach"}), argon_call(1))
+    assert provenance(taught, now=2.0) == "live"
+    assert provenance(taught, now=30.0) == "recorded"
+    assert provenance([], now=100.0) == "recorded"
 
 
 def test_a_real_run_is_live_while_events_arrive_or_a_finetune_is_pending_and_recorded_otherwise() -> None:
@@ -419,8 +423,6 @@ def test_each_frame_keeps_the_controller_that_saw_it_after_a_takeover() -> None:
 
 VIEW = """
 const v = S.view();
-// The presenter tests below drive Teaching unless they choose another tab.
-S.visit(v, { tab: "teaching" });
 let now = 0;
 // Each event arrives a second after it was written, as from a live run.
 const feed = (n) => { for (const e of events.splice(0, n)) { now = e.t + 1; S.receive(v, e, now); } };
@@ -799,25 +801,24 @@ def test_d_from_between_two_diagnoses_goes_forward_on_a_tie() -> None:
     assert out == ["t2", "t3"]
 
 
-def test_end_opens_now_on_the_episode_in_progress_while_the_run_is_live_and_now_stays_there_once_it_stops() -> None:
+def test_end_follows_the_episode_in_progress_while_the_run_is_live_and_the_view_stays_there_once_it_stops() -> None:
     out = presenter(
         """
         const tail = events.splice(events.length - 3);
         feed(events.length);
-        press("ArrowLeft"); press("End");
-        const live = [v.tab, look().episode];
+        press("ArrowLeft");
+        const pinned = look().episode;
+        S.visit(v, { seed: 1 });
+        press("End");
+        const live = [S.where(v), v.selected, look().episode];
         events.push(...tail); feed(3);
         const followed = look().episode;
         now += 60;
-        const stopped = [look().episode, S.target(v, now, "End")];
-        S.visit(v, { tab: "teaching" });
-        press("ArrowLeft");
-        return [live, followed, stopped, look().episode, S.target(v, now, "End")];
+        return [pinned, live, followed, look().episode, S.target(v, now, "End")];
         """,
         stream(*BEATS),
     )
-    # Teaching kept the d4 that ← pinned before End, so ← from there reaches t3
-    assert out == [["now", "t5"], "t6", ["t6", None], "t3", None]
+    assert out == ["d4", ["run", None, "t5"], "t6", "t6", None]
 
 
 def test_navigation_targets_say_where_each_key_leads_and_null_for_nowhere_new() -> None:
@@ -832,23 +833,22 @@ def test_navigation_targets_say_where_each_key_leads_and_null_for_nowhere_new() 
         """,
         stream(*BEATS),
     )
-    teaching = lambda id_: {"tab": "teaching", "selected": id_}  # noqa: E731
-    # following the latest: ← pins t5, nothing lies to the right, End opens Now; landing on t6 again would follow
+    pin = lambda id_: {"selected": id_, "seed": None, "opened": None}  # noqa: E731
     assert out[0] == {
-        "ArrowLeft": teaching("t5"),
+        "ArrowLeft": pin("t5"),
         "ArrowRight": None,
-        "d": teaching("t3"),
-        "t": teaching("d4"),
-        "m": teaching("t5"),
-        "End": {"tab": "now"},
+        "d": pin("t3"),
+        "t": pin("d4"),
+        "m": pin("t5"),
+        "End": None,
     }
     assert out[1] == {
-        "ArrowLeft": teaching("t0"),
-        "ArrowRight": teaching("t2"),
-        "d": teaching("t3"),
-        "t": teaching("d4"),
-        "m": teaching("t5"),
-        "End": {"tab": "now"},
+        "ArrowLeft": pin("t0"),
+        "ArrowRight": pin("t2"),
+        "d": pin("t3"),
+        "t": pin("d4"),
+        "m": pin("t5"),
+        "End": pin(None),
     }
 
 
@@ -1249,37 +1249,35 @@ def evaluated(round_: int, *outcomes: tuple[object, str | None]) -> list[tuple[s
 RESULTS = """
 const s = S.initial();
 for (const e of events) S.reduce(s, e);
-const r = S.results(s, ONLY);
+const r = S.results(s);
 return {
   checkpoints: r.checkpoints,
   rows: r.seeds.map((x) => [x.seed, x.mark, x.episodes.map((e) => e.outcome)]),
   ids: r.seeds.map((x) => x.episodes.map((e) => e.id)),
-  counts: r.counts,
+  claim: S.claim(s),
 };
 """
 
 
-def results(*events: tuple[str, dict], only: str | None = None) -> dict:
-    return run(RESULTS.replace("ONLY", json.dumps(only)), stream(*events))
+def results(*events: tuple[str, dict]) -> dict:
+    return run(RESULTS, stream(*events))
 
 
 def test_each_seed_is_marked_by_how_its_held_out_episode_changed_from_the_first_to_the_latest_evaluation() -> None:
     first = evaluated(0, (1, "failed"), (2, "succeeded"), (3, "succeeded"), (4, "failed"))
     latest = evaluated(1, (1, "succeeded"), (2, "failed"), (3, "succeeded"), (4, "failed"))
     out = results(*first, started("trial"), *latest)
-    # regressed and improved sort first, then still fails and always passed
     assert out["rows"] == [
-        [2, "down", ["succeeded", "failed"]],
         [1, "up", ["failed", "succeeded"]],
-        [4, "fail", ["failed", "failed"]],
+        [2, "down", ["succeeded", "failed"]],
         [3, "pass", ["succeeded", "succeeded"]],
+        [4, "fail", ["failed", "failed"]],
     ]
-    assert out["ids"][0] == ["h0-2", "h1-2"]
+    assert out["ids"][1] == ["h0-2", "h1-2"]
     assert out["checkpoints"] == [
-        {"round": 0, "checkpoint": "ckpt-r0", "name": "before fine-tuning", "done": True},
-        {"round": 1, "checkpoint": "r/ckpt-r1", "name": "after round 1", "done": True},
+        {"round": 0, "checkpoint": "ckpt-r0", "name": "before\u00a0fine-tuning", "done": True},
+        {"round": 1, "checkpoint": "r/ckpt-r1", "name": "after\u00a0round\u00a01", "done": True},
     ]
-    assert out["counts"] == {"down": 1, "up": 1, "fail": 1, "pass": 1, "error": 0, "pending": 0}
 
 
 def test_a_seed_that_errored_in_the_first_or_the_latest_evaluation_is_marked_errored() -> None:
@@ -1303,12 +1301,12 @@ def test_a_seed_that_errored_in_the_first_or_the_latest_evaluation_is_marked_err
 def test_with_one_evaluation_every_seed_is_pending_and_mid_evaluation_so_is_every_seed_not_yet_judged() -> None:
     first = evaluated(0, (1, "failed"), (2, "succeeded"), (3, "errored"))
     one = results(*first)
-    assert one["rows"] == [[3, "error", ["errored"]], [1, "pending", ["failed"]], [2, "pending", ["succeeded"]]]
+    assert one["rows"] == [[1, "pending", ["failed"]], [2, "pending", ["succeeded"]], [3, "error", ["errored"]]]
     mid = results(*first, started("trial"), *held_out(1, 1, "succeeded"), *held_out(1, 2, None))
     assert mid["rows"] == [
         [1, "up", ["failed", "succeeded"]],
-        [3, "error", ["errored", "pending"]],
         [2, "pending", ["succeeded", "pending"]],
+        [3, "error", ["errored", "pending"]],
     ]
     assert mid["checkpoints"][1] == {"round": 1, "checkpoint": "r/ckpt-r1", "name": "after round 1", "done": False}
     running = results(*held_out(0, 1, "failed"), *held_out(0, 2, None))
@@ -1335,7 +1333,7 @@ def test_with_three_checkpoints_the_mark_compares_the_first_and_the_latest_and_l
     ]
 
 
-def test_seeds_sort_by_mark_then_number_the_counts_sum_to_the_seeds_and_a_filter_keeps_one_mark() -> None:
+def test_seeds_come_in_seed_order_whatever_their_marks() -> None:
     first = evaluated(0, *[(seed, "failed") for seed in (9, 3, 5)], (7, "succeeded"), (8, "errored"), (2, "failed"))
     latest = [
         *held_out(1, 9, "succeeded"),
@@ -1344,19 +1342,8 @@ def test_seeds_sort_by_mark_then_number_the_counts_sum_to_the_seeds_and_a_filter
         *held_out(1, 7, "failed"),
     ]
     out = results(*first, *latest)
-    assert [row[:2] for row in out["rows"]] == [
-        [7, "down"],
-        [3, "up"],
-        [9, "up"],
-        [5, "fail"],
-        [8, "error"],
-        [2, "pending"],
-    ]
-    assert out["counts"] == {"down": 1, "up": 2, "fail": 1, "pass": 0, "error": 1, "pending": 1}
-    assert sum(out["counts"].values()) == len(out["rows"])
-    only = results(*first, *latest, only="up")
-    assert [row[0] for row in only["rows"]] == [3, 9]
-    assert only["counts"] == out["counts"]
+    marks = [[2, "pending"], [3, "up"], [5, "fail"], [7, "down"], [8, "error"], [9, "up"]]
+    assert [row[:2] for row in out["rows"]] == marks
 
 
 def test_a_seed_missing_from_a_finished_evaluation_errored_and_one_the_running_evaluation_lacks_is_pending() -> None:
@@ -1395,67 +1382,64 @@ TWO_EVALUATIONS = [
 ]
 
 
-def test_a_run_opens_on_results_where_the_arrows_step_through_the_seeds_and_escape_returns_to_the_one_left() -> None:
+def test_a_seed_opens_over_the_run_arrows_step_its_neighbours_and_escape_returns_to_where_the_view_was() -> None:
     out = presenter(
         """
-        S.visit(v, { tab: "results" });
         open();
-        const seen = [];
-        const at = () => [S.where(v), v.focus, v.seed, look().episode];
-        for (const key of ["ArrowDown", "ArrowDown", "ArrowRight", "ArrowDown", "ArrowUp"]) {
+        press("ArrowLeft");
+        const was = look().episode;
+        S.visit(v, { seed: 1 });
+        const seen = [[S.where(v), v.seed, look().episode]];
+        for (const key of ["ArrowLeft", "ArrowRight", "ArrowRight", "ArrowRight"]) {
           press(key);
-          seen.push(at());
+          seen.push([S.where(v), v.seed]);
         }
-        S.visit(v, { seed: v.focus, focus: v.focus });  // Enter on the focused row
-        seen.push(at());
-        press("ArrowRight"); seen.push(at());
-        press("Escape"); seen.push(at());
-        const claims = [press("Escape"), S.target(v, now, "ArrowLeft")];
-        return { first: S.view().tab, seen, claims };
+        S.visit(v, { seed: 1, opened: "h0-1" });
+        const episodes = [look().episode];
+        for (const key of ["ArrowRight", "ArrowRight", "ArrowLeft"]) {
+          press(key);
+          episodes.push(look().episode);
+        }
+        press("Escape");
+        const seed = [S.where(v), v.seed];
+        press("Escape");
+        return { was, seen, episodes, seed, back: [S.where(v), look().episode], claims: press("Escape") };
         """,
         stream(*TWO_EVALUATIONS),
     )
-    assert out["first"] == "results"
-    # sorted ↓ 2, ↑ 1, ✗ 3; the list stops at its ends
-    assert out["seen"] == [
-        ["list", 2, None, None],
-        ["list", 1, None, None],
-        ["list", 3, None, None],
-        ["list", 3, None, None],
-        ["list", 1, None, None],
-        ["seed", 1, 1, None],
-        ["seed", 3, 3, None],
-        ["list", 3, None, None],
-    ]
-    # Escape in the list is not Results' to take; ← goes back up the list
-    assert out["claims"] == [False, {"focus": 1}]
+    assert out["was"] == "h0-3"
+    assert out["seen"] == [["seed", 1, "h0-3"], ["seed", 1], ["seed", 2], ["seed", 3], ["seed", 3]]
+    assert out["episodes"] == ["h0-1", "h1-1", "h1-1", "h0-1"]
+    assert out["seed"] == ["seed", 1]
+    assert out["back"] == ["run", "h0-3"]
+    assert out["claims"] is False
 
 
-def test_a_filter_keeps_the_arrows_to_its_seeds_and_a_seeds_episodes_step_through_its_checkpoints() -> None:
+def test_escape_from_a_seed_opened_over_move_returns_to_move_and_m_still_turns_it_off() -> None:
+    events = stream(*evaluated(0, (1, "failed")), *trial("t0", moved=True), *evaluated(1, (1, "succeeded")))
     out = presenter(
         """
-        S.visit(v, { tab: "results" });
         open();
-        S.visit(v, { only: "fail" });
-        press("ArrowDown");
-        const filtered = [v.focus, S.target(v, now, "ArrowDown")];
-        S.visit(v, { only: null, seed: 1, focus: 1, opened: "h0-1" });
-        const seen = [look().episode];
-        for (const key of ["ArrowRight", "ArrowRight", "ArrowLeft"]) { press(key); seen.push(look().episode); }
-        const up = press("ArrowUp");
+        S.visit(v, { selected: "t0" });
+        press("m");
+        const at = () => [S.where(v), look().episode, look().focus];
+        const moved = at();
+        S.visit(v, S.showSeed(v, 1));
+        const seed = at();
         press("Escape");
-        return { filtered, seen, up, back: [S.where(v), v.seed] };
+        const back = at();
+        press("m");
+        return { moved, seed, back, off: at() };
         """,
-        stream(*TWO_EVALUATIONS),
+        events,
     )
-    assert out["filtered"] == [3, None]
-    assert out["seen"] == ["h0-1", "h1-1", "h1-1", "h0-1"]
-    # ↑ scrolls an episode's view as usual; Escape returns to the seed
-    assert out["up"] is False
-    assert out["back"] == ["seed", 1]
+    assert out["moved"] == ["run", "t0", 1]
+    assert out["seed"] == ["seed", "t0", None]
+    assert out["back"] == ["run", "t0", 1]
+    assert out["off"] == ["run", "t0", None]
 
 
-def test_teaching_holds_every_episode_but_the_held_out_tests_and_move_may_open_one_under_results() -> None:
+def test_the_run_walks_every_episode_in_order_held_out_tests_included_and_move_opens_one_in_place() -> None:
     moved = [*held_out(1, 1, "failed")]
     moved.insert(2, ("perturbation", {"kind": "move_box", "step": 0}))
     events = stream(*evaluated(0, (1, "failed")), *trial("t0", diagnosed=True), *trial("t1"), *moved)
@@ -1463,22 +1447,218 @@ def test_teaching_holds_every_episode_but_the_held_out_tests_and_move_may_open_o
         """
         open();
         const seen = [look().episode];
-        press("ArrowRight"); seen.push(look().episode);
-        press("ArrowLeft"); seen.push(look().episode);
-        press("d"); seen.push(look().episode);
+        for (const key of ["ArrowLeft", "ArrowLeft", "ArrowLeft", "ArrowRight"]) {
+          press(key);
+          seen.push(look().episode);
+        }
         press("m");
-        const moved = [S.where(v), v.seed, look().episode, S.stageStep(v)];
+        const moved = [S.where(v), look().episode, S.stageStep(v)];
         press("m");
-        const ups = [press("ArrowUp"), press("ArrowDown")];
-        return { seen, moved, back: [S.where(v), look().episode], ups };
+        return { seen, moved, back: look().episode };
         """,
         events,
     )
-    # a finished run's Teaching lands on its latest teaching episode; → finds no other, the held-out test is not one
-    assert out["seen"] == ["t1", "t1", "t0", "t0"]
-    assert out["moved"] == ["episode", 1, "h1-1", 0]
-    assert out["back"] == ["teaching", "t0"]
-    assert out["ups"] == [False, False]
+    assert out["seen"] == ["t1", "t0", "h0-1", "h0-1", "t0"]
+    assert out["moved"] == ["run", "h1-1", 0]
+    assert out["back"] == "t0"
+
+
+def test_the_strips_switch_shows_a_seeds_first_or_latest_episode_in_full_or_both_and_holds_from_seed_to_seed() -> None:
+    out = presenter(
+        """
+        open();
+        const at = () => [S.where(v), v.seed, look().episode];
+        S.choose(v, "before");
+        const idle = at();
+        S.visit(v, S.showSeed(v, 1));
+        const seen = [at()];
+        press("ArrowRight"); seen.push(at());
+        S.choose(v, "after"); seen.push(at());
+        press("ArrowRight"); seen.push(at());
+        S.choose(v, "both"); seen.push(at());
+        press("ArrowLeft"); seen.push(at());
+        S.choose(v, "after");
+        press("Escape");
+        return { idle, seen, back: at() };
+        """,
+        stream(*TWO_EVALUATIONS),
+    )
+    assert out["idle"] == ["run", None, "t0"]
+    assert out["seen"] == [
+        ["episode", 1, "h0-1"],
+        ["episode", 2, "h0-2"],
+        ["episode", 2, "h1-2"],
+        ["episode", 3, "h1-3"],
+        ["seed", 3, "t0"],
+        ["seed", 2, "t0"],
+    ]
+    assert out["back"] == ["run", None, "t0"]
+
+
+def test_the_switch_is_dimmed_until_a_seed_is_chosen() -> None:
+    script = """
+    const buttons = ["before", "both", "after"].map((side) => {
+      const b = { dataset: { side }, attrs: {}, setAttribute(k, x) { this.attrs[k] = x; } };
+      return b;
+    });
+    doc.getElementById("sides").querySelectorAll = () => buttons;
+    const look = () => buttons.map((b) => [b.attrs["aria-disabled"], b.attrs["aria-pressed"], b.dataset.tip]);
+    vm.runInContext("render()", context);
+    const idle = look();
+    vm.runInContext("MomState.visit(view, MomState.showSeed(view, 1)); render();", context);
+    return { idle, open: look() };
+    """
+    out = app(REPLAY + script, stream(*TWO_EVALUATIONS))
+    # the harness's stage is narrow, so the switch defaults to After
+    assert out["idle"] == [
+        ["true", "false", "Choose a seed to compare"],
+        ["true", "false", "Choose a seed to compare"],
+        ["true", "true", "Choose a seed to compare"],
+    ]
+    assert [x[:2] for x in out["open"]] == [["false", "false"], ["false", "false"], ["false", "true"]]
+    assert out["open"][2][2] == "After: the seed's latest checkpoint"
+
+
+def test_the_switch_keeps_its_side_while_a_seed_is_open_when_another_checkpoint_starts() -> None:
+    third = held_out(2, 1, None)
+    script = f"""
+    // wide enough for two checkpoints side by side, not three
+    doc.querySelector(".camera").clientWidth = 620;
+    const later = events.splice(events.length - {len(third)});
+    {REPLAY}
+    const at = () => vm.runInContext("[view.side, MomState.where(view)]", context);
+    const idle = at();
+    vm.runInContext("MomState.visit(view, MomState.showSeed(view, 1)); render();", context);
+    const open = at();
+    for (const e of later) sources[0].onmessage({{ data: JSON.stringify(e) }});
+    flush();
+    return {{ idle, open, later: at() }};
+    """
+    out = app(script, stream(*TWO_EVALUATIONS, *third))
+    assert out == {"idle": ["both", "run"], "open": ["both", "seed"], "later": ["both", "seed"]}
+
+
+def test_the_step_keys_tooltips_name_what_they_step_through() -> None:
+    script = """
+    const tip = (fields) => {
+      vm.runInContext(`MomState.visit(view, ${JSON.stringify(fields)}); render();`, context);
+      return [doc.getElementById("b-prev").dataset.tip, doc.getElementById("b-next").dataset.tip];
+    };
+    const seed = tip({ seed: 1, opened: "h1-1" });
+    vm.runInContext(`chosen = true; MomState.choose(view, "both");`, context);
+    return { seed, checkpoint: tip({ seed: 1, opened: "h0-1" }), episode: tip({ seed: null, opened: null }) };
+    """
+    out = app(REPLAY + script, stream(*TWO_EVALUATIONS))
+    # the harness's narrow stage defaults the switch to After, so the arrows step from seed to seed
+    assert out == {
+        "seed": ["Previous seed · ←", "Next seed · →"],
+        "checkpoint": ["Previous checkpoint · ←", "Next checkpoint · →"],
+        "episode": ["Previous episode · ←", "Next episode · →"],
+    }
+
+
+def test_each_back_button_is_named_by_where_it_goes_and_the_switch_describes_itself() -> None:
+    script = """
+    const last = (id) => writes.filter(([at]) => at === id).pop()[1];
+    const back = (html) => html.match(/class="back"[^>]*aria-label="([^"]*)"/)[1];
+    const buttons = ["before", "both", "after"].map((side) => ({
+      dataset: { side }, attrs: {}, setAttribute(k, x) { this.attrs[k] = x; },
+    }));
+    doc.getElementById("sides").querySelectorAll = () => buttons;
+    const said = () => buttons.map((b) => b.attrs["aria-description"]);
+    vm.runInContext("render()", context);
+    const idle = said();
+    vm.runInContext("MomState.visit(view, MomState.showSeed(view, 1)); render();", context);
+    const [shown, open] = [back(last("control")), said()];
+    vm.runInContext(`chosen = true; MomState.choose(view, "both"); render();`, context);
+    const seed = back(last("results"));
+    vm.runInContext(`MomState.visit(view, { opened: "h0-1" }); render();`, context);
+    return { idle, open, shown, seed, card: back(last("control")) };
+    """
+    out = app(REPLAY + script, stream(*TWO_EVALUATIONS))
+    assert out["idle"] == ["Choose a seed to compare"] * 3
+    assert out["open"] == [
+        "Before: the seed's first checkpoint",
+        "Both: every checkpoint side by side",
+        "After: the seed's latest checkpoint",
+    ]
+    # the harness's narrow stage defaults the switch to After, whose episode goes back to the run
+    assert (out["shown"], out["seed"], out["card"]) == ("Back to the run", "Back to the run", "Back to seed 1")
+
+
+def conditioned(round_: int, condition: str, *outcomes: tuple[object, str | None]) -> list[tuple[str, dict]]:
+    *episodes, (kind, result) = evaluated(round_, *outcomes)
+    return [*episodes, (kind, {**result, "condition": condition})]
+
+
+def test_an_eval_run_compares_the_first_and_last_checkpoint_on_the_training_task_alone() -> None:
+    seeds = range(1, 21)
+    blocks = [
+        conditioned(0, "training_distribution", *[(s, "succeeded" if s <= 5 else "failed") for s in seeds]),
+        conditioned(0, "new_layout", *[(s + 100, "succeeded") for s in seeds]),
+        conditioned(0, "move_bin_after_lift", *[(s, "errored") for s in seeds]),
+        conditioned(1, "training_distribution", *[(s, "succeeded" if s <= 15 else "failed") for s in seeds]),
+        conditioned(1, "new_layout", *[(s + 100, "failed") for s in seeds]),
+        conditioned(1, "move_bin_after_lift", *[(s, "succeeded") for s in seeds]),
+    ]
+    out = results(*[e for block in blocks for e in block])
+    assert [c["name"] for c in out["checkpoints"]] == ["ckpt-r0", "ckpt-r1"]
+    assert [row[0] for row in out["rows"]] == list(seeds)
+    assert out["rows"][2] == [3, "pass", ["succeeded", "succeeded"]]
+    assert out["rows"][9] == [10, "up", ["failed", "succeeded"]]
+    assert out["rows"][19] == [20, "fail", ["failed", "failed"]]
+    assert (out["claim"]["figure"], out["claim"]["counts"], out["claim"]["errored"]) == (
+        "+50 pts",
+        "5 → 15 of 20",
+        None,
+    )
+    # a loop run's results carry no condition, so every one of them counts
+    loop = results(*TWO_EVALUATIONS)
+    assert len(loop["checkpoints"]) == 2 and loop["claim"]["counts"] == "1 → 1 of 3"
+
+
+def test_an_eval_runs_checkpoints_are_named_by_their_ids_and_a_loop_runs_by_round() -> None:
+    # `mom eval --ckpt r/ckpt-r3` tests that checkpoint second, so its round is 1, which is no fine-tuning round
+    base = conditioned(0, "training_distribution", (1, "failed"))
+    *tuned, (kind, result) = conditioned(1, "training_distribution", (1, "succeeded"))
+    events = [*base, *tuned, (kind, {**result, "checkpoint": "r/ckpt-r3"})]
+    out = results(*events)
+    assert [c["name"] for c in out["checkpoints"]] == ["ckpt-r0", "ckpt-r3"]
+    assert (out["claim"]["names"], out["claim"]["ids"]) == ("ckpt-r0 → ckpt-r3", "ckpt-r0 → r/ckpt-r3")
+    # a seed's cards head each checkpoint by its id as written, never capitalised
+    script = """
+    vm.runInContext(`
+      chosen = true; MomState.choose(view, "both"); MomState.visit(view, { seed: 1 }); render();
+    `, context);
+    return writes.filter(([id]) => id === "results").pop()[1].match(/<span class="card-head">.*?<\\/span><\\/span>/g);
+    """
+    assert app(REPLAY + script, stream(*events)) == [
+        '<span class="card-head"><span class="what">ckpt-r0</span></span>',
+        '<span class="card-head"><span class="what">ckpt-r3</span></span>',
+    ]
+    loop = results(*TWO_EVALUATIONS)
+    assert [c["name"] for c in loop["checkpoints"]] == ["before fine-tuning", "after round 1"]
+    assert loop["claim"]["names"] == "before fine-tuning → after round 1"
+
+
+def test_a_live_eval_run_shows_no_block_under_way_once_a_closed_result_names_its_condition() -> None:
+    # the base's training block closes with seed 1 failed, then new_layout runs seed 1 on the base and it succeeds
+    layout = held_out(0, 1, "succeeded")
+    layout[0][1]["episode_id"] = "layout-1"
+    live = [*conditioned(0, "training_distribution", (1, "failed"), (2, "succeeded")), *layout]
+    out = results(*live)
+    assert len(out["checkpoints"]) == 1
+    assert out["rows"] == [[1, "pending", ["failed"]], [2, "pending", ["succeeded"]]]
+    assert run(CLAIM, stream(*live))[1] is None
+    script = """
+    const columns = writes.filter(([id]) => id === "columns").pop()[1];
+    vm.runInContext(`
+      chosen = true; MomState.choose(view, "both"); MomState.visit(view, { seed: 1 }); render();
+    `, context);
+    const seed = writes.filter(([id]) => id === "results").pop()[1];
+    return { up: columns.includes("#m-up"), cards: seed.match(/class="card"/g).length };
+    """
+    assert app(REPLAY + script, stream(*live)) == {"up": False, "cards": 1}
 
 
 def test_an_episode_is_finished_once_judged_moved_past_or_its_run_has_stopped() -> None:
@@ -1736,9 +1916,9 @@ Object.defineProperty(FakeElement.prototype, "innerHTML", {
   configurable: true,
 });
 const IDS = ["status", "run-meta", "announce", "control", "stage", "strip", "log", "chip-log", "p-rounds",
-  "p-diagnosis", "p-training", "models", "side", "results", "main", "tabs", "now-dot", "runs", "run-name", "run-list",
-  "teach", "instruction", "teach-count", "teach-go", "teach-said", "teach-status", "b-prev", "b-next", "b-d", "b-t",
-  "b-m", "b-pause"];
+  "p-diagnosis", "p-training", "models", "side", "results", "main", "columns", "sides", "runs", "run-name", "run-list",
+  "teach", "instruction", "teach-count", "teach-go", "teach-said", "teach-status", "b-prev", "b-next", "b-end",
+  "b-d", "b-t", "b-m", "b-pause"];
 for (const id of IDS) elements.set(id, new FakeElement(id, id === "instruction" ? "INPUT" : "DIV"));
 const body = new FakeElement("", "BODY");
 const doc = {
@@ -1878,14 +2058,12 @@ return {
 
 def test_no_value_from_an_event_or_the_runs_list_becomes_markup_in_any_view() -> None:
     script = """
-    // Every place the page can show: Results' list, the seed, its episodes, Teaching with its Move, and Now.
     vm.runInContext(`
-      MomState.visit(view, { seed: 7, focus: 7 }); render();
+      MomState.visit(view, { seed: 7 }); render();
       MomState.visit(view, { opened: MomState.results(MomState.shown(view)).seeds[0].episodes[0].id }); render();
-      MomState.visit(view, { tab: "teaching", selected: null }); render();
+      MomState.visit(view, { seed: null, opened: null, selected: null }); render();
       MomState.keydown(view, { key: "m" }, Date.now() / 1000); render();
       MomState.keydown(view, { key: "d" }, Date.now() / 1000); render();
-      MomState.visit(view, { tab: "now" }); render();
       const reasons = [${JSON.stringify(events[0].data.text)}];
       teaching = MomState.teachAnswer(200, { run_id: "r", started: false, reasons });
       renderTeach();
@@ -1898,14 +2076,13 @@ def test_no_value_from_an_event_or_the_runs_list_becomes_markup_in_any_view() ->
     assert {"run-list", "results", "control", "stage", "log", "p-rounds", "p-diagnosis", "teach-said"} <= set(
         out["escaped"]
     )
-    # A run that did not start shows why in Results and on Now's stage, and Argon's answer can steer that text.
+    # A run that did not start shows why on the stage, and Argon's answer can steer that text.
     events = stream(
         ("instruction", {"text": HOSTILE, "source": "teach"}), ("error", {"error": f"not started: {HOSTILE}"})
     )
-    script = 'vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);'
-    out = app(REPLAY + script + MARKUP, [{**e, "run_id": f"r{HOSTILE}"} for e in events])
+    out = app(REPLAY + MARKUP, [{**e, "run_id": f"r{HOSTILE}"} for e in events])
     assert out["injected"] == []
-    assert {"results", "stage"} <= set(out["escaped"])
+    assert "stage" in out["escaped"]
 
 
 def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_settles() -> None:
@@ -1932,8 +2109,7 @@ def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_set
 
 def test_after_a_move_the_stage_marks_it_on_every_later_frame_and_only_icons_carry_the_results_mark_class() -> None:
     script = """
-    vm.runInContext(`MomState.visit(view, { tab: "teaching" }); render();`, context);
-    // `.mark` sizes the Results icons, so anything else in that class is squeezed into an icon's box.
+    // `.mark` sizes the strip's icons, so anything else in that class is squeezed into an icon's box.
     const marked = writes.flatMap(([, html]) => html.match(/<\\w+[^>]*class="[^"]*\\bmark\\b[^"]*"/g) || []);
     const stage = writes.filter(([id]) => id === "stage").pop()[1];
     return { stage, notIcons: marked.filter((t) => !t.startsWith("<svg")) };
@@ -1943,60 +2119,111 @@ def test_after_a_move_the_stage_marks_it_on_every_later_frame_and_only_icons_car
     assert out["notIcons"] == []
 
 
-def test_the_now_tabs_dot_shows_only_while_the_run_is_live_never_recorded_paused_or_disconnected() -> None:
-    script = """
-    const dot = () => doc.getElementById("now-dot").hidden;
-    const seen = { live: dot() };
-    vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);
-    seen.now = dot();
-    vm.runInContext(`MomState.keydown(view, { key: " " }, Date.now() / 1000); render();`, context);
-    seen.paused = dot();
-    vm.runInContext(`MomState.keydown(view, { key: " " }, Date.now() / 1000); render();`, context);
-    seen.resumed = dot();
-    sources[0].onerror();
-    flush();
-    seen.lost = dot();
-    return seen;
-    """
-    fresh = "for (const e of events) e.t = Date.now() / 1000;"
-    live = app(fresh + REPLAY + script, stream(started("a"), decision(0)))
-    assert live == {"live": False, "now": False, "paused": True, "resumed": False, "lost": True}
-    recorded = app(REPLAY + script, stream(started("a"), decision(0)))
-    assert set(recorded.values()) == {True}
+STYLE_CSS = STATE_JS.parent / "style.css"
 
 
-def test_a_click_on_previous_or_next_in_results_takes_the_focus_to_the_seed_as_the_arrow_key_does() -> None:
+def test_no_rule_redeclares_a_root_token_so_the_strips_hover_and_open_seed_take_their_tint() -> None:
+    rules = re.findall(r"([^{}]*)\{([^{}]*)\}", STYLE_CSS.read_text())
+    declared = [(selector.strip(), set(re.findall(r"(--[\w-]+)\s*:", body))) for selector, body in rules]
+    tokens = set().union(*(names for selector, names in declared if ":root" in selector))
+    shadowed = {selector: names & tokens for selector, names in declared if ":root" not in selector and names & tokens}
+    assert shadowed == {}
+
+
+STRIP = r"""
+const html = writes.filter(([id]) => id === "columns").pop()[1];
+const button =
+  /<button[^>]*data-column="(\d+)"[^>]*tabindex="(-?\d)"[^>]*aria-label="([^"]*)" title="([^"]*)"[^>]*>(.*?)<\/b/g;
+const icon = /<svg class="i ([^"]*)"[^>]*><use href="#m-(\w+)"/g;
+return [...html.matchAll(button)].map((m) => ({
+  seed: Number(m[1]), tab: m[2], name: m[3], tip: m[4],
+  cells: [...m[5].matchAll(icon)].map((x) => `${x[1].split(" ")[0]} ${x[2]}`),
+}));
+"""
+
+
+def strip(events: list[dict]) -> list[dict]:
+    return app(REPLAY + STRIP, events)
+
+
+def test_the_strip_has_a_column_per_seed_in_seed_order_its_coloured_mark_over_its_verdict_before_and_after() -> None:
+    columns = strip(stream(*TWO_EVALUATIONS))
+    assert [(c["seed"], c["name"], c["cells"]) for c in columns] == [
+        (1, "Seed 1: improved, failed before, succeeded after", ["mark up", "plain fail", "plain pass"]),
+        (2, "Seed 2: regressed, succeeded before, failed after", ["mark down", "plain pass", "plain fail"]),
+        (3, "Seed 3: still fails, failed before, failed after", ["mark fail", "plain fail", "plain fail"]),
+    ]
+    assert all(c["tip"] == c["name"] for c in columns)
+    assert [c["tab"] for c in columns] == ["0", "-1", "-1"]
+
+
+def test_more_than_20_seeds_keep_seed_order_and_an_after_not_run_reads_as_not_run() -> None:
+    first = [(seed, "errored" if seed == 5 else "failed" if seed % 2 else "succeeded") for seed in range(30, 0, -1)]
+    events = [*evaluated(0, *first), started("trial"), *held_out(1, 1, "succeeded"), *held_out(1, 2, None)]
+    columns = strip(stream(*events))
+    assert [c["seed"] for c in columns] == list(range(1, 31))
+    by = {c["seed"]: (c["name"], c["cells"]) for c in columns}
+    assert by[1] == ("Seed 1: improved, failed before, succeeded after", ["mark up", "plain fail", "plain pass"])
+    assert by[2] == (
+        "Seed 2: pending, succeeded before, not run after",
+        ["mark pending", "plain pass", "plain pending"],
+    )
+    assert by[5] == ("Seed 5: errored, errored before, not run after", ["mark error", "plain error", "plain pending"])
+    assert by[30] == (
+        "Seed 30: pending, succeeded before, not run after",
+        ["mark pending", "plain pass", "plain pending"],
+    )
+    assert strip(stream(*evaluated(0, (1, "failed"))))[0]["name"] == "Seed 1: pending, failed before, not run after"
+
+
+def test_arrows_in_the_strip_move_between_its_columns_and_enter_on_one_opens_its_seed() -> None:
     script = """
-    const button = (key) => ({ closest: () => ({ dataset: { key } }) });
-    const click = (key) => () => doc.querySelector(".presenter").listeners.click[0]({ target: button(key) });
-    const key = (k) => () => doc.listeners.keydown[0]({ key: k, target: doc.body, preventDefault() {} });
-    const seen = [];
-    for (const act of [click("ArrowRight"), click("ArrowRight"), key("ArrowRight"), click("ArrowLeft")]) {
-      act();
+    const at = (seed) => ({ closest: (s) => (s === "[data-column]" ? { dataset: { column: String(seed) } } : null) });
+    const key = (k, seed) => {
+      let claimed = false;
+      doc.listeners.keydown[0]({ key: k, target: at(seed), preventDefault() { claimed = true; } });
       flush();
-      seen.push(doc.activeElement.selector || null);
-    }
-    return seen;
+      return [doc.activeElement.selector || null, claimed];
+    };
+    const seen = [key("ArrowRight", 1), key("ArrowRight", 2), key("ArrowRight", 3), key("ArrowLeft", 1)];
+    const tab = writes.filter(([id]) => id === "columns").pop()[1].match(/data-column="(\d+)"[^>]*tabindex="0"/)[1];
+    const run = vm.runInContext("[view.selected, view.seed]", context);
+    // Enter on a focused button is its click
+    doc.getElementById("columns").listeners.click[0]({ target: { closest: () => ({ dataset: { column: "2" } }) } });
+    flush();
+    return { seen, tab, run, open: vm.runInContext("[MomState.where(view), view.seed]", context) };
     """
-    # sorted ↓ 2, ↑ 1, ✗ 3
-    assert app(REPLAY + script, stream(*TWO_EVALUATIONS)) == [f'.seeds [data-seed="{n}"]' for n in [2, 1, 3, 1]]
+    out = app(REPLAY + script, stream(*TWO_EVALUATIONS))
+    assert out["seen"] == [
+        ['[data-column="2"]', True],
+        ['[data-column="3"]', True],
+        ['[data-column="3"]', True],
+        ['[data-column="3"]', True],
+    ]
+    assert out["tab"] == "3"
+    assert out["run"] == [None, None]
+    # the harness's narrow stage defaults the switch to After, so the seed shows its latest episode in full
+    assert out["open"] == ["episode", 2]
 
 
-def test_a_run_that_did_not_start_says_why_once_in_each_tab() -> None:
+def test_a_run_that_did_not_start_says_why_once_on_the_stage() -> None:
     script = """
     const last = (id) => writes.filter(([at]) => at === id).pop()[1];
-    const seen = [{ control: last("control"), shown: last("results") }];
-    for (const tab of ["teaching", "now"]) {
-      vm.runInContext(`MomState.visit(view, { tab: "${tab}" }); render();`, context);
-      seen.push({ control: last("control"), shown: last("stage") });
-    }
-    return seen;
+    return { control: last("control"), stage: last("stage"), strip: last("columns") };
     """
     refused = ("error", {"error": "not started: Not yet: the loop teaches one task"})
     out = app(REPLAY + script, stream(("instruction", {"text": "juggle", "source": "teach"}), refused))
-    for tab in out:
-        assert "Not started" in tab["control"] and "Not yet" not in tab["control"]
-        assert "Not yet: the loop teaches one task" in tab["shown"]
+    assert "Not started" in out["control"] and "Not yet" not in out["control"]
+    assert "Not yet: the loop teaches one task" in out["stage"]
+    assert "Not started" in out["strip"] and "Not yet" not in out["strip"]
+
+
+def test_a_real_run_before_its_first_episode_reads_live_in_the_header_not_placeholder() -> None:
+    script = 'return writes.filter(([id]) => id === "status").pop()[1];'
+    fresh = "for (const e of events) e.t = Date.now() / 1000;"
+    taught = stream(("instruction", {"text": "put the box in the bin", "source": "teach"}), argon_call(1))
+    status = app(fresh + REPLAY + script, taught)
+    assert 'class="chip live"' in status and "Placeholder" not in status
 
 
 HEARD = """
@@ -2020,23 +2247,19 @@ def test_a_new_episode_elsewhere_in_the_run_never_re_announces_the_episode_shown
     assert len(out) == 1 and out[0].startswith("Episode 1 of 1, student trial.")
 
 
-def test_results_list_is_announced_with_the_seeds_it_shows_and_the_mark_it_is_filtered_to() -> None:
+def test_a_seed_opened_from_the_strip_is_announced_by_its_mark_and_going_back_by_the_episode_returned_to() -> None:
     script = """
     vm.runInContext(`
-      MomState.visit(view, { only: "up" }); render();
-      MomState.visit(view, { seed: 1, focus: 1 }); render();
+      chosen = true; MomState.choose(view, "both");
+      MomState.visit(view, { seed: 1 }); render();
+      MomState.keydown(view, { key: "ArrowRight" }, Date.now() / 1000); render();
       MomState.keydown(view, { key: "Escape" }, Date.now() / 1000); render();
-      MomState.visit(view, { only: null }); render();
     `, context);
     return heard;
     """
-    assert app(HEARD + REPLAY + script, stream(*TWO_EVALUATIONS)) == [
-        "Results: 3 held-out seeds.",
-        "Results: 1 of 3 held-out seeds, marked improved.",
-        "Seed 1, improved: Failed → Succeeded.",
-        "Results: 1 of 3 held-out seeds, marked improved.",
-        "Results: 3 held-out seeds.",
-    ]
+    heard = app(HEARD + REPLAY + script, stream(*TWO_EVALUATIONS))
+    assert heard[1:3] == ["Seed 1, improved: Failed → Succeeded.", "Seed 2, regressed: Succeeded → Failed."]
+    assert heard[0] == heard[3] and heard[3].startswith("Episode 4 of 7, student trial.")
 
 
 @pytest.mark.parametrize("n", [199, 200, 201])
@@ -2064,7 +2287,7 @@ def test_the_run_picker_closes_when_the_focus_moves_past_it_or_on_escape_and_not
     };
     picker.open = true;
     doc.listeners.keydown[0]({ key: "Escape", target: doc.body, preventDefault() {} });
-    return { escape: picker.open, link: left(link), text: left(null), past: left(doc.getElementById("tabs")) };
+    return { escape: picker.open, link: left(link), text: left(null), past: left(doc.getElementById("columns")) };
     """
     assert app(REPLAY + script, stream(started("a"))) == {"escape": False, "link": True, "text": True, "past": False}
 
@@ -2101,7 +2324,6 @@ def test_a_run_file_the_server_says_is_not_written_yet_reads_as_not_in_the_runs_
 
 def test_an_errored_held_out_episode_reads_errored_not_counted_in_its_own_view_never_failed() -> None:
     script = """
-    vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);
     const last = (id) => writes.filter(([at]) => at === id).pop()[1];
     return { control: last("control"), log: last("log"), heard: heard.at(-1) };
     """
@@ -2115,10 +2337,12 @@ def test_an_errored_held_out_episode_reads_errored_not_counted_in_its_own_view_n
 
 
 def test_a_fine_tuned_checkpoint_shows_by_its_short_id_and_the_names_tooltip_keeps_the_full_ids() -> None:
+    # wide enough for every checkpoint side by side before the seed opens
+    wide = 'doc.getElementById("results").clientWidth = 1280;'
     script = """
     vm.runInContext(`
-      MomState.visit(view, { seed: 1, focus: 1 }); render();
-      MomState.visit(view, { tab: "now" }); render();
+      MomState.visit(view, { seed: 1 }); render();
+      MomState.visit(view, { seed: null, selected: MomState.current(MomState.shown(view)).id }); render();
     `, context);
     const last = (id) => writes.filter(([at]) => at === id).pop()[1];
     // A tooltip may carry the full id; nothing else on the page does.
@@ -2126,7 +2350,7 @@ def test_a_fine_tuned_checkpoint_shows_by_its_short_id_and_the_names_tooltip_kee
     return { shown, rounds: last("p-rounds"), seed: last("results"), control: last("control") };
     """
     events = [*evaluated(0, (1, "failed")), started("trial"), *evaluated(1, (1, "succeeded")), *held_out(2, 1, None)]
-    out = app(REPLAY + script, stream(*events, executed(0)))
+    out = app(wide + REPLAY + script, stream(*events, executed(0)))
     assert out["shown"] == []
     assert 'title="ckpt-r0 → r/ckpt-r1"' in out["rounds"]
     assert 'Testing <span class="mono">ckpt-r2</span>' in out["rounds"]

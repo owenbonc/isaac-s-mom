@@ -5,8 +5,9 @@ Reported only: the loop's stop rule (§3.6) stays on the task the loop trains on
     uv run mom eval --task fixed_feet --ckpt <run>/ckpt-r1
 
 Each episode is recorded as usual (frames, skill calls, perturbations and verdict in its manifest). This adds one line
-per episode to `evaluation.jsonl`, with the condition, the decision latencies and the device, and a summary per
-checkpoint and condition in `evaluation_report.json`.
+per episode to `evaluation.jsonl`, with the condition, the decision latencies and the device, a summary per
+checkpoint and condition in `evaluation_report.json`, and an `evaluation_result` event closing each checkpoint's
+condition, so the dashboard reads the run like a loop run.
 """
 
 import argparse
@@ -21,6 +22,7 @@ from typing import Any, Literal
 
 from pydantic import BaseModel
 
+from isaacs_mom.contracts import EvaluationResult
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import INSTRUCTION
@@ -125,7 +127,7 @@ def evaluation_report(
     sims: dict[str, TruthSim] = {}
     reports: list[ConditionReport] = []
     every_record: list[EpisodeRecord] = []
-    for checkpoint in checkpoints:
+    for round_, checkpoint in enumerate(checkpoints):
         student = make_student(checkpoint)
         for condition in conditions:
             records = []
@@ -138,7 +140,12 @@ def evaluation_report(
                     records.append(record)
                     every_record.append(record)
                     write_atomically(records_path, "".join(r.model_dump_json() + "\n" for r in every_record))
-            reports.append(summarise(checkpoint, condition.name, records, budget_ms))
+            summary = summarise(checkpoint, condition.name, records, budget_ms)
+            reports.append(summary)
+            result = EvaluationResult(
+                checkpoint=checkpoint, round=round_, successes=summary.successes, n=summary.n, errored=summary.errored
+            )
+            events.emit("evaluation_result", **result.model_dump(), rate=result.rate, condition=condition.name)
     report = {
         "budget_ms": budget_ms,
         "memory_budget_gib": MEMORY_BUDGET_GIB,

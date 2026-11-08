@@ -130,6 +130,28 @@ def test_every_checkpoint_runs_the_same_tasks_and_seeds(tmp_path: Path) -> None:
     assert {r["sim_version"] for r in records} == {f"fake-rigged task={t}" for t in asked}
 
 
+def test_each_checkpoints_condition_closes_with_an_evaluation_result(tmp_path: Path) -> None:
+    reports, _ = _run(tmp_path, CrashesOnSeed3)
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    records = [json.loads(line) for line in (tmp_path / "evaluation.jsonl").read_text().splitlines()]
+    ends = [i for i, e in enumerate(events) if e["type"] == "evaluation_result"]
+    results = [events[i]["data"] for i in ends]
+    assert [(r["round"], r["checkpoint"], r["condition"]) for r in results] == [
+        (round_, checkpoint, condition.name)
+        for round_, checkpoint in enumerate(["ckpt-r0", "run/ckpt-r1"])
+        for condition in CONDITIONS
+    ]
+    for report, result in zip(reports, results, strict=True):
+        assert (result["n"], result["successes"], result["errored"]) == (report.n, report.successes, report.errored)
+        assert result["rate"] == report.successes / report.scored
+    for start, end, result in zip([-1, *ends[:-1]], ends, results, strict=True):
+        key = (result["checkpoint"], result["condition"])
+        block = [r["episode_id"] for r in records if (r["checkpoint"], r["condition"]) == key]
+        assert {e["data"].get("episode_id") for e in events[start + 1 : end]} - {None} == set(block)
+        assert events[end - 1]["type"] == "validation" and events[end - 1]["data"]["episode_id"] == block[-1]
+    assert ends[-1] == len(events) - 1
+
+
 def saved_conditions(run_dir: Path) -> list[dict[str, Any]]:
     return json.loads((run_dir / "evaluation_report.json").read_text())["conditions"]
 
