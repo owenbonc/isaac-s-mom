@@ -105,7 +105,7 @@ def create_app(
     launch: Launch = launch_run,
 ) -> FastAPI:
     """`task` is what a Teach-started run trains on; `generate` answers for Argon (None: Gemini)."""
-    app = FastAPI(title="Isaac's Mom dashboard")
+    app = FastAPI(title="Scaffld dashboard")
     # A DNS-rebinding page reaches 127.0.0.1 under its own host name, so only a local name is served.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     own_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}

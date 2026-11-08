@@ -12,7 +12,7 @@ web
 Robotics judges at the AgentVerse 2026 hackathon (Robotics track), watching the dashboard during a 5-minute live pitch on a laptop screen or projector, and later a 1-minute video. They know manipulation and sim-to-real; they are sceptical of staged demos and want evidence. The presenter (Owen) drives the page while talking.
 
 ## Product Purpose
-Isaac's Mom: an Argon teacher agent watches a weak robot student fail in simulation, diagnoses why from the robot's camera, demonstrates corrected behaviour, keeps only demonstrations an independent validator accepts, and fine-tunes the student. The dashboard shows that loop as it runs: what the robot sees, who is in control, what it decided and why, whether it worked, how much it has improved, and where each model runs. Success is a judge who can state, unprompted, what the robot saw, what changed, and whether the student got better.
+Scaffld: an Argon teacher agent watches a weak robot student fail in simulation, diagnoses why from the robot's camera, demonstrates corrected behaviour, keeps only demonstrations an independent validator accepts, and fine-tunes the student. The dashboard shows that loop as it runs: what the robot sees, who is in control, what it decided and why, whether it worked, how much it has improved, and where each model runs. Success is a judge who can state, unprompted, what the robot saw, what changed, and whether the student got better.
 
 ## Positioning
 The numbers are not asserted, they are derived: every figure comes from saved run files and carries its sample size, and each panel says whether it is live, recorded or placeholder.

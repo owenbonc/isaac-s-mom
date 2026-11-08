@@ -5,6 +5,7 @@ Server, timeout, rate-limit and transport errors raise `ArgonUnavailable`, which
 so a bad key or a wrong model stops the run before any episode.
 """
 
+import json
 import math
 import os
 import re
@@ -125,10 +126,13 @@ def gemini_generate(model: str = MODEL) -> Generate:
 
 
 def stub_generate(purpose: Purpose, parts: list[Part]) -> str:
-    """An offline stand-in: diagnoses nothing and ends every demo at once, so the loop runs without a key."""
-    if purpose == "diagnose":
-        return '{"hypothesis": "stub teacher: not diagnosed", "evidence": "", "confidence": 0.0, "lesson": ""}'
-    return '{"done": true, "reason": "stub teacher: offline stand-in"}'
+    """An offline stand-in: diagnoses nothing and ends every demo at once, so the loop runs without a key. A round's
+    diagnosis is one mode naming every failed trial, so the round teaches as the per-episode lessons would."""
+    if purpose != "diagnose":
+        return '{"done": true, "reason": "stub teacher: offline stand-in"}'
+    nothing = {"hypothesis": "stub teacher: not diagnosed", "evidence": "", "confidence": 0.0, "lesson": ""}
+    failed = re.findall(r"trial (ep-\S+) \(failed\)", str(parts[0]))
+    return json.dumps({"modes": [{**nothing, "explains": failed}]} if failed else nothing)
 
 
 class Argon:
