@@ -27,6 +27,7 @@ from isaacs_mom.orchestrator import cli, loop
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import carry_over, check_carry_over, evaluate, lesson_plan, run_loop
+from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
@@ -828,7 +829,9 @@ def test_a_round_teaches_by_its_failure_modes_and_records_them(tmp_path: Path) -
         make_student=StubStudent,
         train_student=stub_finetune,
     )
-    (record,) = json.loads((tmp_path / "diagnosis_r0.json").read_text())
+    written = json.loads((tmp_path / "diagnosis_r0.json").read_text())
+    assert written["fell_back"] is False
+    (record,) = written["modes"]
     failed = [d["episode_id"] for d in _logged(tmp_path, "diagnosis")]
     assert record["diagnosis"]["hypothesis"] == "twists too far" and len(record["demo_seeds"]) == 3
     assert {d["acting_on"] for d in _demos(tmp_path)} <= set(failed)  # a failed episode its mode names
@@ -890,7 +893,7 @@ def test_with_two_modes_each_rejected_scene_gets_its_own_failures_lesson_and_the
     taught = {
         lesson: [d["seed"] for d, given in zip(demos, lessons, strict=True) if given == lesson] for lesson in lessons
     }
-    record = json.loads((tmp_path / "diagnosis_r0.json").read_text())
+    record = json.loads((tmp_path / "diagnosis_r0.json").read_text())["modes"]
     assert [(r["diagnosis"]["lesson"], r["explains"], r["demo_seeds"]) for r in record] == [
         ("lesson a", failed[1:], taught["lesson a"]),
         ("lesson b", failed[:1], taught["lesson b"]),
@@ -922,6 +925,27 @@ def test_a_trial_ended_by_a_recording_error_is_not_in_the_rounds_diagnosis_eithe
     assert not bad & set(named[0])
 
 
+def test_a_round_whose_trials_all_pass_records_no_modes_and_no_fallback(tmp_path: Path) -> None:
+    sim, built = FakeSim(), []
+
+    def make_student(checkpoint: str) -> Policy:  # fails the held-out evaluation, then passes every trial
+        built.append(checkpoint)
+        return StubStudent(checkpoint) if len(built) <= len(heldout_seeds()) else ScriptedPolicy(sim)
+
+    run_loop(
+        sim,
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=1,
+        dev_trials=2,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=make_student,
+        train_student=stub_finetune,
+    )
+    assert json.loads((tmp_path / "diagnosis_r0.json").read_text()) == {"fell_back": False, "modes": []}
+
+
 def test_an_unusable_round_diagnosis_leaves_the_per_episode_lessons(tmp_path: Path) -> None:
     argon, acted = _round_argon(tmp_path, lambda failed: "not json")
     run_loop(
@@ -935,7 +959,7 @@ def test_an_unusable_round_diagnosis_leaves_the_per_episode_lessons(tmp_path: Pa
         make_student=StubStudent,
         train_student=stub_finetune,
     )
-    assert json.loads((tmp_path / "diagnosis_r0.json").read_text()) == []
+    assert json.loads((tmp_path / "diagnosis_r0.json").read_text()) == {"fell_back": True, "modes": []}
     assert [d["acting_on"] for d in _demos(tmp_path)] and acted  # the round still teaches, on the per-episode lessons
 
 

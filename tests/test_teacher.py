@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 import isaacs_mom.teacher.argon as argon_module
 from isaacs_mom.contracts import (
@@ -658,12 +659,19 @@ def modes(*explains: list[str], cite: str = "") -> str:
 def test_a_round_diagnosis_groups_the_failures_and_names_the_ones_each_mode_explains(tmp_path: Path) -> None:
     a, fake = argon(tmp_path, modes([*FAILED[:2], FAILED[0]], FAILED[2:]))  # a failure named twice counts once
     found = diagnose_round(ROUND, a)
+    assert found is not None
     assert [(m.diagnosis.hypothesis, m.diagnosis.lesson, m.explains) for m in found] == [
         ("mode 0", "lesson 0", FAILED[:2]),
         ("mode 1", "lesson 1", FAILED[2:]),
     ]
     assert all(isinstance(m, FailureMode) and isinstance(m.diagnosis, Diagnosis) for m in found)
     assert found[0].diagnosis.evidence == "seen in 3 trials" and len(events(tmp_path, "argon_call")) == 1  # rule 5
+
+
+def test_a_failure_mode_explains_at_least_one_failure() -> None:
+    lesson = Diagnosis(hypothesis="h", evidence="e", confidence=0.5, lesson="l")
+    with pytest.raises(ValidationError):
+        FailureMode(diagnosis=lesson, explains=[])  # lesson_plan shares demos by it, so none would divide by zero
 
 
 def test_the_round_prompt_gives_each_trial_its_verdict_and_skill_calls_only(tmp_path: Path) -> None:
@@ -720,6 +728,7 @@ def test_the_round_diagnosis_shows_at_most_eight_frames(tmp_path: Path) -> None:
         modes(["ep-9999-abcdef"]),  # a trial that isn't in the round
         modes(FAILED, cite=" like ep-9999-abcdef"),  # evidence citing a trial that isn't in the round
         modes(FAILED[:1], FAILED[1:2], FAILED[2:], FAILED[:1]),  # more than ROUND_MODES
+        json.dumps({"modes": [{**json.loads(modes(FAILED))["modes"][0], "severity": "high"}]}),  # a key no mode has
         json.dumps({"modes": []}),
         json.dumps(
             {"modes": [{"hypothesis": "x", "evidence": "y", "confidence": 2, "lesson": "z", "explains": FAILED}]}
@@ -727,17 +736,17 @@ def test_the_round_diagnosis_shows_at_most_eight_frames(tmp_path: Path) -> None:
         "not json",
     ],
 )
-def test_an_unusable_round_diagnosis_gives_no_modes_after_one_call(answer: str, tmp_path: Path) -> None:
+def test_an_unusable_round_diagnosis_falls_back_after_one_call(answer: str, tmp_path: Path) -> None:
     a, _ = argon(tmp_path, answer, modes(FAILED))  # a usable spare: a retry would take it
-    assert diagnose_round(ROUND, a) == []
+    assert diagnose_round(ROUND, a) is None  # fell back, not "nothing failed"
     assert len(events(tmp_path, "argon_call")) == 1 and events(tmp_path, "error")  # logged, never retried
 
 
-def test_an_unreachable_or_spent_argon_gives_no_modes(tmp_path: Path) -> None:
+def test_an_unreachable_or_spent_argon_falls_back(tmp_path: Path) -> None:
     a, fake = argon(tmp_path, ArgonUnavailable("ServerError: 503"), modes(FAILED))
-    assert diagnose_round(ROUND, a) == [] and len(fake.prompts) == 1  # never retried
+    assert diagnose_round(ROUND, a) is None and len(fake.prompts) == 1  # never retried
     spent, _ = argon(tmp_path / "spent", budget=0)
-    assert diagnose_round(ROUND, spent) == [] and not (tmp_path / "spent" / "events.jsonl").read_text().count(
+    assert diagnose_round(ROUND, spent) is None and not (tmp_path / "spent" / "events.jsonl").read_text().count(
         "argon_call"
     )
 

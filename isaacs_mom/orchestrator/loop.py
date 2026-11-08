@@ -264,18 +264,23 @@ def run_loop(
                 diagnosis = diagnose(manifest, [(episode_dir / s.frame).read_bytes() for s in manifest.steps], argon)
             events.emit("diagnosis", episode_id=manifest.episode_id, **diagnosis.model_dump())
             diagnosed.append((manifest.episode_id, diagnosis))
-        modes: list[FailureMode] = []
+        modes: list[FailureMode] | None = []
         if failures:
             frames = [
                 (m, [(run_dir / "episodes" / m.episode_id / s.frame).read_bytes() for s in m.steps]) for m in trials
             ]
             with heartbeat(events, failures[0].episode_id, HEARTBEAT_SECONDS):
                 modes = diagnose_round(frames, argon)
-        plan = lesson_plan(demos, modes, diagnosed)
+        plan = lesson_plan(demos, modes or [], diagnosed)
         seeds = choose_scenes(failures, demos, start=trial_start + 500)  # demo i replays failure i first
         taught = list(zip(seeds, plan, strict=True))
         # rule 6: each mode and the seeds it taught
-        record = [m.model_dump() | {"demo_seeds": [s for s, (_, d) in taught if d is m.diagnosis]} for m in modes]
+        record = {
+            "fell_back": modes is None,
+            "modes": [
+                m.model_dump() | {"demo_seeds": [s for s, (_, d) in taught if d is m.diagnosis]} for m in modes or []
+            ],
+        }
         write_atomically(run_dir / f"diagnosis_r{round_}.json", json.dumps(record, indent=2))
         moved = moves_bin(demos, move_bin_share)
         for i, seed in enumerate(seeds):

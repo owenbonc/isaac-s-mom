@@ -13,7 +13,7 @@ import re
 from collections.abc import Callable
 from typing import Literal
 
-from pydantic import BaseModel, Field, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, ValidationError
 
 from isaacs_mom.contracts import (
     MAX_ANGLE_DEG,
@@ -157,6 +157,8 @@ Diagnose the most likely cause of the failure from this evidence only. Answer wi
 
 
 class _Mode(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
     hypothesis: str
     evidence: str
     confidence: float = Field(ge=0.0, le=1.0)
@@ -172,7 +174,7 @@ class FailureMode(BaseModel):
     """One cause shared by some of a round's failed trials: the lesson for it, and the failed trials it explains."""
 
     diagnosis: Diagnosis
-    explains: list[str]
+    explains: list[str] = Field(min_length=1)
 
 
 def _accepted(episode: EpisodeManifest) -> bool:
@@ -210,17 +212,17 @@ def _round_modes(answer: str, trial_ids: set[str], failed_ids: set[str]) -> list
     for mode in parsed.modes:
         explains = list(dict.fromkeys(mode.explains))
         cited = set(EPISODE_ID.findall(f"{mode.hypothesis} {mode.evidence} {mode.lesson}"))
-        if not set(explains) <= failed_ids or not cited <= trial_ids:  # only this round's trials, only its failures
+        if not set(explains) <= failed_ids or not cited <= trial_ids:
             return None
         diagnosis = Diagnosis(**mode.model_dump(exclude={"explains"}))
         modes.append(FailureMode(diagnosis=diagnosis, explains=explains))
     return modes
 
 
-def diagnose_round(trials: list[tuple[EpisodeManifest, list[bytes]]], argon: Argon) -> list[FailureMode]:
+def diagnose_round(trials: list[tuple[EpisodeManifest, list[bytes]]], argon: Argon) -> list[FailureMode] | None:
     """The round's failure modes, from every student trial of it, failed and successful, in one Argon call: each
-    mode names the failed trials it explains. Empty when Argon is unreachable, over budget or unusable, so the
-    per-episode lessons stand."""
+    mode names the failed trials it explains. Empty when nothing failed; None when Argon is unreachable, over budget
+    or unusable, so the per-episode lessons stand."""
     failed = [episode for episode, _ in trials if not _accepted(episode)]
     if not failed:
         return []
@@ -245,12 +247,12 @@ this JSON object, 1 to {ROUND_MODES} modes, the one explaining the most failures
 sentence the teacher should apply when demonstrating this task."""
     answer = argon.ask("diagnose", [prompt, *_decision_frames(trials)])  # one call per round (rule 5)
     if answer is None:
-        return []
+        return None
     ids = {episode.episode_id for episode, _ in trials}
     modes = _round_modes(answer, ids, {episode.episode_id for episode in failed})
     if modes is None:
         argon.error("diagnose", "unusable round diagnosis", raw=answer[:RAW_LOG_CHARS])
-        return []
+        return None
     return modes
 
 
