@@ -2,11 +2,11 @@
 
 # Scaffld
 
-### A robot teacher that finds the gaps in a robot's skills and builds its own lessons.
+### An Argon-powered robot teacher that diagnoses failures in a robot’s skills and builds its own lessons.
 
-## One typed sentence → a new, tested robot skill in 39.7 minutes.
+## One sentence description of a task → a new, tested robot skill in 39.7 minutes.
 
-**No human demonstrations. No labels. The trained student then runs alone on a laptop.**
+**No human demonstrations. No labels. The trained robot student runs alone on a laptop.**
 
 <sub>39.7 min is the wall-clock time of the measured stages (spec, demos, fine-tune, exam); it excludes a 70-minute wait for a busy GPU.</sub>
 
@@ -15,13 +15,13 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 <img src="docs/media/scaffld-video-excerpt.gif" width="100%" alt="The student alone: the simulator moves the bin after the lift, the student still puts the box in, and the validator accepts">
 
-<sub>From our simulation video (<a href="docs/media/scaffld-simulation-video.mp4">full take, 54 s</a>). The student works alone on a scene it has never seen. After the lift, the simulator moves the bin without warning; the student, which sees only its head camera (right), still puts the box in. Shown at 0.5× speed.</sub>
+<sub>From our simulation video (<a href="docs/media/scaffld-simulation-video.mp4">full take, 54 s</a>). The student works alone on a scene it has never seen. After lifting the box, the simulator moves the bin without warning; the student, which sees only from its RGB head camera (right), still puts the box in. Shown at 0.5× speed.</sub>
 
 <br>
 
 | **39.7 min** | **0/20 → 18/20** | **10/20 → 18/20** (untargeted demos: also 18/20) | **19/20 vs 0/20** | **0** |
 |:---:|:---:|:---:|:---:|:---:|
-| to teach the robot **one new skill** from one sentence | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic teaching round** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image** (on a Mac); a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
+| to teach the robot **one new skill** from a one sentence description | unseen scenes the student then solves **alone** (17/20 with the bin moved) | after **one automatic teaching round** on a weaker student (p = 0.039) | the same student **with its camera vs a grey image** (on a Mac); a second student on the laptop GPU: 18/20 vs 0/20 | **teleoperated steps** or **human labels** |
 
 [Technical summary (PDF)](docs/technical-summary.pdf) · [Pitch deck (PDF)](docs/deck/deck.pdf) · [How it works](#how-it-works) · [Repair loop](#the-repair-loop-test-diagnose-re-teach-until-its-good-enough) · [Results](#results) · [Impact](#impact) · [Videos](#videos) · [Live demo](#live-demo) · [Quickstart](#quickstart)
 
@@ -33,7 +33,7 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 Robots learn new skills from **human demonstrations**, and those are slow and costly: DROID needed 50 collectors for 12 months to record 76k trajectories, and RT-1 13 robots for 17 months for 130k episodes. Every new failure costs more operator hours.
 
-**Scaffld hands that job to an agent.** In teaching, scaffolding is support given exactly where a learner struggles, then taken away. Here a cloud teacher, **Argon**, turns one sentence into a checked task, demonstrates it by driving the robot itself, keeps only what an independent validator accepts, and trains a small student that then **runs on the robot alone**.
+**Scaffld hands that job to an agent.** With human training, support given exactly where the learner struggles, which is then taken away. Here a cloud teacher, **Argon**, turns one sentence into a checked task, and demonstrates it by driving the robot itself. Only successful demos an independent validator accepts is kept, and is used to train a small VLM student that then **runs on the robot alone**.
 
 ## How it works
 
@@ -41,11 +41,11 @@ Robots learn new skills from **human demonstrations**, and those are slow and co
 
 <img src="docs/media/pipeline.png" width="100%" alt="Pipeline: one sentence, Argon writes the spec, Argon teachers demonstrate and a validator keeps what works, LoRA fine-tune, student examined alone; elapsed time to scale">
 
-1. **One sentence.** A person types what the robot should learn. Nothing else is task-specific: no teleoperation, no labels.
+1. **One sentence description.** A person types what the robot should learn. Nothing else is task-specific: no teleoperation, no labels.
 2. **Argon writes the task.** The scene, which objects may move, and a **declarative success rule**, all checked by code before any demo runs.
-3. **Argon teaches; a validator keeps what works.** Eight Argon teachers drive the robot in parallel through **the same head camera and skills the student will have**. An independent validator judges each demo from ground truth, and only accepted steps become training data.
+3. **Argon teaches; a validator keeps what works.** Eight Argon teachers drive the robot in parallel through **the same head camera and skills the student will have**. An independent validator judges each demo from ground truth, and only accepted, successful steps become training data.
 4. **The student learns.** SmolVLM2-500M is fine-tuned with LoRA r16 on a laptop GPU to pick the next skill from the head-camera image.
-5. **The student is examined alone** on 20 **sealed** scenes that no demonstration may use: no teacher, no cloud.
+5. **The student is examined alone** on 20 **sealed** scenes that no demonstration may be used: no teacher, no cloud.
 
 ### The repair loop: test, diagnose, re-teach, until it's good enough
 
