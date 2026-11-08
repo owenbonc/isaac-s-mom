@@ -3,6 +3,7 @@ import math
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -268,6 +269,67 @@ def test_a_move_due_when_the_student_stops_is_made_once_not_again_when_the_teach
     moves = [line for line in events.path.read_text().splitlines() if '"perturbation"' in line]
     assert manifest.takeover_step == 1  # the student stopped at step 1, where the move was due
     assert [p.before_step for p in manifest.perturbations] == [1] and len(moves) == 1
+
+
+class Calls:
+    """Plays a fixed list of skills, then stops."""
+
+    controller: Controller = "student"
+    checkpoint: str | None = None
+
+    def __init__(self, *skills: str) -> None:
+        self.skills = list(skills)
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        return SkillCall.model_validate({"skill": self.skills.pop(0)}) if self.skills else None
+
+
+def _move_bin_events(events: EventLog, episode_id: str) -> list[dict[str, Any]]:
+    logged = [json.loads(line) for line in events.path.read_text().splitlines()]
+    return [e for e in logged if e["data"].get("episode_id") == episode_id and e["type"] in ("perturbation", "error")]
+
+
+def test_the_bin_moves_once_right_after_a_lift_that_worked_and_the_episode_replays(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1505}
+    still = run_episode(sim, ScriptedPolicy(sim), **common)
+    bin_unmoved = sim.ground_truth().bin_xy
+    moved = run_episode(sim, ScriptedPolicy(sim), move_bin_after_lift=True, **common)
+    lift = next(i for i, s in enumerate(moved.steps) if s.skill_call.skill == "lift")
+    assert [(p.before_step, p.perturbation.kind) for p in moved.perturbations] == [(lift + 1, "move_bin")]
+    (move,) = _move_bin_events(events, moved.episode_id)
+    assert move["type"] == "perturbation" and move["data"]["kind"] == "move_bin"
+    assert moved.validation and moved.validation.accepted  # it re-aims every step, so it finds the bin again
+    assert sim.ground_truth().bin_xy != bin_unmoved and len(moved.steps) >= len(still.steps)
+    assert replay(FakeSim(), tmp_path / "episodes" / moved.episode_id / "manifest.json")
+
+
+def test_without_a_lift_the_bin_never_moves(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1505}
+    manifest = run_episode(sim, GiveUp(), move_bin_after_lift=True, **common)
+    assert manifest.perturbations == [] and _move_bin_events(events, manifest.episode_id) == []  # trigger not reached
+
+
+def test_the_trigger_reads_the_box_not_the_skill_name(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1505}
+    manifest = run_episode(sim, Calls("lift", "reobserve", "reobserve"), move_bin_after_lift=True, **common)
+    assert manifest.steps[0].skill_call.skill == "lift" and manifest.perturbations == []  # lifted nothing
+
+
+def test_a_bin_move_the_sim_refuses_is_reported_not_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sim = FakeSim()
+    monkeypatch.setattr(sim, "perturb", lambda perturbation: False)
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1505}
+    manifest = run_episode(sim, ScriptedPolicy(sim), move_bin_after_lift=True, **common)
+    (refused,) = _move_bin_events(events, manifest.episode_id)
+    assert manifest.perturbations == [] and refused["type"] == "error"
+    assert str(refused["data"]["error"]).startswith("move_bin not applied")
 
 
 def test_scripted_episode_succeeds_and_takeover_is_recorded(tmp_path: Path) -> None:

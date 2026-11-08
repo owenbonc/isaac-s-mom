@@ -2,6 +2,7 @@ import argparse
 import time
 from pathlib import Path
 
+from isaacs_mom.orchestrator import evaluation
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
 from isaacs_mom.sim.base import TruthSim
@@ -47,6 +48,8 @@ def main() -> None:
     dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a run directory")
     dashboard.add_argument("--run", type=Path, required=True)
     dashboard.add_argument("--port", type=int, default=8200)
+    evaluate = commands.add_parser("eval", help="the student evaluation report in three conditions (SPEC §6.10)")
+    evaluation.add_arguments(evaluate)
     demo = commands.add_parser("demo", help="the judged single take, recorded to an MP4")
     demo.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     demo.add_argument("--ckpt", required=True)
@@ -67,6 +70,9 @@ def main() -> None:
             "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)"
         )
     args = parser.parse_args()
+    if args.command == "eval":
+        evaluation.run_from_args(evaluate, args)
+        return
     if args.command == "dashboard":
         from isaacs_mom.orchestrator.dashboard.server import serve
 
