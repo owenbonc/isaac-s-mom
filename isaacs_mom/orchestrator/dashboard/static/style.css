@@ -10,9 +10,9 @@
 --ease-out:cubic-bezier(.23,1,.32,1);
 --sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 --r:10px;--r-sm:6px;
-/* Type roles at the Claude desktop app's density: labels 12 px and body 14 px at 1280x720; the skill on the frame
-   and the held-out figure stay large enough for the back of the room. */
---t-label:calc(12rem / 14);--t-code:.93rem;--t-title:1.07rem;--t-slate:1.29rem;--t-skill:2.2rem;--t-fig:2.8rem}
+/* Two sizes at the Claude desktop app's density, labels 12 px and body 14 px at 1280x720, and one large number, the
+   held-out change; emphasis is weight (450 or 600) and colour, never another size. */
+--t-label:calc(12rem / 14);--t-fig:2.8rem}
 *{box-sizing:border-box}
 html{scrollbar-color:rgb(255 255 255 / .22) transparent;color-scheme:dark}
 /* 14px at 1280x720, growing with the smaller viewport side to 16px, so the layout keeps its proportions. */
@@ -34,7 +34,7 @@ h2{font-size:var(--t-label);color:var(--muted);letter-spacing:.01em}
 
 header.bar{flex:none;position:relative;z-index:3}
 .bar .top{display:flex;align-items:center;gap:.4rem .6rem;padding:.4rem .75rem .2rem;flex-wrap:wrap}
-header.bar h1{font-size:var(--t-title);flex:none}
+header.bar h1{font-size:1rem;flex:none}
 .bar .where{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem .9rem;padding:0 .75rem .3rem}
 #episode-line{margin:0;font-size:var(--t-label);font-weight:600;white-space:nowrap}
 #episode-line .lost{color:var(--bad)}
@@ -70,7 +70,7 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 
 /* The run picker: the shown run's id and a chevron; its popover lists every run. */
 .runs{position:relative;min-width:0;flex:0 1 auto}
-.runs summary{max-width:17rem;list-style:none;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.15rem .35rem;border-radius:var(--r-sm);font:500 var(--t-label)/1.35 var(--mono)}
+.runs summary{max-width:17rem;list-style:none;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.15rem .35rem;border-radius:var(--r-sm);font:450 var(--t-label)/1.35 var(--mono)}
 .runs summary::-webkit-details-marker{display:none}
 .runs[open] summary{background:var(--raised)}
 @media (hover:hover){.runs summary:hover{background:var(--raised)}}
@@ -84,7 +84,7 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 @media (hover:hover){.run-list a:hover{background:var(--row)}}
 .run-list a[aria-current]{background:var(--raised)}
 .run-list .chip{grid-area:chip;justify-self:start}
-.run-what{grid-area:what;font-weight:550;overflow-wrap:anywhere}
+.run-what{grid-area:what;font-weight:600;overflow-wrap:anywhere}
 .run-id{grid-area:id;font-size:var(--t-label);color:var(--muted);overflow-wrap:anywhere}
 .run-why{grid-area:why;font-size:var(--t-label);overflow-wrap:anywhere}
 
@@ -92,7 +92,7 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
    a bare icon and its name, filled only under the pointer or the focus; its shortcut is in its tooltip and in Labels. */
 .presenter{display:flex;align-items:center;gap:.9rem;margin-left:auto;flex:none}
 .presenter .group{display:inline-flex;gap:2px}
-.presenter button{position:relative;font:500 var(--t-code)/1 var(--sans);color:var(--ink);background:none;border:0;border-radius:7px;height:1.95rem;padding:0 .6rem 0 .5rem;display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;transition:background-color .15s,transform .12s var(--ease-out)}
+.presenter button{position:relative;font:450 1rem/1 var(--sans);color:var(--ink);background:none;border:0;border-radius:7px;height:1.95rem;padding:0 .6rem 0 .5rem;display:inline-flex;align-items:center;gap:.35rem;cursor:pointer;transition:background-color .15s,transform .12s var(--ease-out)}
 @media (hover:hover){.presenter button:hover:not(:disabled){background:var(--raised)}}
 .presenter button:focus-visible{background:var(--raised)}
 .presenter button:active:not(:disabled){transform:scale(.96)}
@@ -105,7 +105,7 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 /* Wide enough for "Resume · 999 new", so pausing never reflows the header above the frame. */
 #b-pause{min-width:10.8rem;justify-content:center}
 /* The tooltip names the key and its shortcut: after a beat on hover, at once on keyboard focus. */
-.presenter button::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:500 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
+.presenter button::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
 .presenter .group:last-child button::after{left:auto;right:0;--tx:0%}
 @media (hover:hover){.presenter button:hover::after{opacity:1;translate:var(--tx) 0;transition-delay:.3s}}
 .presenter button:focus-visible::after{opacity:1;translate:var(--tx) 0}
@@ -125,7 +125,7 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .chip.refused{color:var(--muted)}
 .chip.refused::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px solid currentColor;background:linear-gradient(135deg,transparent 42%,currentColor 42% 58%,transparent 58%)}
 /* Panel labels are grey and lighter than the header's status, which stays the one to read first. */
-.chip.quiet{font-weight:500;color:var(--muted)}
+.chip.quiet{font-weight:450;color:var(--muted)}
 .tag{display:inline-flex;align-items:center;gap:.4rem;font-size:var(--t-label);font-weight:600;line-height:1.35;white-space:nowrap}
 .tag.student{color:var(--student)}
 .tag.teacher{color:var(--teacher)}
@@ -155,7 +155,7 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .teach input::placeholder{color:var(--muted)}
 .teach input:read-only{color:var(--muted)}
 .teach .count{position:absolute;right:.6rem;top:50%;translate:0 -50%;font-size:var(--t-label);color:var(--muted);pointer-events:none}
-.teach button{font:600 var(--t-code)/1 var(--sans);height:1.85rem;padding:0 .75rem 0 .6rem;border:0;border-radius:999px;background:var(--accent);color:var(--on-accent);display:inline-flex;align-items:center;gap:.3rem;cursor:pointer;transition:transform .12s var(--ease-out)}
+.teach button{font:600 1rem/1 var(--sans);height:1.85rem;padding:0 .75rem 0 .6rem;border:0;border-radius:999px;background:var(--accent);color:var(--on-accent);display:inline-flex;align-items:center;gap:.3rem;cursor:pointer;transition:transform .12s var(--ease-out)}
 .teach button:active:not(:disabled){transform:scale(.96)}
 .teach:has(input:placeholder-shown) button,.teach button:disabled{background:var(--raised);color:var(--ink)}
 .teach button:disabled{cursor:progress}
@@ -210,15 +210,14 @@ footer.models .v{color:var(--muted)}
 .over .tag.ink{background:var(--accent);color:var(--on-accent);box-shadow:0 0 0 1px #000}
 .over .tag.ink .i{width:1rem;height:1rem}
 /* The skill the shown frame led to is the robot's voice: the largest type on the stage, in its controller's hue. */
-.over .said{display:inline-flex;align-items:center;gap:.5rem;max-width:100%;padding:.1rem .6rem .14rem .5rem;font:700 var(--t-skill)/1.15 var(--mono);letter-spacing:-.01em}
+.over .said{display:inline-flex;align-items:center;gap:.5rem;max-width:100%;padding:.1rem .6rem .14rem .5rem;font:600 1rem/1.35 var(--mono)}
 .said.student{color:var(--student)}
 .said.teacher{color:var(--teacher)}
 .over .said::before{width:.3em;height:.3em}
-@container (width < 24rem){.over .said{font-size:var(--t-slate)}}
 /* Frame-sized, so the stage keeps its shape between episodes and while nothing is on camera yet. */
 .slate{display:grid;place-content:center;gap:.4rem;padding:1.5rem;text-align:center;text-wrap:balance}
 .slate p{margin:0}
-.slate .what{font-size:var(--t-slate);font-weight:600}
+.slate .what{font-weight:600}
 /* The fine-tune's contact sheet: n × n frames of 4:3 fill the 4:3 frame. */
 .sheet ol{position:absolute;inset:0;margin:0;padding:0;list-style:none;display:grid;grid-template:repeat(var(--n),minmax(0,1fr))/repeat(var(--n),minmax(0,1fr));gap:2px}
 .sheet li{position:relative;overflow:hidden;background:var(--well)}
@@ -251,7 +250,7 @@ footer.models .v{color:var(--muted)}
 .foot>.chip:last-child{margin-left:auto}
 .caption{flex:1;min-width:0;margin:0;padding:.3rem .55rem;border-radius:var(--r-sm);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* The move's caption is the stage's one raised line: grey, in full ink, the colour left to the frames. */
-.caption.moved{background:var(--raised);color:var(--ink);font-weight:550;white-space:normal;text-wrap:pretty;box-shadow:inset 0 0 0 1px var(--edge)}
+.caption.moved{background:var(--raised);color:var(--ink);font-weight:600;white-space:normal;text-wrap:pretty;box-shadow:inset 0 0 0 1px var(--edge)}
 .caption.wrap{white-space:normal;text-wrap:pretty}
 /* A clamped caption's padding would show the top of the line after its last; a transparent border keeps that gap blank. */
 .caption.clamped{padding-block:0;border-block:.3rem solid transparent}
@@ -308,7 +307,7 @@ ol.log li .n{font-size:var(--t-label);color:var(--muted);text-align:right}
 ol.log li.event .n{color:inherit;display:flex;justify-content:flex-end;align-self:center}
 ol.log li.event .n svg{width:1em;height:1em}
 ol.log .line{display:flex;flex-wrap:wrap;justify-content:space-between;align-items:baseline;gap:0 .6rem;min-width:0}
-ol.log .skill{font:600 var(--t-code)/1.35 var(--mono);overflow-wrap:anywhere}
+ol.log .skill{font:600 1rem/1.35 var(--mono);overflow-wrap:anywhere}
 ol.log li.student .skill{color:var(--student)}
 ol.log li.teacher .skill{color:var(--teacher)}
 ol.log .reason{grid-column:2;text-wrap:pretty;overflow-wrap:anywhere}
