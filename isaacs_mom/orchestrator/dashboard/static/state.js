@@ -404,7 +404,6 @@
     const first = s.rounds[0];
     const last = s.rounds[s.rounds.length - 1];
     const pair = first === last ? [first] : [first, last];
-    const name = roundName;
     const scored = (r) => r.n - r.errored;
     // Whole percentages of the scored episodes; the change is taken between the rates as shown, so the figures agree.
     const rate = (r) => (scored(r) > 0 ? Math.round((100 * r.successes) / scored(r)) : null);
@@ -412,10 +411,10 @@
     const points = pair.length > 1 && !rates.includes(null) ? rates[1] - rates[0] : null;
     const said = (r) =>
       !r.n
-        ? `no held-out episode ran ${name(r)}`
+        ? `no held-out episode ran ${roundName(r)}`
         : scored(r) <= 0
-          ? `all ${r.n} held-out episodes errored ${name(r)}`
-          : `${rate(r)}%, ${r.successes} of ${scored(r)}, ${name(r)}${r.errored ? `, ${r.errored} errored` : ""}`;
+          ? `all ${r.n} held-out episodes errored ${roundName(r)}`
+          : `${rate(r)}%, ${r.successes} of ${scored(r)}, ${roundName(r)}${r.errored ? `, ${r.errored} errored` : ""}`;
     const change = points === null ? "" : points === 0 ? "No change: " : `${points > 0 ? "Up" : "Down"} ${Math.abs(points)} percentage points: `;
     // One denominator is said once ("4 → 15 of 20"); two that differ go with their counts ("9/18 → 15/20").
     const of = scored(first);
@@ -429,7 +428,7 @@
       counts,
       spoken: change + pair.map(said).join(", then "),
       errored: pair.some((r) => r.errored) ? `${pair.map((r) => r.errored).join(" → ")} errored` : null,
-      names: pair.map(name).join(" → "),
+      names: pair.map(roundName).join(" → "),
       ids: pair.map((r) => r.checkpoint).join(" → "),
     };
   }

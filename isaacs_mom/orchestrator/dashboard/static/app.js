@@ -175,9 +175,10 @@ function renderControl() {
   }
   const [kind, where] = kindOf(ep);
   // A seed's episode names its checkpoint and leads with the key back to the seed.
-  const row = place === "episode" && MomState.results(MomState.shown(view)).seeds.find((x) => x.seed === view.seed);
+  const r = place === "episode" && MomState.results(MomState.shown(view));
+  const row = r && r.seeds.find((x) => x.seed === view.seed);
   const k = row ? row.episodes.findIndex((x) => x.id === ep.id) : -1;
-  const at = k < 0 ? "" : `, ${esc(MomState.results(MomState.shown(view)).checkpoints[k].name)}`;
+  const at = k < 0 ? "" : `, ${esc(r.checkpoints[k].name)}`;
   const among = position(ep);
   const back = place === "episode" ? `<button type="button" class="back" data-back data-f="control-back" aria-label="Back to seed ${esc(view.seed)}" data-tip="Back to seed ${esc(view.seed)} · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
   const head = `${back}<span class="kind"><span class="what">${kind}</span><span class="note">${where}${at}${among ? ` · ${among.toLowerCase()}` : ""}</span></span>`;
