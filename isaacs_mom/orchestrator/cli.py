@@ -5,7 +5,14 @@ from pathlib import Path
 
 from isaacs_mom.orchestrator import evaluation
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, MOVE_BIN_SHARE, bin_moves, run_loop
+from isaacs_mom.orchestrator.loop import (
+    DEMOS_PER_ROUND,
+    DEV_TRIALS,
+    MOVE_BIN_SHARE,
+    bin_moves,
+    check_carry_over,
+    run_loop,
+)
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -98,8 +105,6 @@ def main() -> None:
             "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)"
         )
     args = parser.parse_args()
-    if getattr(args, "from_run", None) is not None and not (args.from_run / "checkpoints").is_dir():
-        run.error(f"--from-run {args.from_run} has no checkpoints/ to start from")
     if args.command == "eval":
         evaluation.run_from_args(evaluate, args)
         return
@@ -144,9 +149,16 @@ def main() -> None:
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
+    sim = None
+    if args.from_run is not None:
+        sim = make_sim(args.sim, args.task)
+        try:  # before anything is written, so a refused source leaves no run behind
+            check_carry_over(args.from_run, run_dir, sim.sim_version)
+        except ValueError as refused:
+            run.error(f"--from-run: {refused}")
     argon = checked_argon(EventLog(run_dir, args.run_id))
     results = run_loop(
-        make_sim(args.sim, args.task),
+        sim or make_sim(args.sim, args.task),
         run_dir,
         args.run_id,
         max_rounds=args.rounds,
@@ -160,7 +172,10 @@ def main() -> None:
     )
     if args.from_run is not None:
         record = json.loads((run_dir / "from_run.json").read_text())
-        print(f"round 0 started from {record['checkpoint']}, with {len(record['episodes'])} of its demonstrations")
+        carried, left = len(record["episodes"]), len(record["left_behind"])
+        print(
+            f"round 0 started from {record['checkpoint']}: {carried} demonstrations carried, {left} exams left behind"
+        )
     print(bin_moves(run_dir / "events.jsonl"))
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"

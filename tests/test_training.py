@@ -84,7 +84,10 @@ def test_physics_invalid_episode_gives_no_examples(tmp_path: Path) -> None:
 def _write(run_dir: Path, episode_id: str, episode: EpisodeManifest) -> None:
     episode_dir = run_dir / "episodes" / episode_id
     episode_dir.mkdir(parents=True)
-    (episode_dir / "manifest.json").write_text(episode.model_copy(update={"episode_id": episode_id}).model_dump_json())
+    written = episode.model_copy(
+        update={"episode_id": episode_id, "run_id": episode.run_id if episode.run_id != "run" else run_dir.name}
+    )
+    (episode_dir / "manifest.json").write_text(written.model_dump_json())
 
 
 def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
@@ -122,6 +125,15 @@ def test_each_training_set_comes_with_a_report_card(tmp_path: Path) -> None:
         examples=2,
     )
     assert len(training_set.read_text().splitlines()) == summary.examples
+
+
+def test_demonstrations_another_run_recorded_are_counted_apart(tmp_path: Path) -> None:
+    _write(tmp_path, "a-own", manifest())
+    _write(tmp_path, "b-carried", manifest().model_copy(update={"run_id": "earlier-run"}))
+    summary = TrainingSetSummary.model_validate_json(
+        build_training_set(tmp_path, 1).with_suffix(".summary.json").read_text()
+    )
+    assert (summary.accepted, summary.carried) == (2, 1)
 
 
 def test_a_teacher_refused_at_its_first_step_is_a_rejected_demonstration(tmp_path: Path) -> None:
