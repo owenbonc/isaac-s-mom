@@ -3,6 +3,7 @@ import math
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import pytest
@@ -278,6 +279,67 @@ def test_a_move_due_when_the_student_stops_is_made_once_not_again_when_the_teach
     assert [p.before_step for p in manifest.perturbations] == [1] and len(moves) == 1
 
 
+class Calls:
+    """Plays a fixed list of skills, then stops."""
+
+    controller: Controller = "student"
+    checkpoint: str | None = None
+
+    def __init__(self, *skills: str) -> None:
+        self.skills = list(skills)
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        return SkillCall.model_validate({"skill": self.skills.pop(0)}) if self.skills else None
+
+
+def _move_bin_events(events: EventLog, episode_id: str) -> list[dict[str, Any]]:
+    logged = [json.loads(line) for line in events.path.read_text().splitlines()]
+    return [e for e in logged if e["data"].get("episode_id") == episode_id and e["type"] in ("perturbation", "error")]
+
+
+def test_the_bin_moves_once_right_after_a_lift_that_worked_and_the_episode_replays(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1505}
+    still = run_episode(sim, ScriptedPolicy(sim), **common)
+    bin_unmoved = sim.ground_truth().bin_xy
+    moved = run_episode(sim, ScriptedPolicy(sim), move_bin_after_lift=True, **common)
+    lift = next(i for i, s in enumerate(moved.steps) if s.skill_call.skill == "lift")
+    assert [(p.before_step, p.perturbation.kind) for p in moved.perturbations] == [(lift + 1, "move_bin")]
+    (move,) = _move_bin_events(events, moved.episode_id)
+    assert move["type"] == "perturbation" and move["data"]["kind"] == "move_bin"
+    assert moved.validation and moved.validation.accepted  # it re-aims every step, so it finds the bin again
+    assert sim.ground_truth().bin_xy != bin_unmoved and len(moved.steps) >= len(still.steps)
+    assert replay(FakeSim(), tmp_path / "episodes" / moved.episode_id / "manifest.json")
+
+
+def test_without_a_lift_the_bin_never_moves(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1505}
+    manifest = run_episode(sim, GiveUp(), move_bin_after_lift=True, **common)
+    assert manifest.perturbations == [] and _move_bin_events(events, manifest.episode_id) == []  # trigger not reached
+
+
+def test_the_trigger_reads_the_box_not_the_skill_name(tmp_path: Path) -> None:
+    sim = FakeSim()
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1505}
+    manifest = run_episode(sim, Calls("lift", "reobserve", "reobserve"), move_bin_after_lift=True, **common)
+    assert manifest.steps[0].skill_call.skill == "lift" and manifest.perturbations == []  # lifted nothing
+
+
+def test_a_bin_move_the_sim_refuses_is_reported_not_recorded(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    sim = FakeSim()
+    monkeypatch.setattr(sim, "perturb", lambda perturbation: False)
+    events = EventLog(tmp_path, "t")
+    common = {"run_dir": tmp_path, "events": events, "split": "dev", "round_": 0, "instruction": "hug", "seed": 1505}
+    manifest = run_episode(sim, ScriptedPolicy(sim), move_bin_after_lift=True, **common)
+    (refused,) = _move_bin_events(events, manifest.episode_id)
+    assert manifest.perturbations == [] and refused["type"] == "error"
+    assert str(refused["data"]["error"]).startswith("move_bin not applied")
+
+
 def test_scripted_episode_succeeds_and_takeover_is_recorded(tmp_path: Path) -> None:
     sim = FakeSim()
     events = EventLog(tmp_path, "t")
@@ -547,24 +609,29 @@ def test_the_cli_sizes_a_round_with_demos_and_dev_trials(tmp_path: Path, monkeyp
     sizes: dict[str, object] = {}
 
     def run_loop_spy(*args: object, **kwargs: object) -> list[object]:
-        sizes.update(demos=kwargs["demos"], dev_trials=kwargs["dev_trials"])
+        sizes.update(demos=kwargs["demos"], dev_trials=kwargs["dev_trials"], share=kwargs["move_bin_share"])
         return []
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "run_loop", run_loop_spy)
     base = ["mom", "run", "--sim", "fake", "--student", "stub", "--rounds", "1"]
-    monkeypatch.setattr(sys, "argv", [*base, "--demos", "80", "--dev-trials", "15"])
+    monkeypatch.setattr(sys, "argv", [*base, "--demos", "80", "--dev-trials", "15", "--move-bin-share", "0.5"])
     cli.main()
-    assert sizes == {"demos": 80, "dev_trials": 15}
+    assert sizes == {"demos": 80, "dev_trials": 15, "share": 0.5}
     monkeypatch.setattr(sys, "argv", base)
     cli.main()
-    assert sizes == {"demos": loop.DEMOS_PER_ROUND, "dev_trials": loop.DEV_TRIALS}
+    assert sizes == {"demos": loop.DEMOS_PER_ROUND, "dev_trials": loop.DEV_TRIALS, "share": loop.MOVE_BIN_SHARE}
 
 
-@pytest.mark.parametrize("flag", ["--demos", "--dev-trials"])
-def test_the_cli_refuses_a_round_size_below_one(flag: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(
+    ("flag", "value"),
+    [("--demos", "0"), ("--dev-trials", "0"), ("--move-bin-share", "1.5"), ("--move-bin-share", "-0.1")],
+)
+def test_the_cli_refuses_a_round_size_below_one_or_a_share_above_all(
+    flag: str, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", flag, "0"])
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", flag, value])
     with pytest.raises(SystemExit) as exit_:
         cli.main()
     assert exit_.value.code == 2
@@ -601,3 +668,68 @@ def test_a_finetune_reports_what_it_trained_on_how_long_and_where(tmp_path: Path
     assert completed["examples"] == len(Path(started["training_set"]).read_text().splitlines())
     assert isinstance(completed["duration_s"], float) and completed["duration_s"] >= 0
     assert Path(completed["checkpoint_path"]).parts == (*tmp_path.parts, "some-run", "checkpoints", "ckpt-r1")
+
+
+def test_a_stated_share_of_teacher_demonstrations_gets_the_bin_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = loop.run_episode
+    asked: list[tuple[str, bool]] = []
+
+    def recorded(sim: FakeSim, policy: Any, **kwargs: Any) -> EpisodeManifest:
+        asked.append((policy.controller, kwargs.get("move_bin_after_lift", False)))
+        return real(sim, policy, **kwargs)
+
+    monkeypatch.setattr(loop, "run_episode", recorded)
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=8,
+        dev_trials=1,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=StubStudent,
+        train_student=stub_finetune,
+        move_bin_share=0.25,
+    )
+    assert [moved for controller, moved in asked if controller == "teacher"] == [False, False, False, True] * 2
+    assert not any(moved for controller, moved in asked if controller == "student")  # trials and held-out: unmoved
+    logged = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    scheduled = [e["data"]["move_bin_after_lift"] for e in logged if e["type"] == "episode_started"]
+    assert sum(scheduled) == 2 and len(scheduled) == len(asked)  # every episode states whether its move was due
+
+
+@pytest.mark.parametrize(
+    ("demos", "share", "moved"), [(20, 0.25, {3, 7, 11, 15, 19}), (5, 0.0, set()), (3, 1.0, {0, 1, 2}), (4, 0.1, set())]
+)
+def test_the_share_is_spread_evenly(demos: int, share: float, moved: set[int]) -> None:
+    assert loop.moves_bin(demos, share) == moved
+
+
+@pytest.mark.parametrize("share", [1.5, -0.1])
+def test_a_share_outside_zero_to_one_is_refused(share: float, tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="share of the demonstrations"):
+        run_loop(
+            FakeSim(),
+            tmp_path,
+            "t",
+            argon=silent_argon(tmp_path, "t"),
+            make_student=StubStudent,
+            train_student=stub_finetune,
+            max_rounds=0,
+            move_bin_share=share,
+        )
+
+
+def test_the_run_reports_the_bin_moves_that_happened_not_the_share_asked_for(tmp_path: Path) -> None:
+    events = EventLog(tmp_path, "t")
+    for episode, scheduled in [("a", True), ("b", True), ("c", False)]:
+        events.emit("episode_started", episode_id=episode, move_bin_after_lift=scheduled)
+        events.emit("decision", episode_id=episode, controller="teacher")
+    events.emit("perturbation", episode_id="a", kind="move_bin")  # b was scheduled but never lifted
+    events.emit("episode_started", episode_id="s", move_bin_after_lift=False)
+    events.emit("decision", episode_id="s", controller="student")
+    expected = "the bin moved right after the lift in 1 of 3 teacher demonstrations (2 scheduled)"
+    assert loop.bin_moves(tmp_path / "events.jsonl") == expected
+    assert loop.bin_moves(tmp_path / "missing.jsonl").startswith("the bin moved right after the lift in 0 of 0")

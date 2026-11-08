@@ -2,8 +2,17 @@ import argparse
 import time
 from pathlib import Path
 
+from isaacs_mom.orchestrator import evaluation
 from isaacs_mom.orchestrator.events import EventLog, read_events
-from isaacs_mom.orchestrator.loop import DEMOS_PER_ROUND, DEV_TRIALS, INSTRUCTION, instruction_text, run_loop
+from isaacs_mom.orchestrator.loop import (
+    DEMOS_PER_ROUND,
+    DEV_TRIALS,
+    INSTRUCTION,
+    MOVE_BIN_SHARE,
+    bin_moves,
+    instruction_text,
+    run_loop,
+)
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -32,6 +41,13 @@ def instruction(text: str) -> str:
         return instruction_text(text)
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from None
+
+
+def share(text: str) -> float:
+    value = float(text)
+    if not 0 <= value <= 1:
+        raise argparse.ArgumentTypeError(f"{text}: must be from 0 to 1")
+    return value
 
 
 def at_least_one(text: str) -> int:
@@ -63,12 +79,20 @@ def main() -> None:
     run.add_argument(
         "--instruction", type=instruction, default=INSTRUCTION, help="what the robot learns; held-out tests use it too"
     )
+    run.add_argument(
+        "--move-bin-share",
+        type=share,
+        default=MOVE_BIN_SHARE,
+        help="the share of teacher demonstrations where the bin moves right after the lift (SPEC §3.5)",
+    )
     dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a runs directory")
     dashboard.add_argument("--runs", type=Path, required=True, help="a directory of run directories, e.g. runs/")
     dashboard.add_argument("--port", type=int, default=8200)
     dashboard.add_argument(
         "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset a Teach-started run trains on"
     )
+    evaluate = commands.add_parser("eval", help="the student evaluation report in three conditions (SPEC §6.10)")
+    evaluation.add_arguments(evaluate)
     demo = commands.add_parser("demo", help="the judged single take, recorded to an MP4")
     demo.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     demo.add_argument("--ckpt", required=True)
@@ -90,6 +114,9 @@ def main() -> None:
         )
         command.add_argument("--runs", type=Path, default=Path("runs"), help="the directory the run directory goes in")
     args = parser.parse_args()
+    if args.command == "eval":
+        evaluation.run_from_args(evaluate, args)
+        return
     if args.command == "dashboard":
         from isaacs_mom.orchestrator.dashboard.server import serve
 
@@ -148,7 +175,9 @@ def main() -> None:
         make_student=make_student,
         train_student=train_student,
         instruction=args.instruction,
+        move_bin_share=args.move_bin_share,
     )
+    print(bin_moves(run_dir / "events.jsonl"))
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"
         print(f"round {r.round} {r.checkpoint}: {scored}")

@@ -1,5 +1,8 @@
 """The student evaluation report (SPEC §6 criterion 10): checkpoints, student only, on the sealed held-out seeds, in
-three conditions. Reported only: the loop's stop rule (§3.6) stays on `across_room`.
+three conditions: the training task, bin placements it never uses, and the bin moved once right after a lift.
+Reported only: the loop's stop rule (§3.6) stays on the task the loop trains on.
+
+    uv run mom eval --task fixed_feet --ckpt <run>/ckpt-r1
 
 Each episode is recorded as usual (frames, skill calls, perturbations and verdict in its manifest). This adds one line
 per episode to `evaluation.jsonl`, with the condition, the decision latencies and the device, and a summary per
@@ -34,21 +37,30 @@ MEMORY_BUDGET_GIB = 3.0
 
 ConditionName = Literal["training_distribution", "new_layout", "move_bin_after_lift"]
 Outcome = Literal["accepted", "rejected", "errored"]
+# Only an applied move is an adaptation test; a refused one and a lift that never happened are shown apart (§6.10).
+Adaptation = Literal["applied", "not applied", "trigger not reached"]
 
 
 @dataclass(frozen=True)
 class Condition:
     name: ConditionName
     tasks: tuple[str, ...]
+    move_bin_after_lift: bool = False
 
 
-CONDITIONS = (
-    Condition("training_distribution", ("across_room",)),
-    Condition("new_layout", ("near_bin", "far_bin")),  # bin distances the training task never uses
-    Condition("move_bin_after_lift", ("across_room",)),
-)
-# The lift trigger belongs in `run_episode`, which lands after WS5's dashboard PR; until then the condition isn't run.
-NOT_RUN = {"move_bin_after_lift": "not run: needs the lift-triggered move_bin in run_episode"}
+# Bin placements the training task never uses: nearer and further walks, or a fixed-feet bin further ahead or out.
+NEW_LAYOUTS = {True: ("near_bin", "far_bin"), False: ("fixed_feet_ahead", "fixed_feet_far")}
+
+
+def conditions_for(task: str, walking: bool) -> tuple[Condition, ...]:
+    return (
+        Condition("training_distribution", (task,)),
+        Condition("new_layout", NEW_LAYOUTS[walking]),
+        Condition("move_bin_after_lift", (task,), move_bin_after_lift=True),
+    )
+
+
+CONDITIONS = conditions_for("across_room", walking=True)
 
 
 class EpisodeRecord(BaseModel):
@@ -62,6 +74,7 @@ class EpisodeRecord(BaseModel):
     reason: str
     latencies_ms: list[float]
     device: str
+    adaptation: Adaptation | None = None  # only in the move condition
 
 
 class ConditionReport(BaseModel):
@@ -74,14 +87,18 @@ class ConditionReport(BaseModel):
     latency_median_ms: float | None
     latency_p95_ms: float | None
     over_budget: int  # decisions slower than the budget
-    note: str | None = None
+    # None outside the move condition, so nothing there reads as measured.
+    adaptation_tests: int | None = None
+    adapted: int | None = None  # of the adaptation tests, accepted
+    not_applied: int | None = None
+    trigger_not_reached: int | None = None  # the box was never lifted
 
     @property
     def scored(self) -> int:
         return self.n - self.errored
 
     def score(self) -> str:
-        return f"{self.successes}/{self.scored}" if self.note is None else self.note
+        return f"{self.successes}/{self.scored}"
 
 
 def evaluation_report(
@@ -111,9 +128,6 @@ def evaluation_report(
     for checkpoint in checkpoints:
         student = make_student(checkpoint)
         for condition in conditions:
-            if condition.name in NOT_RUN:
-                reports.append(_not_run(checkpoint, condition))
-                continue
             records = []
             for task in condition.tasks:
                 if task not in sims:
@@ -151,7 +165,15 @@ def _run_one(
     start = events.path.stat().st_size if events.path.exists() else 0
     try:
         manifest = run_episode(
-            sim, student, run_dir=run_dir, events=events, seed=seed, split="heldout", round_=0, instruction=INSTRUCTION
+            sim,
+            student,
+            run_dir=run_dir,
+            events=events,
+            seed=seed,
+            split="heldout",
+            round_=0,
+            instruction=INSTRUCTION,
+            move_bin_after_lift=condition.move_bin_after_lift,
         )
     except Exception as error:  # an errored episode is reported apart, not as the student's failure (§3.5)
         events.emit("error", seed=seed, split="heldout", round=0, error=f"{type(error).__name__}: {error}")
@@ -178,7 +200,17 @@ def _run_one(
         reason=reason,
         latencies_ms=_latencies(events.path, start),
         device=device,
+        adaptation=adaptation_of(events.path, start) if condition.move_bin_after_lift else None,
     )
+
+
+def adaptation_of(events_path: Path, start: int) -> Adaptation:
+    since = _events_since(events_path, start)
+    if any(e["type"] == "perturbation" and e["data"].get("kind") == "move_bin" for e in since):
+        return "applied"
+    if any(e["type"] == "error" and e["data"].get("kind") == "move_bin" for e in since):
+        return "not applied"
+    return "trigger not reached"
 
 
 def _events_since(events_path: Path, start: int) -> list[dict[str, Any]]:
@@ -204,6 +236,8 @@ def summarise(
     checkpoint: str, condition: ConditionName, records: Sequence[EpisodeRecord], budget_ms: float
 ) -> ConditionReport:
     latencies = sorted(ms for r in records for ms in r.latencies_ms)
+    scored = [r for r in records if r.outcome != "errored"]
+    moved = condition == "move_bin_after_lift"
     return ConditionReport(
         checkpoint=checkpoint,
         condition=condition,
@@ -214,21 +248,10 @@ def summarise(
         latency_median_ms=statistics.median(latencies) if latencies else None,
         latency_p95_ms=latencies[math.ceil(0.95 * len(latencies)) - 1] if latencies else None,  # nearest rank
         over_budget=sum(ms > budget_ms for ms in latencies),
-    )
-
-
-def _not_run(checkpoint: str, condition: Condition) -> ConditionReport:
-    return ConditionReport(
-        checkpoint=checkpoint,
-        condition=condition.name,
-        n=0,
-        errored=0,
-        successes=0,
-        decisions=0,
-        latency_median_ms=None,
-        latency_p95_ms=None,
-        over_budget=0,
-        note=NOT_RUN[condition.name],
+        adaptation_tests=sum(r.adaptation == "applied" for r in scored) if moved else None,
+        adapted=sum(r.adaptation == "applied" and r.outcome == "accepted" for r in scored) if moved else None,
+        not_applied=sum(r.adaptation == "not applied" for r in scored) if moved else None,
+        trigger_not_reached=sum(r.adaptation == "trigger not reached" for r in scored) if moved else None,
     )
 
 
@@ -245,15 +268,23 @@ def markdown(
         f"Student only, held-out seeds {', '.join(map(str, seeds))} (n={len(seeds)} per task), on {device}; "
         f"budget {budget_ms:.0f} ms per decision and {MEMORY_BUDGET_GIB:.0f} GiB, {memory}.",
         "",
-        "| Checkpoint | Condition | Successes / (n - errored) | Errored | Median ms | p95 ms | Over budget |",
-        "|---|---|---|---|---|---|---|",
+        "| Checkpoint | Condition | Successes / (n - errored) | Errored | Adapted / moves applied | Median ms | p95 ms "
+        "| Over budget |",
+        "|---|---|---|---|---|---|---|---|",
     ]
     for r in reports:
         median = f"{r.latency_median_ms:.0f}" if r.latency_median_ms is not None else "-"
         p95 = f"{r.latency_p95_ms:.0f}" if r.latency_p95_ms is not None else "-"
         over = f"{r.over_budget}/{r.decisions}" if r.decisions else "-"
-        errored = "-" if r.note else str(r.errored)
-        lines.append(f"| {r.checkpoint} | {r.condition} | {r.score()} | {errored} | {median} | {p95} | {over} |")
+        adapted = (
+            f"{r.adapted}/{r.adaptation_tests} (not applied {r.not_applied}/{r.scored}, "
+            f"no lift {r.trigger_not_reached}/{r.scored})"
+            if r.adaptation_tests is not None
+            else "-"
+        )
+        lines.append(
+            f"| {r.checkpoint} | {r.condition} | {r.score()} | {r.errored} | {adapted} | {median} | {p95} | {over} |"
+        )
     return "\n".join(lines)
 
 
@@ -263,18 +294,22 @@ def _cuda_peak_memory_gib() -> float:
     return torch.cuda.max_memory_allocated() / 2**30
 
 
-def main() -> None:
-    parser = argparse.ArgumentParser(description="SPEC §6 criterion 10: the student evaluation report")
+def add_arguments(parser: argparse.ArgumentParser) -> None:
     parser.add_argument("--ckpt", action="append", default=[], help="a fine-tuned checkpoint id (ckpt-r0 always runs)")
     parser.add_argument("--student", choices=["smolvlm", "stub"], default="smolvlm")
+    parser.add_argument("--task", default="across_room", help="the task the student was trained on (SPEC §3.1)")
     parser.add_argument("--seeds", type=int, default=None, help="only the first N held-out seeds")
     parser.add_argument("--budget-ms", type=float, default=DEFAULT_BUDGET_MS)
-    args = parser.parse_args()
+
+
+def run_from_args(parser: argparse.ArgumentParser, args: argparse.Namespace) -> None:
     if args.seeds is not None and args.seeds < 1:
         parser.error("--seeds must be at least 1")
     from isaacs_mom.sim.mujoco import MujocoSim
     from isaacs_mom.sim.mujoco.task import TASKS
 
+    if args.task not in TASKS:
+        parser.error(f"--task must be one of {', '.join(sorted(TASKS))}")
     if args.student == "stub":
         make_student, device = StubStudent, "stub, no model"
     else:
@@ -293,10 +328,17 @@ def main() -> None:
         seeds=seeds,
         device=device,
         budget_ms=args.budget_ms,
+        conditions=conditions_for(args.task, TASKS[args.task].walking),
         peak_memory_gib=peak_memory,
     )
     print(markdown(reports, args.budget_ms, device, seeds, peak_memory()))
     print(f"saved to {run_dir}")
+
+
+def main() -> None:
+    parser = argparse.ArgumentParser(description="SPEC §6 criterion 10: the student evaluation report")
+    add_arguments(parser)
+    run_from_args(parser, parser.parse_args())
 
 
 if __name__ == "__main__":
