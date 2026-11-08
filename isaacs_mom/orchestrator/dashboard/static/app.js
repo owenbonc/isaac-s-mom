@@ -188,16 +188,16 @@ function fineTuneStage(seconds) {
   const l = MomState.lessons(MomState.shown(view));
   const shown = l.frames.slice(-SHEET);
   // A lost stream can't tell whether the fine-tune still runs, so the clock says only when it started.
-  const clock = `<span class="tag ink">${view.lost ? "Connection lost · " : ""}${elapsed(seconds)} since the fine-tune started</span>`;
+  const clock = `${view.lost ? "Connection lost · " : ""}${elapsed(seconds)} since the fine-tune started`;
   const sheet = shown.length
     ? `<div class="frame"><div class="cell"><div class="shot sheet"><ol style="--n:${Math.ceil(Math.sqrt(shown.length))}" aria-label="The last frame of each accepted teacher demonstration">${shown
         .map((f) => `<li${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="Episode ${f.number}'s last frame">` : ""}</li>`)
-        .join("")}</ol><div class="over">${clock}</div></div></div></div>`
-    : slate("No accepted demonstration to learn from", `${clock} Teacher demonstrations: ${l.accepted} accepted · ${l.rejected} rejected (n=${l.n}).`);
+        .join("")}</ol></div></div></div>`
+    : slate("No accepted demonstration to learn from", `${clock}. Teacher demonstrations: ${l.accepted} accepted · ${l.rejected} rejected (n=${l.n}).`);
   const latest = l.frames.length > shown.length ? `, the latest ${shown.length} of ${l.frames.length} shown` : "";
   // The counts lead and the line wraps, so no width ever cuts a number off.
   const caption = shown.length
-    ? `<p class="caption wrap" title="The last frame of each accepted teacher demonstration${latest}.">Learning from ${l.accepted} accepted teacher demonstration${l.accepted === 1 ? "" : "s"} (${l.rejected} rejected, n=${l.n})</p>`
+    ? `<p class="caption wrap" title="The last frame of each accepted teacher demonstration${latest}.">Learning from ${l.accepted} accepted teacher demonstration${l.accepted === 1 ? "" : "s"} (${l.rejected} rejected, n=${l.n}) · ${clock}</p>`
     : "";
   return sheet + foot(caption, panelChip());
 }
@@ -228,24 +228,24 @@ function renderCamera() {
   const move = MomState.move(ep);
   const what = move && esc(MOVED[ep.rows.findLast((r) => r.kind === "perturbation").what] || "Scene changed");
   // The caption row is always there, so the peak's caption never shrinks the frame.
-  let frame, caption;
+  let frame, caption, mark = "";
   if (view.compare && move) {
     // The orchestrator took the left frame at the same pose right before the move, so no skill was chosen from it.
-    const who = (f) => (f ? tag(f.controller, f.checkpoint) : "");
-    frame = cell(move.before, `<span class="tag">Before the move</span>${who(move.before)}`, null, false) + cell(move.after, `<span class="tag">After</span>${who(move.after)}`, skillRow(ep, move.after), true);
+    frame = cell(move.before, null, false, "Before the move") + cell(move.after, skillRow(ep, move.after), true, "After");
     // The pair covers the log, so the caption carries its marked row, clamped so it never shrinks the pair.
     const first = move.decision;
     const next = first ? ` First decision after the move: <span class="mono">${skillText(first)}</span>.${first.reason ? ` ${esc(first.reason)}` : ""}` : "";
     caption = `<p class="caption moved clamped"${first && first.reason ? ` title="${esc(first.reason)}"` : ""}>${what} between these frames, before step ${esc(move.step)}.${next}</p>`;
   } else {
-    // The move stays marked, with Move's icon, for the rest of its episode, so it can be shown after the moment passed.
-    const mark = last.after ? `<span class="tag ink">${what} at step ${esc(move.step)}${MOVE}</span>` : "";
-    frame = cell(last, tag(last.controller, last.checkpoint), skillRow(ep, last), last.moved, mark);
+    // The move stays marked on the caption line, with Move's icon, for the rest of its episode, so it can be shown after
+    // the moment passed; the first frame after it says so in its own caption.
+    mark = last.after && !last.moved ? `<span class="mark">${MOVE}${what} at step ${esc(move.step)}</span>` : "";
+    frame = cell(last, skillRow(ep, last), last.moved);
     caption = last.moved
       ? `<p class="caption moved">${what} before step ${esc(move.step)}. This is the first frame after it.</p>`
       : `<p class="caption">${last.step === null ? "Head-camera frame." : `What the ${last.controller || "robot"} saw at step ${esc(last.step)}, before choosing.`}</p>`;
   }
-  $("stage").innerHTML = `<div class="frame">${frame}</div>${foot(caption, panelChip(ep))}`;
+  $("stage").innerHTML = `<div class="frame">${frame}</div>${foot(mark + caption, panelChip(ep))}`;
   $("strip").innerHTML = frames
     .map((f) => `<li class="${[f.now ? "now" : "", f.moved ? "moved" : ""].join(" ").trim()}"><div class="thumb"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="">` : ""}</div><span class="st">step ${esc(f.step ?? "")}${f.moved ? '<span class="sr"> (the scene moved before this frame)</span>' : ""}</span></li>`)
     .join("");
@@ -268,12 +268,14 @@ const foot = (caption, provenance) => `<div class="foot">${caption}${provenance}
 // The decision that chose a skill from frame `f`, or null.
 const skillRow = (ep, f) => (f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill)) || null;
 
-// One frame on the stage: its labels, the skill `row` chose from it, then `mark`; a missing frame stays, hatched.
-function cell(f, label, row, moved, mark = "") {
+// One frame on the stage: the skill `row` chose from it, led by `label`, in a notch at its top left, and its controller
+// in a pill at its bottom left; nothing else covers it. A missing frame stays, hatched.
+function cell(f, row, moved, label = "") {
   const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : ` at step ${esc(f.step)}`}">` : "";
-  // The skill joins the labels in the frame's top band, which shows floor; the hands, box and bin are in the bottom.
-  const said = row ? `<span class="said ${row.controller || "unknown"}">${skillText(row)}</span>` : "";
-  return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}<div class="over">${label}${said}${mark}</div></div></div>`;
+  const skill = row ? `<span class="said ${row.controller || "unknown"}"><svg class="i" aria-hidden="true"><use href="#s-${row.skill ? esc(row.skill) : "stop"}"/></svg>${skillText(row)}</span>` : "";
+  const notch = label || skill ? `<p class="notch">${label ? `<span>${label}</span>` : ""}${skill}</p>` : "";
+  const who = f ? tag(f.controller, f.checkpoint) : "";
+  return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}${notch}${who}</div></div>`;
 }
 
 // Event rows carry a glyph where decisions carry their step, so the two never read as the same kind of row.

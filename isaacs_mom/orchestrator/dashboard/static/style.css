@@ -129,8 +129,8 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .tag{display:inline-flex;align-items:center;gap:.4rem;font-size:var(--t-label);font-weight:600;line-height:1.35;white-space:nowrap}
 .tag.student{color:var(--student)}
 .tag.teacher{color:var(--teacher)}
-.tag.student::before,.said.student::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor;flex:none}
-.tag.teacher::before,.said.teacher::before{content:"";width:.45rem;height:.45rem;background:currentColor;transform:rotate(45deg);flex:none}
+.tag.student::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor;flex:none}
+.tag.teacher::before{content:"";width:.45rem;height:.45rem;background:currentColor;transform:rotate(45deg);flex:none}
 /* A verdict is a short word in its colour on grey, led by its mark. */
 .verdict{display:inline-flex;align-items:center;gap:.4rem;font-weight:600}
 .verdict.bad{color:var(--bad)}
@@ -202,18 +202,18 @@ footer.models .v{color:var(--muted)}
 .cell{min-height:0;display:grid;place-items:center;container-type:size}
 .shot{position:relative;width:min(100cqw,133.33cqh);aspect-ratio:4/3;background:var(--well);border-radius:var(--r-sm);box-shadow:0 0 0 1px var(--edge);overflow:hidden}
 .shot img{display:block;width:100%;height:100%;object-fit:contain}
-/* Every label sits in the frame's top band, which shows floor; the hands, the box and the bin are in its bottom half.
-   Each has a solid backing and a 1px edge, so it reads over a white floor and a dark robot alike. */
-.shot .over{position:absolute;left:.55rem;right:.55rem;top:.55rem;display:flex;flex-wrap:wrap;gap:.35rem .45rem;align-items:center}
-.over .tag{padding:.1rem .45rem}
-.over .tag,.over .said{border-radius:4px;background:var(--well);box-shadow:0 0 0 1px rgb(255 255 255 / .18),0 4px 12px rgb(0 0 0 / .3)}
-.over .tag.ink{background:var(--accent);color:var(--on-accent);box-shadow:0 0 0 1px #000}
-.over .tag.ink .i{width:1rem;height:1rem}
-/* The skill the shown frame led to is the robot's voice: the largest type on the stage, in its controller's hue. */
-.over .said{display:inline-flex;align-items:center;gap:.5rem;max-width:100%;padding:.1rem .6rem .14rem .5rem;font:600 1rem/1.35 var(--mono)}
+/* The skill the frame led to sits in a notch cut into the frame's top-left corner, in the colour around the frame:
+   its two inner corners curve into the image, so it reads as part of the frame, not a capsule over it. */
+.notch{--nr:.5rem;position:absolute;top:0;left:0;z-index:1;display:flex;align-items:center;gap:.6rem;max-width:calc(100% - 2rem);margin:0;padding:.3rem .7rem .4rem .55rem;border-bottom-right-radius:var(--nr);background:var(--well);font-weight:600}
+.notch::before,.notch::after{content:"";position:absolute;width:var(--nr);height:var(--nr);background:radial-gradient(circle at 100% 100%,transparent calc(var(--nr) - .5px),var(--well) var(--nr))}
+.notch::before{top:0;left:100%}
+.notch::after{top:100%;left:0}
+.said{display:inline-flex;align-items:center;gap:.4rem;min-width:0;font-family:var(--mono)}
+.said .i{width:1rem;height:1rem}
 .said.student{color:var(--student)}
 .said.teacher{color:var(--teacher)}
-.over .said::before{width:.3em;height:.3em}
+/* The controller is a small pill in the frame's bottom-left corner, beside the left hand, where the floor shows. */
+.shot>.tag{position:absolute;left:.5rem;bottom:.5rem;z-index:1;padding:.1rem .55rem;border-radius:999px;background:var(--well);box-shadow:0 0 0 1px var(--edge-strong)}
 /* Frame-sized, so the stage keeps its shape between episodes and while nothing is on camera yet. */
 .slate{display:grid;place-content:center;gap:.4rem;padding:1.5rem;text-align:center;text-wrap:balance}
 .slate p{margin:0}
@@ -245,8 +245,9 @@ footer.models .v{color:var(--muted)}
 [data-missing]{background:radial-gradient(circle at 1px 1px,rgb(255 255 255 / .16) 1px,transparent 1.6px) 0 0 / 11px 11px,var(--well)}
 [data-missing] img{visibility:hidden}
 [data-missing]::after{content:"Frame missing";position:absolute;inset:0;display:grid;place-items:center;color:var(--muted)}
-/* The caption line also carries the camera panel's provenance label. */
+/* The caption line also carries the move's mark and the camera panel's provenance label. */
 .foot{flex:none;display:flex;align-items:center;gap:.5rem}
+.foot .mark{flex:none;display:inline-flex;align-items:center;gap:.35rem;padding-left:.55rem;font-weight:600}
 .foot>.chip:last-child{margin-left:auto}
 .caption{flex:1;min-width:0;margin:0;padding:.3rem .55rem;border-radius:var(--r-sm);color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 /* The move's caption is the stage's one raised line: grey, in full ink, the colour left to the frames. */
