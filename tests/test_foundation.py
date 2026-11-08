@@ -806,6 +806,15 @@ def test_starting_twice_or_from_a_run_that_carried_over_copies_each_demonstratio
     assert sorted(p.name for p in (then / "episodes").iterdir()) == sorted(_manifests(prev))
 
 
+def test_round_0_starts_from_the_earlier_runs_last_finished_checkpoint(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    for name in ("ckpt-r2", "ckpt-r10", "ckpt-r11.tmp"):  # numbered, not sorted as text; a half-written one ignored
+        (prev / "checkpoints" / name).mkdir()
+    run_dir = tmp_path / "runs" / "next"
+    run_dir.mkdir(parents=True)
+    assert carry_over(prev, run_dir, FakeSim().sim_version) == "prev/ckpt-r10"
+
+
 @pytest.mark.parametrize("where", ["elsewhere", "no checkpoint"])
 def test_a_run_refuses_to_start_from_a_run_it_cannot_continue(where: str, tmp_path: Path) -> None:
     prev = _earlier_run(tmp_path / ("runs" if where == "no checkpoint" else "other"), "taught")
