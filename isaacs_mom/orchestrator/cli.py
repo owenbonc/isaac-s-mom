@@ -1,4 +1,5 @@
 import argparse
+import json
 import time
 from pathlib import Path
 
@@ -10,6 +11,7 @@ from isaacs_mom.orchestrator.loop import (
     INSTRUCTION,
     MOVE_BIN_SHARE,
     bin_moves,
+    check_carry_over,
     instruction_text,
     run_loop,
 )
@@ -78,6 +80,11 @@ def main() -> None:
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
     run.add_argument(
         "--instruction", type=instruction, default=INSTRUCTION, help="what the robot learns; held-out tests use it too"
+    )
+    run.add_argument(
+        "--from-run",
+        type=Path,
+        help="start from an earlier run in the same runs dir: its development episodes and its last checkpoint",
     )
     run.add_argument(
         "--move-bin-share",
@@ -159,12 +166,19 @@ def main() -> None:
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
+    sim = None
+    if args.from_run is not None:
+        sim = make_sim(args.sim, args.task)
+        try:  # before anything is written, so a refused source leaves no run behind
+            check_carry_over(args.from_run, run_dir, sim.sim_version)
+        except ValueError as refused:
+            run.error(f"--from-run: {refused}")
     events = EventLog(run_dir, args.run_id)
     if not any(e.type == "instruction" for e in read_events(run_dir)):  # a Teach-started run already holds its own
         events.emit("instruction", text=args.instruction, source="cli")
     argon = checked_argon(events)
     results = run_loop(
-        make_sim(args.sim, args.task),
+        sim or make_sim(args.sim, args.task),
         run_dir,
         args.run_id,
         max_rounds=args.rounds,
@@ -175,7 +189,14 @@ def main() -> None:
         train_student=train_student,
         instruction=args.instruction,
         move_bin_share=args.move_bin_share,
+        from_run=args.from_run,
     )
+    if args.from_run is not None:
+        record = json.loads((run_dir / "from_run.json").read_text())
+        carried, left = len(record["episodes"]), len(record["left_behind"])
+        print(
+            f"round 0 started from {record['checkpoint']}: {carried} demonstrations carried, {left} exams left behind"
+        )
     print(bin_moves(run_dir / "events.jsonl"))
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"
