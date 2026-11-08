@@ -17,6 +17,7 @@ from isaacs_mom.contracts import (
     ExecResult,
     Observation,
     Perturbation,
+    ReplayReport,
     SkillCall,
     SkillTarget,
     TrainingExample,
@@ -411,6 +412,18 @@ def test_skeleton_loop_runs_end_to_end(tmp_path: Path) -> None:
     event_types = {json.loads(line)["type"] for line in (tmp_path / "events.jsonl").read_text().splitlines()}
     assert {"evaluation_result", "finetune_completed", "validation"} <= event_types
     assert "error" not in event_types  # the stub's round diagnosis is usable, so the skeleton run logs no error
+
+
+def test_a_run_ends_by_replaying_every_accepted_episode(tmp_path: Path) -> None:
+    sim = FakeSim()
+    run_loop(sim, tmp_path, "t", max_rounds=0, argon=silent_argon(tmp_path, "t"),
+             make_student=lambda checkpoint: ScriptedPolicy(sim), train_student=stub_finetune)  # fmt: skip
+    saved = [EpisodeManifest.model_validate_json(p.read_text()) for p in tmp_path.glob("episodes/*/manifest.json")]
+    accepted = [m for m in saved if m.validation and m.validation.accepted]
+    assert (tmp_path / "replay_report.json").exists()
+    report = ReplayReport.model_validate_json((tmp_path / "replay_report.json").read_text())
+    assert report.replayed == len(accepted) == len(heldout_seeds())  # SPEC §3.6 step 6
+    assert report.reproduced == report.replayed and all(m.replay_valid for m in accepted)
 
 
 def test_decisions_carry_reason_and_latency_but_training_targets_drop_the_reason(tmp_path: Path) -> None:
@@ -1064,7 +1077,7 @@ def test_copied_demonstrations_stay_apart_from_this_runs_own(tmp_path: Path) -> 
     (demo,) = _manifests(prev)
     run_dir, _, _ = _from_run(tmp_path, prev)
     copied = _manifests(run_dir)[demo]
-    assert copied == _manifests(prev)[demo]  # its run id and controller labels are the earlier run's
+    assert copied == _manifests(prev)[demo].model_copy(update={"replay_valid": True})  # the earlier run's, replayed
     assert copied.run_id == "prev" and {s.controller for s in copied.steps} == {"teacher"}
     logged = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
     assert demo not in {e["data"].get("episode_id") for e in logged}  # nothing in this run's events claims it
