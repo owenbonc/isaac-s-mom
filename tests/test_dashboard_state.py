@@ -1940,3 +1940,14 @@ def test_a_click_on_previous_or_next_in_results_takes_the_focus_to_the_seed_as_t
     """
     # sorted ↓ 2, ↑ 1, ✗ 3
     assert app(REPLAY + script, stream(*TWO_EVALUATIONS)) == [f'.seeds [data-seed="{n}"]' for n in [2, 1, 3, 1]]
+
+
+def test_results_says_once_why_a_run_did_not_start() -> None:
+    script = """
+    const last = (id) => writes.filter(([at]) => at === id).pop()[1];
+    return { control: last("control"), results: last("results") };
+    """
+    refused = ("error", {"error": "not started: Not yet: the loop teaches one task"})
+    out = app(REPLAY + script, stream(("instruction", {"text": "juggle", "source": "teach"}), refused))
+    assert "Not started" in out["control"] and "Not yet" not in out["control"]
+    assert "Not yet: the loop teaches one task" in out["results"]

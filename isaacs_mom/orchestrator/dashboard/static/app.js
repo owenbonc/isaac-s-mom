@@ -155,9 +155,10 @@ function renderControl() {
     const s = MomState.shown(view);
     const tested = MomState.results(s).seeds.length;
     el.className = "control";
+    // A run that did not start says why where its results would be, so the bar names only that.
     el.innerHTML =
       s.refused !== null
-        ? `<span class="what">Not started</span><span class="note">${esc(s.refused)}</span>`
+        ? '<span class="what">Not started</span>'
         : `<span class="what">Held-out seeds</span>${!tested ? "" : `<span class="note">${place === "list" ? "Choose a seed to see its test at each checkpoint." : "Choose a checkpoint to see that episode in full."}</span>`}`;
     return "";
   }
