@@ -59,7 +59,7 @@ Robots learn new skills from **human demonstrations**, and those are slow and co
 6. **Test again** on the same 20 sealed scenes.
 7. **Loop or stop.** Below 80% (16/20), it diagnoses the new student's mistakes and repeats steps 3 to 6, for up to 3 rounds. At 80% it stops by itself.
 
-**Measured:** one round took the fixed-feet student v2 from **10/20 to 18/20**, past the target, so the loop stopped itself. An untargeted control matched it ([Results](#results)). The Teach box runs this loop for the task it serves; a brand-new task starts with the one-sentence path above.
+**Measured:** Another round took the fixed-feet student from **10/20 to 18/20**, past the target, so the loop stopped itself. An untargeted control matched it ([Results](#results)). The Teach box runs this loop for the task it serves; a brand-new task starts with the one-sentence path above.
 
 ### Architecture
 
