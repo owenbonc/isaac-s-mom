@@ -136,14 +136,11 @@ def create_app(
 
     @app.get("/run-files/{run_id}/{name}")
     def run_files(run_id: str, name: str) -> TrainingSetSummary | ReplayReport:
-        model = (
-            ReplayReport
-            if name == "replay_report.json"
-            else TrainingSetSummary
-            if TRAINING_SUMMARY.fullmatch(name)
-            else None
-        )
-        if model is None:
+        if name == "replay_report.json":
+            model = ReplayReport
+        elif TRAINING_SUMMARY.fullmatch(name):
+            model = TrainingSetSummary
+        else:
             raise HTTPException(status_code=404)
         try:
             return model.model_validate_json((served(run_id) / name).read_bytes())
