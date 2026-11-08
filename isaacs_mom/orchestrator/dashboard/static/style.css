@@ -88,6 +88,9 @@ footer.models .v{color:var(--muted)}
 .chip.live::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:var(--ok)}
 .chip.live{border-color:var(--ok);color:var(--ok)}
 .chip.config{color:var(--muted)}
+/* A broken line: the stream is down, so nothing shown is live. */
+.chip.lost{border-color:var(--bad);color:var(--bad)}
+.chip.lost::before{content:"";width:.65rem;height:2px;background:currentColor;transform:rotate(-45deg)}
 .chip.placeholder{border-style:dashed;color:var(--ph);background:repeating-linear-gradient(135deg,var(--panel) 0 5px,var(--hatch) 5px 7px)}
 /* Panel labels keep their shapes in outline and text, so the header's status and the Space key stay the loud ones. */
 .chip.quiet{background:none;font-weight:400}
@@ -131,7 +134,7 @@ footer.models .v{color:var(--muted)}
 .strip{list-style:none;margin:0;padding:.1rem .7rem .7rem;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-content:start;gap:.4rem;flex:1 1 0;min-height:0;container-type:size}
 /* P's pair is the peak, so no thumbnail competes with it at any size. */
 .strip:empty,#stage:has(.cell + .cell) + .strip{display:none}
-.strip li{display:flex;flex-direction:column;gap:.15rem;min-width:0}
+.strip li{position:relative;display:flex;flex-direction:column;gap:.15rem;min-width:0}
 @container (height < 5.5rem){.strip li{display:none}}
 .thumb{position:relative;width:min(100%,(100cqh - 1.65rem) * 4 / 3);aspect-ratio:4/3;background:var(--frame-bg);border-radius:3px;overflow:hidden}
 .strip img{display:block;width:100%;height:100%;object-fit:cover}
@@ -167,17 +170,18 @@ footer.models .v{color:var(--muted)}
 @media (min-width:1001px) and (max-width:1279px){.side{grid-template-columns:minmax(0,1fr)}}
 /* The box or bin move is the take's peak: the frame that first shows it stays outlined in ink, and flashes once on arrival. */
 .shot.moved{outline:.3rem solid var(--ink);outline-offset:.15rem}
-/* Rare (a few times a take) and aimed at the back of the room, so it runs longer than UI feedback would. */
+/* Rare (a few times a take) and aimed at the back of the room, so it runs longer than UI feedback would. An ink ring
+   only: it draws the eye to the frame without covering the evidence in it. */
 @media (prefers-reduced-motion:no-preference){
-  .shot.flash::before{content:"";position:absolute;inset:0;background:var(--panel);box-shadow:inset 0 0 0 .5rem var(--ink);pointer-events:none;animation:flash .4s var(--ease-out) forwards}
+  .shot.flash::before{content:"";position:absolute;inset:0;box-shadow:inset 0 0 0 .5rem var(--ink);pointer-events:none;animation:flash .4s var(--ease-out) forwards}
 }
-@keyframes flash{from{opacity:.85}to{opacity:0}}
+@keyframes flash{to{opacity:0}}
 .stop{font-family:var(--sans);font-weight:600;color:var(--ink)}
 .sr{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
 .strip .st{color:var(--muted)}
 
 ol.log{list-style:none;margin:0;padding:0;overflow:auto;min-height:0;flex:1}
-ol.log li{display:grid;grid-template-columns:1.5rem minmax(0,1fr);gap:.2rem .5rem;padding:.45rem .8rem;border-bottom:1px solid var(--rule);align-items:baseline}
+ol.log li{position:relative;display:grid;grid-template-columns:1.5rem minmax(0,1fr);gap:.2rem .5rem;padding:.45rem .8rem;border-bottom:1px solid var(--rule);align-items:baseline}
 ol.log li .n{color:var(--muted);text-align:right}
 ol.log li.event .n{color:inherit;display:flex;justify-content:flex-end;align-self:center}
 ol.log li.event .n svg{width:1em;height:1em}
@@ -187,6 +191,7 @@ ol.log li.student .skill{color:var(--student)}
 ol.log li.teacher .skill{color:var(--teacher)}
 ol.log .reason{grid-column:2;text-wrap:pretty;overflow-wrap:anywhere}
 .clamped{display:-webkit-box;-webkit-line-clamp:3;-webkit-box-orient:vertical;overflow:hidden}
+.clamped.four{-webkit-line-clamp:4}
 ol.log .right{display:flex;gap:.6rem;align-items:baseline;white-space:nowrap}
 ol.log .ok{color:var(--ok);display:inline-flex}
 ol.log .ok svg{width:1em;height:1em}

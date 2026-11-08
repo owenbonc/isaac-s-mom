@@ -10,7 +10,7 @@ let logFollowing = true;
 // Where following last parked the log: its foot, or the stage frame's row while a later decision runs.
 let logAnchor = 0;
 let flashedFrame = null;
-let lastHeard = { text: "", episode: null, paused: false, lost: false };
+let lastHeard = { text: "", episode: null, count: 0, paused: false, lost: false };
 // A one-off line for the announcer: the box or bin move, heard once when it arrives live.
 let news = "";
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
@@ -82,7 +82,9 @@ function renderHeader() {
   const kind = MomState.provenance(view, now());
   const sim = MomState.simulator(s);
   // The simulator in words keeps the header on one line; its version and task are in the legend's run line.
-  const status = s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)}${sim ? ` · ${esc(sim.name)}` : ""}`);
+  const named = (word) => `${word}${sim ? ` · ${esc(sim.name)}` : ""}`;
+  // A lost stream says so in its own style; nothing it shows is live until the connection returns.
+  const status = view.lost ? chip("lost", named("Disconnected")) : s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, named(label(kind)));
   $("status").innerHTML = status;
   const robot = s.episodes.length && s.episodes[s.episodes.length - 1].sim;
   const task = sim && sim.task ? `, the ${sim.task === "fixed_feet" ? "fixed-feet" : "walking"} task (<span class="mono">${esc(sim.task)}</span>)` : "";
@@ -97,11 +99,11 @@ function renderHeader() {
 function announce(text) {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
-  const heard = { text, episode: ep && ep.id, paused: view.frozen !== null, lost: view.lost };
+  const heard = { text, episode: ep && ep.id, count: s.episodes.length, paused: view.frozen !== null, lost: view.lost };
   const parts = [];
   if (heard.paused !== lastHeard.paused) parts.push(heard.paused ? "Paused." : "Resumed.");
   if (heard.lost !== lastHeard.lost) parts.push(heard.lost ? "Connection to the run lost, retrying." : "Connection restored.");
-  if (ep && heard.episode !== lastHeard.episode) parts.push(`Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}, ${kindOf(ep)[0].toLowerCase()}.`, text);
+  if (ep && (heard.episode !== lastHeard.episode || heard.count !== lastHeard.count)) parts.push(`Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}, ${kindOf(ep)[0].toLowerCase()}.`, text);
   else if (text !== lastHeard.text) parts.push(text);
   parts.push(news);
   news = "";
@@ -138,7 +140,8 @@ function renderControl() {
   const { controller, checkpoint, step } = MomState.inControl(view, now());
   const who = WHO[controller] || "An unknown controller";
   const took = ep.rows.find((r) => r.kind === "takeover");
-  const done = finished(ep);
+  // While the stream is lost nothing reads as still running.
+  const done = finished(ep) || view.lost;
   const words = MomState.verdictWords(ep);
   // The controller tag is the sentence's subject.
   const detail =
@@ -317,7 +320,7 @@ function renderLog() {
     return;
   }
   const move = MomState.move(ep);
-  const done = finished(ep);
+  const done = finished(ep) || view.lost;
   const step = MomState.stageStep(view);
   const stage = MomState.filmstrip(ep, step).find((f) => f.now);
   const full = (r) => !stage || stage.step === null || (r.step !== null && r.step >= stage.step);
@@ -372,7 +375,8 @@ function renderModels() {
     panelChip();
 }
 
-const evidenceText = (d) => (d.evidence ? `<div class="note">${esc(d.evidence)}</div>` : "");
+// Clamped to four lines, so a long one never pushes the side band past its fold; the whole of it is in the title.
+const evidenceText = (d) => (d.evidence ? `<div class="note clamped four" title="${esc(d.evidence)}">${esc(d.evidence)}</div>` : "");
 const confidenceText = (d) => (d.confidence === null ? "" : `<div class="note">Confidence ${Math.round(d.confidence * 100)}%.</div>`);
 // Clamped to three lines, so the evidence under it always shows.
 const hypothesisText = (d) => `<div class="clamped" title="${esc(d.hypothesis)}">${esc(d.hypothesis)}</div>`;
@@ -442,8 +446,20 @@ function fadeSide() {
   side.toggleAttribute("data-more", side.scrollHeight - side.scrollTop - side.clientHeight > 1);
 }
 
+// The server replays the whole run on every connection, so the page holds still until that backlog has streamed in
+// and shows and announces only where it settles: once no event has arrived for this long.
+const SETTLE_MS = 200;
+let settleTimer = null;
+function holdUntilSettled() {
+  clearTimeout(settleTimer);
+  settleTimer = setTimeout(() => {
+    MomState.settle(view);
+    schedule();
+  }, SETTLE_MS);
+}
+
 function schedule() {
-  if (renderQueued) return;
+  if (renderQueued || view.settling) return;
   renderQueued = true;
   requestAnimationFrame(render);
 }
@@ -495,9 +511,10 @@ source.onopen = () => {
   MomState.reconnect(view);
   renderedRows = 0;
   renderedEpisode = null;
-  schedule();
+  holdUntilSettled();
 };
 source.onerror = () => {
+  clearTimeout(settleTimer);
   MomState.disconnect(view);
   schedule();
 };
@@ -507,7 +524,8 @@ source.onmessage = (message) => {
   } catch (error) {
     console.error("bad event", error);
   }
-  schedule();
+  if (view.settling) holdUntilSettled();
+  else schedule();
 };
 setInterval(schedule, 1000); // live and recorded change with time, and the fine-tune clock ticks
 schedule();

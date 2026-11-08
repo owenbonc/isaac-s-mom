@@ -1026,3 +1026,17 @@ def test_the_fine_tune_shows_each_accepted_demonstrations_last_frame_and_counts_
         "rejected": 1,
         "n": 4,
     }
+
+
+def test_a_view_holds_still_from_each_connection_until_its_replayed_backlog_has_settled() -> None:
+    out = presenter(
+        """
+        const seen = [v.settling];
+        S.settle(v); seen.push(v.settling);
+        S.disconnect(v); S.reconnect(v); seen.push(v.settling);  // a reconnect replays the run from its start
+        S.disconnect(v); seen.push(v.settling);  // a lost stream shows that it is lost
+        return seen;
+        """,
+        [],
+    )
+    assert out == [True, False, True, False]

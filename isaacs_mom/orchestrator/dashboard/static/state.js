@@ -22,15 +22,22 @@
   // it was paused; `selected` pins an episode (null follows the run: its latest episode while live, its story once
   // finished); `step` holds the shown episode at a step (M: the first frame after its move), null at its latest;
   // `compare` is the box or bin move P shows, with the selection to return to when P is pressed again;
-  // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down.
-  const view = () => ({ live: initial(), frozen: null, selected: null, step: null, compare: null, followed: false, lost: false });
+  // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down; `settling`
+  // while a connection's replay of the events already written streams in, which the page neither shows nor announces.
+  const view = () => ({ live: initial(), frozen: null, selected: null, step: null, compare: null, followed: false, lost: false, settling: true });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
     v.lost = false;
+    v.settling = true;
   }
+  const settle = (v) => {
+    v.settling = false;
+  };
+  // A lost stream shows that it is lost, even before a replay settles.
   function disconnect(v) {
     v.lost = true;
+    v.settling = false;
   }
 
   const num = (v) => (typeof v === "number" && Number.isFinite(v) ? v : null);
@@ -405,7 +412,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  const api = { initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
