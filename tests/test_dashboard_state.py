@@ -39,11 +39,18 @@ def fold(*events: tuple[str, dict]) -> dict:
     return run(FOLD, stream(*events))
 
 
-def decision(step: int, controller: str = "student", latency: object = 100.0, reason: str = "why") -> tuple[str, dict]:
+def ckpt(round_: int) -> str:
+    """The student's checkpoint id after `round_` as the producer writes it: the base bare, the rest with the run."""
+    return "ckpt-r0" if round_ == 0 else f"r/ckpt-r{round_}"
+
+
+def decision(
+    step: int, controller: str = "student", latency: object = 100.0, reason: str = "why", round_: int = 0
+) -> tuple[str, dict]:
     skill = {"skill": "hug", "params": {}}
     return "decision", {
         "controller": controller,
-        "checkpoint": "ckpt-r0",
+        "checkpoint": ckpt(round_),
         "step": step,
         "skill": skill,
         "reason": reason,
@@ -1046,7 +1053,7 @@ return [S.claim(s), S.testing(s)];
 
 
 def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoint_ids_beside_them() -> None:
-    rounds = [evaluation("ckpt-r0", 0, 4, 20), evaluation("ckpt-r1", 1, 9, 20), evaluation("ckpt-r2", 2, 15, 20)]
+    rounds = [evaluation(ckpt(0), 0, 4, 20), evaluation(ckpt(1), 1, 9, 20), evaluation(ckpt(2), 2, 15, 20)]
     claim, _ = run(CLAIM, stream(*rounds))
     # the counts carry n, so there is no n line, and nothing errored, so there is no errored note
     assert claim == {
@@ -1056,7 +1063,7 @@ def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoint_ids_be
         "then 75%, 15 of 20, after\u00a0round\u00a02",
         "errored": None,
         "names": "before\u00a0fine-tuning → after\u00a0round\u00a02",
-        "ids": "ckpt-r0 → ckpt-r2",
+        "ids": "ckpt-r0 → r/ckpt-r2",
     }
 
 
@@ -1146,11 +1153,11 @@ return { names: c && c.names, spoken: c && c.spoken, checkpoints, carried: S.les
 
 
 def from_run(value: object) -> tuple[str, dict]:
-    return "evaluation_result", {**evaluation("ckpt-r1", 0, 4, 20)[1], "from_run": value}
+    return "evaluation_result", {**evaluation("fixed-v2/ckpt-r1", 0, 4, 20)[1], "from_run": value}
 
 
 def test_a_run_started_from_an_earlier_run_names_round_0_by_that_run_and_counts_its_carried_demonstrations() -> None:
-    source = {"run": "fixed-v2", "checkpoint": "ckpt-r1", "carried": 8}
+    source = {"run": "fixed-v2", "checkpoint": "fixed-v2/ckpt-r1", "carried": 8}
     out = run(FROM, stream(*held_out(0, 1, "failed"), from_run(source), *evaluated(1, (1, "succeeded"))))
     assert out["names"] == "from fixed-v2, ckpt-r1 → after\u00a0round\u00a01"
     assert out["spoken"].endswith("20%, 4 of 20, from fixed-v2, ckpt-r1, then 100%, 1 of 1, after\u00a0round\u00a01")
@@ -1212,7 +1219,7 @@ VERDICTS = {
 def held_out(round_: int, seed: object, outcome: str | None) -> list[tuple[str, dict]]:
     """`round_`'s held-out episode on `seed`: succeeded, failed, a recording error, or (None) still running."""
     start = ("episode_started", {**started(f"h{round_}-{seed}")[1], "seed": seed, "split": "heldout", "round": round_})
-    test = ("decision", {**decision(0)[1], "checkpoint": f"ckpt-r{round_}"})
+    test = decision(0, round_=round_)
     if outcome is None:
         return [start, test]
     task, reason = VERDICTS[outcome]
@@ -1224,7 +1231,7 @@ def evaluated(round_: int, *outcomes: tuple[object, str | None]) -> list[tuple[s
     episodes = [e for seed, outcome in outcomes for e in held_out(round_, seed, outcome)]
     good = sum(outcome == "succeeded" for _, outcome in outcomes)
     bad = sum(outcome in {"errored", None} for _, outcome in outcomes)
-    return [*episodes, evaluation(f"ckpt-r{round_}", round_, good, len(outcomes), errored=bad)]
+    return [*episodes, evaluation(ckpt(round_), round_, good, len(outcomes), errored=bad)]
 
 
 RESULTS = """
@@ -1258,7 +1265,7 @@ def test_each_seed_is_marked_by_how_its_held_out_episode_changed_from_the_first_
     assert out["ids"][0] == ["h0-2", "h1-2"]
     assert out["checkpoints"] == [
         {"round": 0, "checkpoint": "ckpt-r0", "name": "before fine-tuning", "done": True},
-        {"round": 1, "checkpoint": "ckpt-r1", "name": "after round 1", "done": True},
+        {"round": 1, "checkpoint": "r/ckpt-r1", "name": "after round 1", "done": True},
     ]
     assert out["counts"] == {"down": 1, "up": 1, "fail": 1, "pass": 1, "error": 0, "pending": 0}
 
@@ -1291,7 +1298,7 @@ def test_with_one_evaluation_every_seed_is_pending_and_mid_evaluation_so_is_ever
         [3, "error", ["errored", "pending"]],
         [2, "pending", ["succeeded", "pending"]],
     ]
-    assert mid["checkpoints"][1] == {"round": 1, "checkpoint": "ckpt-r1", "name": "after round 1", "done": False}
+    assert mid["checkpoints"][1] == {"round": 1, "checkpoint": "r/ckpt-r1", "name": "after round 1", "done": False}
     running = results(*held_out(0, 1, "failed"), *held_out(0, 2, None))
     assert running["rows"] == [[1, "pending", ["failed"]], [2, "pending", ["pending"]]]
 
@@ -2085,3 +2092,25 @@ def test_an_errored_held_out_episode_reads_errored_not_counted_in_its_own_view_n
     assert 'class="verdict warn"' in out["control"]
     assert 'class="event warn"' in out["log"]
     assert out["heard"].endswith("Verdict: Errored, not counted.")
+
+
+def test_a_fine_tuned_checkpoint_shows_by_its_short_id_and_the_names_tooltip_keeps_the_full_ids() -> None:
+    script = """
+    vm.runInContext(`
+      MomState.visit(view, { seed: 1, focus: 1 }); render();
+      MomState.visit(view, { tab: "now" }); render();
+    `, context);
+    const last = (id) => writes.filter(([at]) => at === id).pop()[1];
+    // A tooltip may carry the full id; nothing else on the page does.
+    const shown = writes.map(([, html]) => html.replace(/title="[^"]*"/g, "")).filter((h) => h.includes("r/ckpt-r"));
+    return { shown, rounds: last("p-rounds"), seed: last("results"), control: last("control") };
+    """
+    events = [*evaluated(0, (1, "failed")), started("trial"), *evaluated(1, (1, "succeeded")), *held_out(2, 1, None)]
+    out = app(REPLAY + script, stream(*events, executed(0)))
+    assert out["shown"] == []
+    assert 'title="ckpt-r0 → r/ckpt-r1"' in out["rounds"]
+    assert 'Testing <span class="mono">ckpt-r2</span>' in out["rounds"]
+    assert (
+        '<span class="mono note">ckpt-r1</span>' in out["seed"] and '<span class="mono">ckpt-r2</span>' in out["seed"]
+    )
+    assert 'Student <span class="mono">ckpt-r2</span>' in out["control"]

@@ -34,7 +34,7 @@ for (const el of document.querySelectorAll("[id]")) {
     },
   });
 }
-const { esc } = MomState;
+const { esc, shortCheckpoint } = MomState;
 const X = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M2 2l8 8M10 2l-8 8" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>';
 const ARROW = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 6h8M6.5 2.5L10 6l-3.5 3.5" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 const DIAMOND = '<svg viewBox="0 0 12 12" aria-hidden="true"><path d="M6 1.5L10.5 6 6 10.5 1.5 6z" fill="currentColor"/></svg>';
@@ -53,7 +53,7 @@ const panelChip = (ep = null) => {
 const WHO = { student: "Student", teacher: "Teacher (Argon)" };
 const tag = (controller, checkpoint) => {
   const who = WHO[controller] || "Unknown controller";
-  return `<span class="tag ${controller || "unknown"}">${who}${checkpoint ? ` <span class="mono">${esc(checkpoint)}</span>` : ""}</span>`;
+  return `<span class="tag ${controller || "unknown"}">${who}${checkpoint ? ` <span class="mono">${esc(shortCheckpoint(checkpoint))}</span>` : ""}</span>`;
 };
 const amount = (row) => (row.distance !== null ? ` ${+row.distance.toFixed(1)} cm` : row.angle !== null ? ` ${Math.round(row.angle)}°` : "");
 const skillText = (row) => (row.skill ? esc(row.skill) + amount(row) : '<span class="stop">Stopped, no skill chosen</span>');
@@ -417,7 +417,7 @@ function heldOut() {
   const test = MomState.testing(s);
   // A run that stopped arriving mid-evaluation can't say the test still runs.
   const live = MomState.following(view, now()) && !view.lost;
-  const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? " run so far" : ` of ${test.of} run`}${live ? "" : " when its events stopped"}.`;
+  const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(shortCheckpoint(test.checkpoint))}</span>` : "the student"}: ${test.run}${test.of === null ? " run so far" : ` of ${test.of} run`}${live ? "" : " when its events stopped"}.`;
   const errored = c && c.errored ? `<span class="note">${esc(c.errored)}</span>` : "";
   const lead = c && (c.figure
     ? `<span class="fig" role="img" aria-label="Held-out success: ${esc(c.spoken)}">${esc(c.figure)}</span><span class="rates"><span>${esc(c.counts)}</span>${errored}</span>`
@@ -481,7 +481,8 @@ function cardVerdict(e, ep) {
   return `${verdictChip(ep)}<span class="note clamped two" title="${esc(cap(ep.verdict.reason))}">${esc(cap(ep.verdict.reason))}</span>`;
 }
 function seedCard(c, e, ep) {
-  const id = c.checkpoint && !c.name.endsWith(c.checkpoint) ? `<span class="mono note">${esc(c.checkpoint)}</span>` : "";
+  const short = c.checkpoint && shortCheckpoint(c.checkpoint);
+  const id = short && !c.name.endsWith(short) ? `<span class="mono note">${esc(short)}</span>` : "";
   const head = `<span class="card-head"><span class="what">${esc(cap(c.name))}</span>${id}</span>`;
   const f = ep && ep.frames[ep.frames.length - 1];
   const shot = f

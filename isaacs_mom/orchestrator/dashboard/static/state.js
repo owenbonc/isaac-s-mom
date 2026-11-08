@@ -328,9 +328,11 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
+  // A fine-tuned checkpoint's id is `<run_id>/ckpt-rN` (student/checkpoints.py); the page names it by its last part.
+  const shortCheckpoint = (c) => c.slice(c.lastIndexOf("/") + 1);
   // No-break spaces keep each round's name on one line when a pair wraps.
   function roundName(r) {
-    if (r.from) return `from ${r.from.run}, ${r.from.checkpoint}`;
+    if (r.from) return `from ${r.from.run}, ${shortCheckpoint(r.from.checkpoint)}`;
     return r.round === 0 ? "before\u00a0fine-tuning" : r.round === null ? "the\u00a0evaluation\u00a0under\u00a0way" : `after\u00a0round\u00a0${r.round}`;
   }
   // The base model's checkpoint (student/checkpoints.py): a round 0 tested on another came from an earlier run.
@@ -623,7 +625,7 @@
     return { state: "failed", message };
   }
 
-  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, errored, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, tooLong, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
+  const api = { esc, shortCheckpoint, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, errored, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, tooLong, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
