@@ -851,3 +851,135 @@ def test_verdicts_are_worded_by_episode_kind_and_a_judged_take_says_who_finished
         ["take", "Failed after the teacher took over at step 8"],
         ["trial", None],
     ]
+
+
+def test_an_episodes_kind_is_known_from_its_start_except_a_trial_which_its_first_decision_tells() -> None:
+    def kinded(episode_id: str, **data: object) -> tuple[str, dict]:
+        return "episode_started", {**started(episode_id)[1], **data}
+
+    script = """
+    const s = S.initial();
+    const kinds = [];
+    for (const e of events) { S.reduce(s, e); kinds.push(S.kind(S.current(s))); }
+    return kinds;
+    """
+    events = stream(
+        kinded("take", demo=True),
+        kinded("heldout", split="heldout"),
+        kinded("demo", acting_on="trial"),
+        started("trial"),
+        decision(0),
+        started("rescue"),
+        decision(0, controller="teacher"),
+    )
+    assert run(script, events) == ["take", "heldout", "demonstration", None, "trial", None, "demonstration"]
+
+
+TAKE = [
+    ("episode_started", {**started("take")[1], "demo": True}),
+    *[x for step in range(3) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))],
+    ("decision", {"controller": "teacher", "takeover": True, "step": 3, "skill": None}),
+    ("decision", {**decision(3, controller="teacher")[1], "checkpoint": None}),  # the teacher has no checkpoint
+    executed(3, frame="/f/3.jpg"),
+]
+TAKE.insert(3, ("perturbation", {"kind": "move_box", "step": 1, "before_frame": "/f/before.jpg"}))
+
+
+def test_while_the_stage_holds_a_step_the_bar_names_that_frames_controller_not_the_episodes_latest() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        const who = () => S.inControl(v, now);
+        const seen = [who()];
+        for (const key of ["m", "p", "p", "End"]) { press(key); seen.push(who()); }
+        return seen;
+        """,
+        stream(*TAKE, started("next")),
+    )
+    teacher = {"controller": "teacher", "checkpoint": None, "step": None}
+    student_at_the_move = {"controller": "student", "checkpoint": "ckpt-r0", "step": 1}
+    nobody_yet = {"controller": None, "checkpoint": None, "step": None}
+    assert out == [nobody_yet, student_at_the_move, student_at_the_move, student_at_the_move, nobody_yet]
+    take = presenter(
+        "feed(events.length); const latest = S.inControl(v, now); press('p'); return [latest, S.inControl(v, now)];",
+        stream(*TAKE),
+    )
+    assert take == [teacher, student_at_the_move]
+
+
+def evaluation(checkpoint: str, round_: int, successes: int, n: int) -> tuple[str, dict]:
+    return "evaluation_result", {"checkpoint": checkpoint, "round": round_, "successes": successes, "n": n}
+
+
+def heldout(episode_id: str, checkpoint: str, judged: bool = True) -> list[tuple[str, dict]]:
+    events = [("episode_started", {**started(episode_id)[1], "split": "heldout"}), decision(0)]
+    events[-1][1]["checkpoint"] = checkpoint
+    return [*events, verdict(False)] if judged else events
+
+
+CLAIM = """
+const s = S.initial();
+for (const e of events) S.reduce(s, e);
+return [S.claim(s), S.testing(s)];
+"""
+
+
+def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_note() -> None:
+    first = run(CLAIM, stream(*heldout("h1", "ckpt-r0"), evaluation("ckpt-r0", 0, 0, 20)))
+    assert first == [
+        {
+            "figure": "0/20",
+            "spoken": "0 of 20 before fine-tuning",
+            "sample": "n=20",
+            "names": "before fine-tuning",
+            "ids": "ckpt-r0",
+        },
+        None,
+    ]
+    rounds = [evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 3, 20), evaluation("ckpt-r2", 2, 9, 20)]
+    claim, _ = run(CLAIM, stream(*rounds))
+    assert claim == {
+        "figure": "0/20 → 9/20",
+        "spoken": "0 of 20 before fine-tuning, then 9 of 20 after round 2",
+        "sample": "n=20 each",
+        "names": "before fine-tuning → after round 2",
+        "ids": "ckpt-r0 → ckpt-r2",
+    }
+
+
+def test_a_held_out_evaluation_with_no_episodes_says_so_in_words() -> None:
+    claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 0)))
+    assert (claim["figure"], claim["sample"]) == ("0/20 → none run", "n=20 and no held-out episode ran")
+    assert claim["spoken"] == "0 of 20 before fine-tuning, then none run after round 1"
+
+
+def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_evaluations_n() -> None:
+    _, first = run(CLAIM, stream(*heldout("h1", "ckpt-r0"), *heldout("h2", "ckpt-r0", judged=False)))
+    assert first == {"checkpoint": "ckpt-r0", "run": 1, "of": None}  # nothing in the events says 20 yet
+    later = stream(
+        *heldout("h1", "ckpt-r0"),
+        evaluation("ckpt-r0", 0, 0, 20),
+        started("trial"),
+        decision(0),
+        verdict(False),
+        *heldout("h2", "ckpt-r1"),
+        *heldout("h3", "ckpt-r1"),
+        started("take-is-dev"),
+    )
+    assert run(CLAIM, later)[1] == {"checkpoint": "ckpt-r1", "run": 2, "of": 20}
+    done = stream(*heldout("h1", "ckpt-r0"), evaluation("ckpt-r0", 0, 0, 20), started("trial"))
+    assert run(CLAIM, done)[1] is None
+
+
+def test_an_episode_is_finished_once_judged_moved_past_or_its_run_has_stopped() -> None:
+    out = presenter(
+        """
+        feed(events.length);
+        const [a, b, c] = S.shown(v).episodes;
+        const live = [a, b, c].map((e) => S.finished(v, now, e));
+        now += 60;
+        return [live, S.finished(v, now, c)];
+        """,
+        stream(started("a"), decision(0), started("b"), decision(0), verdict(False), started("c"), decision(0)),
+    )
+    assert out == [[True, True, False], True]

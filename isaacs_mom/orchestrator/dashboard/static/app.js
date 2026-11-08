@@ -57,14 +57,15 @@ const tag = (controller, checkpoint) => {
 };
 const amount = (row) => (row.distance !== null ? ` ${+row.distance.toFixed(1)} cm` : row.angle !== null ? ` ${Math.round(row.angle)}°` : "");
 const skillText = (row) => (row.skill ? esc(row.skill) + amount(row) : '<span class="stop">Stopped, no skill chosen</span>');
+const finished = (ep) => MomState.finished(view, now(), ep);
 // What an episode is, named without the loop's round index, which reads like a checkpoint number and is not one.
-// An episode is over once judged, or once the view has moved past it or the run has stopped.
-const finished = (ep) => ep.verdict !== null || ep !== MomState.current(MomState.shown(view)) || !MomState.following(view, now());
 const KINDS = {
   take: ["Judged take", "unseen scene, seed"],
   heldout: ["Held-out test", "seed"],
   demonstration: ["Teacher demonstration", "development seed"],
   trial: ["Student trial", "development seed"],
+  // A development episode before its first decision says whether the student or the teacher drives it.
+  null: ["Development episode", "seed"],
 };
 const kindOf = (ep) => {
   const [name, seed] = KINDS[MomState.kind(ep)];
@@ -122,26 +123,39 @@ function renderControl() {
       : `<span class="what">Fine-tuning the student</span><span class="note">No robot is moving. The held-out test of the new checkpoint starts when it is ready.</span>`;
     return view.lost ? "" : "Fine-tuning the student.";
   }
-  if (!ep || !ep.controller) {
+  if (!ep) {
     el.className = "control";
-    el.innerHTML = `<span class="what">${ep ? "Waiting for the first decision" : "Waiting for the run to start"}</span>`;
+    el.innerHTML = '<span class="what">Waiting for the run to start</span>';
     return "";
   }
+  const [kind, where] = kindOf(ep);
+  const head = `<span class="what">${kind}</span><span class="note">${where}</span>`;
+  if (!ep.controller) {
+    el.className = "control";
+    el.innerHTML = `${head}<span class="note">Waiting for the first decision.</span>`;
+    return "";
+  }
+  // After M or P the bar names whoever controlled the frame on the stage, not whoever controls the episode now.
+  const { controller, checkpoint, step } = MomState.inControl(view, now());
+  const who = WHO[controller] || "An unknown controller";
   const took = ep.rows.find((r) => r.kind === "takeover");
   const done = finished(ep);
   const words = MomState.verdictWords(ep);
   // The controller tag is the sentence's subject.
-  const detail = took
-    ? `took over when the student stopped${took.step === null ? "" : " at step " + esc(took.step)}.`
-    : ep.controller === "student"
-      ? `${done ? "chose" : "is choosing"} each skill from the head-camera frame.`
-      : `${done ? "demonstrated" : "is demonstrating"} from the head-camera frame.`;
+  const detail =
+    step !== null
+      ? `was in control at step ${esc(step)}.`
+      : took
+        ? `took over when the student stopped${took.step === null ? "" : " at step " + esc(took.step)}.`
+        : controller === "student"
+          ? `${done ? "chose" : "is choosing"} each skill from the head-camera frame.`
+          : `${done ? "demonstrated" : "is demonstrating"} from the head-camera frame.`;
   // A judged take's verdict already says when the teacher took over.
-  const sentence = ep.demo && took && words ? "" : `<span class="note">${detail}</span>`;
-  const [kind, where] = kindOf(ep);
-  el.className = "control " + ep.controller;
-  el.innerHTML = `<span class="what">${kind}</span><span class="note">${where}</span>${tag(ep.controller, ep.checkpoint)}${sentence}${words ? verdictChip(ep) : ""}`;
-  return `${WHO[ep.controller]} ${done ? "was" : "is"} in control.${words ? ` Verdict: ${words}.` : ""}`;
+  const sentence = step === null && ep.demo && took && words ? "" : `<span class="note">${detail}</span>`;
+  el.className = "control " + (controller || "");
+  el.innerHTML = `${head}${tag(controller, checkpoint)}${sentence}${words ? verdictChip(ep) : ""}`;
+  const said = step !== null ? `${who} was in control at step ${step}.` : `${who} ${done ? "was" : "is"} in control.`;
+  return `${said}${words ? ` Verdict: ${words}.` : ""}`;
 }
 
 function renderCamera() {
@@ -271,7 +285,7 @@ function renderLog() {
   // Said once in the header rather than on every row, until a decision in the episode carries a reason.
   const decisions = ep ? ep.rows.filter((r) => r.kind === "decision") : [];
   const reasons = !decisions.length || decisions.some((r) => r.reason);
-  const silent = decisions.every((r) => r.controller === "student") ? "The student gives no reasons" : "No reasons yet";
+  const silent = decisions.every((r) => r.controller === "student") ? "The student gives no reasons" : finished(ep) ? "No reasons given" : "No reasons yet";
   $("chip-log").innerHTML = (reasons ? "" : `<span class="note">${silent}</span>`) + panelChip(ep);
   if (!ep) {
     list.innerHTML = '<li class="empty">No decisions yet. Each decision appears with its reason and latency.</li>';
@@ -309,20 +323,16 @@ function renderLog() {
 }
 
 function renderRounds() {
-  const rounds = MomState.shown(view).rounds;
-  let body = '<div class="ph-text">No held-out evaluation in the events yet.</div>';
-  if (rounds.length) {
-    const first = rounds[0];
-    const last = rounds[rounds.length - 1];
-    const both = rounds.length > 1;
-    const fig = both ? `${first.successes}/${first.n} → ${last.successes}/${last.n}` : `${first.successes}/${first.n}`;
-    const spoken = both ? `${first.successes} of ${first.n}, then ${last.successes} of ${last.n}` : `${first.successes} of ${first.n}`;
-    const n = first.n === last.n ? `n=${last.n}${both ? " each" : ""}` : `n=${first.n} and n=${last.n}`;
-    const span = both ? `${esc(first.checkpoint)} → ${esc(last.checkpoint)}` : esc(first.checkpoint);
-    // First and latest only: the change is the claim.
-    body = `<div class="gain"><span class="fig" role="img" aria-label="${spoken} held-out successes">${fig}</span><span>${n}</span><span class="note mono">${span}</span></div>`;
-  }
-  $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body">${body}</div>`;
+  const s = MomState.shown(view);
+  const c = MomState.claim(s);
+  const test = MomState.testing(s);
+  // A run that stopped arriving mid-evaluation can't say the test still runs.
+  const live = MomState.following(view, now()) && !view.lost;
+  const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? "" : ` of ${test.of}`} run${live ? "" : " when its events stopped"}.`;
+  // First and latest only: the change is the claim.
+  const gain = c && `<div class="gain"><span class="fig" role="img" aria-label="Held-out successes: ${esc(c.spoken)}">${esc(c.figure)}</span><span>${esc(c.sample)}</span></div><div>${esc(c.names)} <span class="note mono">${esc(c.ids)}</span></div>`;
+  const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;
+  $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}</div>`;
 }
 
 // One line: each model, where it runs (configured), and its measured median latency or fine-tune duration.
@@ -367,7 +377,7 @@ function renderDiagnosis() {
     ? actingOnBody(acting)
     : d
       ? `<div class="body stack">${diagnosisText(d)}</div>`
-      : `<div class="body ph-text">${ep ? "No diagnosis for this episode. The teacher diagnoses failed student episodes on development seeds, then demonstrates on new ones." : "No episode yet."}</div>`;
+      : `<div class="body ph-text">${ep ? "No diagnosis for this episode. The teacher diagnoses the student's failed trials, then demonstrates on those seeds first and new ones after." : "No episode yet."}</div>`;
   $("p-diagnosis").innerHTML = `<header><h2>Diagnosis</h2>${panelChip(ep)}</header>${body}`;
 }
 

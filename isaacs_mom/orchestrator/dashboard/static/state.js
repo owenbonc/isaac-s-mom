@@ -142,7 +142,8 @@
         break;
       }
       case "evaluation_result":
-        if (num(d.successes) !== null && num(d.n) !== null) s.rounds.push({ round: num(d.round), checkpoint: text(d.checkpoint), successes: d.successes, n: d.n });
+        // `after` is where the next evaluation's held-out episodes start.
+        if (num(d.round) !== null && num(d.successes) !== null && num(d.n) !== null) s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, after: s.episodes.length });
         break;
       case "finetune_started":
         s.finetune.pending = { round: num(d.round), t: event.t };
@@ -243,12 +244,14 @@
   const following = (v, now) => running(v.live, v.frozen ? v.frozen.at : now);
 
   const accepted = (ep) => ep.verdict !== null && ep.verdict.task && ep.verdict.physics;
-  // What an episode is: the judged take, a held-out test, a teacher demonstration or a student trial.
+  // What an episode is: the judged take, a held-out test, a teacher demonstration or a student trial. All but a trial
+  // are known from the episode's start; a development episode acting on no diagnosis is null until its first decision.
   function kind(ep) {
     if (ep.demo) return "take";
     if (ep.split === "heldout") return "heldout";
+    if (ep.actingOn) return "demonstration";
     const first = ep.rows.find((r) => r.kind === "decision");
-    return first && first.controller === "teacher" ? "demonstration" : "trial";
+    return !first ? null : first.controller === "teacher" ? "demonstration" : "trial";
   }
   // The verdict in the words of the episode's kind (SPEC §3.5): only a demonstration is admitted to training; the
   // rest succeed or fail, and the judged take says whether the student finished it alone. Null before the verdict.
@@ -263,6 +266,35 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
+  // The held-out claim (SPEC §3.5): the first and the latest evaluation, each with its n, named in words, with the
+  // checkpoint ids as a note. Null before the first evaluation.
+  function claim(s) {
+    if (!s.rounds.length) return null;
+    const first = s.rounds[0];
+    const last = s.rounds[s.rounds.length - 1];
+    const pair = first === last ? [first] : [first, last];
+    const name = (r) => (r.round === 0 ? "before fine-tuning" : `after round ${r.round}`);
+    const score = (r, of) => (r.n ? `${r.successes}${of}${r.n}` : "none run");
+    const same = pair.every((r) => r.n === first.n) && first.n;
+    return {
+      figure: pair.map((r) => score(r, "/")).join(" → "),
+      spoken: pair.map((r) => `${score(r, " of ")} ${name(r)}`).join(", then "),
+      sample: same ? `n=${first.n}${pair.length > 1 ? " each" : ""}` : pair.map((r) => (r.n ? `n=${r.n}` : "no held-out episode ran")).join(" and "),
+      names: pair.map(name).join(" → "),
+      ids: pair.map((r) => r.checkpoint).join(" → "),
+    };
+  }
+
+  // The held-out evaluation under way: its checkpoint, how many of its episodes have a verdict, and out of how many,
+  // which only an earlier evaluation of the same sealed seeds tells. Null while none runs.
+  function testing(s) {
+    const last = s.rounds[s.rounds.length - 1];
+    const tests = s.episodes.slice(last ? last.after : 0).filter((e) => e.split === "heldout");
+    if (!tests.length) return null;
+    const decided = tests.flatMap((e) => e.rows).findLast((r) => r.kind === "decision" && r.checkpoint);
+    return { checkpoint: decided ? decided.checkpoint : null, run: tests.filter((e) => e.verdict).length, of: last ? last.n : null };
+  }
+
   // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
   const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || current(s);
 
@@ -312,6 +344,18 @@
   // The step the stage holds the shown episode at: its move under P or after M, null for its latest frame.
   const stageStep = (v) => (v.compare ? v.compare.step : v.step);
 
+  // Who the control bar names: the controller of the frame the stage holds after M or P, else the episode's latest.
+  function inControl(v, now) {
+    const ep = episode(v, now);
+    if (!ep) return null;
+    const step = stageStep(v);
+    const frame = step === null ? null : filmstrip(ep, step).find((f) => f.now);
+    return frame ? { controller: frame.controller, checkpoint: frame.checkpoint, step: frame.step } : { controller: ep.controller, checkpoint: ep.checkpoint, step: null };
+  }
+
+  // An episode is over once judged, once the run has moved past it, or once the run has stopped.
+  const finished = (v, now, ep) => ep.verdict !== null || ep !== current(shown(v)) || !following(v, now);
+
   // Shows the shown episode's box or bin move; pressing again returns to the selection from before.
   function compareMove(v, now) {
     if (v.compare) {
@@ -336,7 +380,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, teacherDrove, episode, finetuning, target, stageStep, keydown };
+  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, claim, testing, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
