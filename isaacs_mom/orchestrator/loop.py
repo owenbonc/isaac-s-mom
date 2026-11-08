@@ -14,6 +14,7 @@ from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, adapter_dir, finetune
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.validator.rules import RECORDING_ERROR
 from isaacs_mom.validator.training import build_training_set
 
 INSTRUCTION = "Hug the orange box, lift it, and put it in the green bin."
@@ -35,20 +36,30 @@ def evaluate(
     make_student: StudentFactory = StudentPolicy,
 ) -> EvaluationResult:
     seeds = sorted(heldout_seeds())
-    successes = sum(
-        run_episode(
-            sim,
-            make_student(checkpoint),
-            run_dir=run_dir,
-            events=events,
-            seed=seed,
-            split="heldout",
-            round_=round_,
-            instruction=INSTRUCTION,
-        ).validation.accepted  # type: ignore[union-attr]  # finish() always sets validation
-        for seed in seeds
-    )
-    result = EvaluationResult(checkpoint=checkpoint, round=round_, successes=successes, n=len(seeds))
+    successes = errored = 0
+    for seed in seeds:
+        student = make_student(checkpoint)  # outside the try: a checkpoint that can't load stops the run
+        try:
+            manifest = run_episode(
+                sim,
+                student,
+                run_dir=run_dir,
+                events=events,
+                seed=seed,
+                split="heldout",
+                round_=round_,
+                instruction=INSTRUCTION,
+            )
+        except Exception as error:  # a crash is the system's fault, not the student's, so it's counted apart (§3.5)
+            errored += 1
+            events.emit("error", seed=seed, split="heldout", round=round_, error=f"{type(error).__name__}: {error}")
+            continue
+        verdict = manifest.validation
+        if verdict is None or verdict.reason.startswith(RECORDING_ERROR):
+            errored += 1
+        elif verdict.accepted:
+            successes += 1
+    result = EvaluationResult(checkpoint=checkpoint, round=round_, successes=successes, n=len(seeds), errored=errored)
     events.emit("evaluation_result", **result.model_dump(), rate=result.rate)
     return result
 
