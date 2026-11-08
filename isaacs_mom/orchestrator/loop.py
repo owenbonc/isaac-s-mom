@@ -111,7 +111,9 @@ def run_loop(
                 round_=round_,
                 instruction=instruction,
             )
-            if manifest.validation and not manifest.validation.accepted:
+            verdict = manifest.validation
+            # A recording error is a simulator bug, never a lesson, so the teacher doesn't diagnose it.
+            if verdict and not verdict.accepted and not verdict.reason.startswith(RECORDING_ERROR):
                 failures.append(manifest)
         diagnosed: list[tuple[str, Diagnosis]] = []
         for manifest in failures:
