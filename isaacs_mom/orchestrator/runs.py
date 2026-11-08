@@ -26,6 +26,8 @@ NOT_STARTED = "not started: "  # the error a Teach that started nothing leaves a
 STOPPED = "mom run stopped"  # the error a Teach-started run that exited non-zero leaves as its last word
 NOT_YET = "Not yet: the loop teaches one task"
 NO_KEY = "Argon isn't reachable: GEMINI_API_KEY is not set on the machine serving the dashboard"
+HOLDS_KEY = "The instruction holds GEMINI_API_KEY, so it goes no further and is kept with [key] in its place"
+RUN_ID_TRIES = 8  # a run id is taken only by a Teach in the same second drawing the same 1 in 65536
 REASON_CHARS = 300
 LOG_TAIL_BYTES = 64 * 1024
 Launch = Callable[[list[str], Path], object]  # a command, and the log in its run's directory its output goes to
@@ -151,12 +153,15 @@ def teach(
     runs_dir: Path, instruction: str, *, task: str, generate: Generate | None, launch: Launch
 ) -> tuple[str, list[str]]:
     """A new run whose first event is the instruction. The task generator judges it, its Argon call counted in the
-    run's own budget (rule 5), and `mom run` starts there when it asks for the loop's task. Returns the run id and why
-    nothing started, empty when the run did."""
+    run's own budget (rule 5), and `mom run` starts there when it asks for the loop's task. An instruction holding the
+    Argon key is refused before either, and kept with the key hidden (rule 5). Returns the run id and why nothing
+    started, empty when the run did; raises OSError when the runs folder can't hold a new run."""
     run_id, run_dir = _new_run(runs_dir)
     events = EventLog(run_dir, run_id)
-    events.emit("instruction", text=instruction, source="teach")
-    reasons = _judge(instruction, events, generate)
+    shown = hide_key(instruction)
+    events.emit("instruction", text=shown, source="teach")
+    # Argon would be sent the key, and `mom run`'s command line shows it to every process on the machine.
+    reasons = [HOLDS_KEY] if shown != instruction else _judge(instruction, events, generate)
     if not reasons:
         # One argument whatever the text holds, even a leading "-" that would read as an option.
         cli = [sys.executable, "-m", "isaacs_mom.orchestrator.cli", "run", "--runs", str(runs_dir.resolve())]
@@ -170,14 +175,17 @@ def teach(
 
 
 def _new_run(runs_dir: Path) -> tuple[str, Path]:
-    """A fresh run directory, made exclusively, so two Teaches in the same second never share one."""
-    while True:
+    """A fresh run directory, made exclusively, so two Teaches in the same second never share one. Only a taken run id
+    is drawn again, so a runs folder that can't be made (a dangling symlink, a file) raises at once."""
+    runs_dir.mkdir(parents=True, exist_ok=True)
+    for _ in range(RUN_ID_TRIES):
         run_id = f"{time.strftime('teach-%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
         try:
-            (runs_dir / run_id).mkdir(parents=True)
+            (runs_dir / run_id).mkdir()
         except FileExistsError:
             continue
         return run_id, runs_dir / run_id
+    raise FileExistsError(f"no free run id in {runs_dir} after {RUN_ID_TRIES} draws")
 
 
 def _judge(instruction: str, events: EventLog, generate: Generate | None) -> list[str]:

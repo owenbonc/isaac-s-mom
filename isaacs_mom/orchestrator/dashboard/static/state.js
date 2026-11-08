@@ -650,7 +650,9 @@
           ? "The dashboard takes instructions only from its own page on this computer."
           : status === 400
             ? `An instruction is 1 to ${TEACH_MAX} characters.`
-            : `The dashboard server could not take it (HTTP ${status}).`;
+            : status === 500 && body && typeof body.detail === "string"
+              ? body.detail
+              : `The dashboard server could not take it (HTTP ${status}).`;
     return { state: "failed", message };
   }
 
