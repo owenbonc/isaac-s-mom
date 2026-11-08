@@ -955,23 +955,14 @@ return [S.claim(s), S.testing(s)];
 
 
 def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_note() -> None:
-    first = run(CLAIM, stream(*heldout("h1", "ckpt-r0"), evaluation("ckpt-r0", 0, 0, 20)))
-    assert first == [
-        {
-            "figure": "0/20",
-            "spoken": "0 of 20 before\u00a0fine-tuning",
-            "sample": "n=20",
-            "errored": None,
-            "names": "before\u00a0fine-tuning",
-            "ids": "ckpt-r0",
-        },
-        None,
-    ]
-    rounds = [evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 3, 20), evaluation("ckpt-r2", 2, 9, 20)]
+    rounds = [evaluation("ckpt-r0", 0, 4, 20), evaluation("ckpt-r1", 1, 9, 20), evaluation("ckpt-r2", 2, 15, 20)]
     claim, _ = run(CLAIM, stream(*rounds))
     assert claim == {
-        "figure": "0/20 → 9/20",
-        "spoken": "0 of 20 before\u00a0fine-tuning, then 9 of 20 after\u00a0round\u00a02",
+        "figure": "+55 pts",
+        "rates": "20% → 75%",
+        "counts": "4/20 → 15/20",
+        "spoken": "Up 55 percentage points: 20%, 4 of 20, before\u00a0fine-tuning, "
+        "then 75%, 15 of 20, after\u00a0round\u00a02",
         "sample": "n=20 each",
         "errored": None,
         "names": "before\u00a0fine-tuning → after\u00a0round\u00a02",
@@ -979,23 +970,69 @@ def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_
     }
 
 
+def test_with_one_held_out_evaluation_the_figure_is_its_rate() -> None:
+    first = run(CLAIM, stream(*heldout("h1", "ckpt-r0"), evaluation("ckpt-r0", 0, 4, 20)))
+    assert first == [
+        {
+            "figure": "20%",
+            "rates": None,
+            "counts": "4/20",
+            "spoken": "20%, 4 of 20, before\u00a0fine-tuning",
+            "sample": "n=20",
+            "errored": None,
+            "names": "before\u00a0fine-tuning",
+            "ids": "ckpt-r0",
+        },
+        None,
+    ]
+
+
+@pytest.mark.parametrize(
+    ("first", "latest", "figure", "rates", "spoken"),
+    [
+        ((15, 20), (13, 20), "\u221210 pts", "75% → 65%", "Down 10 percentage points: "),
+        ((0, 20), (0, 20), "+0 pts", "0% → 0%", "No change: "),
+        # The change is taken between the rates as shown (33% → 67%), never from the unrounded 33.3 points.
+        ((1, 3), (2, 3), "+34 pts", "33% → 67%", "Up 34 percentage points: "),
+    ],
+)
+def test_the_held_out_change_is_in_points_between_the_rates_shown(
+    first: tuple[int, int], latest: tuple[int, int], figure: str, rates: str, spoken: str
+) -> None:
+    claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, *first), evaluation("ckpt-r1", 1, *latest)))
+    assert (claim["figure"], claim["rates"]) == (figure, rates)
+    assert claim["spoken"].startswith(spoken)
+
+
 def test_a_held_out_evaluation_with_no_episodes_says_so_in_words() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 0)))
-    assert (claim["figure"], claim["sample"]) == ("0/20 → none", "n=20 and no held-out episode ran")
-    assert claim["spoken"] == "0 of 20 before\u00a0fine-tuning, then no held-out episode ran after\u00a0round\u00a01"
+    assert (claim["figure"], claim["counts"], claim["sample"]) == (
+        None,
+        "0/20 → none",
+        "n=20 and no held-out episode ran",
+    )
+    assert (
+        claim["spoken"] == "0%, 0 of 20, before\u00a0fine-tuning, then no held-out episode ran after\u00a0round\u00a01"
+    )
 
 
 def test_held_out_success_is_out_of_n_minus_errored_with_the_errored_counts_shown_apart() -> None:
-    rounds = [evaluation("ckpt-r0", 0, 0, 20, errored=0), evaluation("ckpt-r1", 1, 3, 20, errored=1)]
+    rounds = [evaluation("ckpt-r0", 0, 4, 20, errored=0), evaluation("ckpt-r1", 1, 3, 20, errored=1)]
     claim, _ = run(CLAIM, stream(*rounds))
-    assert (claim["figure"], claim["sample"], claim["errored"]) == ("0/20 → 3/19", "n=20 each", "0 → 1 errored")
-    assert claim["spoken"] == "0 of 20 before\u00a0fine-tuning, then 3 of 19 after\u00a0round\u00a01, 1 errored"
+    assert (claim["figure"], claim["rates"], claim["counts"]) == ("\u22124 pts", "20% → 16%", "4/20 → 3/19")
+    assert (claim["sample"], claim["errored"]) == ("n=20 each", "0 → 1 errored")
+    assert claim["spoken"] == (
+        "Down 4 percentage points: 20%, 4 of 20, before\u00a0fine-tuning, "
+        "then 16%, 3 of 19, after\u00a0round\u00a01, 1 errored"
+    )
 
 
-def test_a_held_out_evaluation_whose_every_episode_errored_says_so_in_words() -> None:
+def test_a_held_out_evaluation_whose_every_episode_errored_says_so_in_words_and_shows_no_points() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20, errored=20)))
-    assert (claim["figure"], claim["errored"]) == ("none", "20 errored")
+    assert (claim["figure"], claim["counts"], claim["errored"]) == (None, "none", "20 errored")
     assert claim["spoken"] == "all 20 held-out episodes errored before\u00a0fine-tuning"
+    later, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 4, 20), evaluation("ckpt-r1", 1, 0, 20, errored=20)))
+    assert (later["figure"], later["rates"], later["counts"]) == (None, "20% → none", "4/20 → none")
 
 
 def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_evaluations_n() -> None:

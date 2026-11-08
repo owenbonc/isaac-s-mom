@@ -261,9 +261,9 @@ footer.models .v{color:var(--muted)}
   main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:fit-content(60%) minmax(0,1fr);grid-template-areas:"cam side" "cam log"}
   .camera{grid-area:cam}
   .decisions{grid-area:log}
-  /* The held-out column is as wide as its heading and chip on one line; the diagnosis takes the rest, and the
-     training sets and replay run the band's full width under both. */
-  .side{grid-area:side;display:grid;grid-template-columns:min-content minmax(0,1fr);grid-template-areas:"rounds diag" "train train"}
+  /* The held-out column is as wide as its figure with the rates beside it, up to 20rem; the diagnosis takes the rest,
+     and the training sets and replay run the band's full width under both. */
+  .side{grid-area:side;display:grid;grid-template-columns:fit-content(20rem) minmax(0,1fr);grid-template-areas:"rounds diag" "train train"}
   .side>#p-diagnosis{border-top:0;border-left:1px solid var(--edge)}
   #p-rounds{grid-area:rounds}
   #p-diagnosis{grid-area:diag}
@@ -331,8 +331,11 @@ ol.log li.empty{display:block;color:var(--muted);border-bottom:0}
 ol.log li.event.moved{background:var(--raised);color:var(--ink)}
 ol.log li.focus{box-shadow:inset 0 0 0 1.5px var(--accent)}
 ol.log .after{grid-column:2;font-size:var(--t-label);font-weight:600;color:var(--ink)}
-.gain{display:flex;flex-wrap:wrap;align-items:baseline;gap:.15rem .6rem}
-.fig{white-space:nowrap;font-size:var(--t-fig);font-weight:700;line-height:1.05;letter-spacing:-.025em}
+.gain{display:flex;flex-wrap:wrap;align-items:center;gap:.15rem .7rem}
+/* The one large number: size alone sets it apart, so it stays at a medium weight. */
+.fig{white-space:nowrap;font-size:var(--t-fig);font-weight:500;line-height:1.05;letter-spacing:-.025em}
+.rates{display:flex;flex-direction:column;white-space:nowrap}
+.rates b{font-weight:600}
 ol.log li.fresh{animation:in .16s var(--ease-out)}
 @keyframes in{from{opacity:0;transform:translateY(4px)}}
 ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}

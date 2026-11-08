@@ -382,9 +382,13 @@ function renderRounds() {
   // A run that stopped arriving mid-evaluation can't say the test still runs.
   const live = MomState.following(view, now()) && !view.lost;
   const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? " run so far" : ` of ${test.of} run`}${live ? "" : " when its events stopped"}.`;
-  // First and latest only: the change is the claim.
+  // First and latest only: the change is the claim, the page's one large number, with the rates and their counts
+  // beside it; with nothing scored to compare, it says so in words.
   const errored = c && c.errored ? ` · ${esc(c.errored)}` : "";
-  const gain = c && `<div class="gain"><span class="fig" role="img" aria-label="Held-out successes: ${esc(c.spoken)}">${esc(c.figure)}</span><span>${esc(c.sample)}${errored}</span></div><div>${esc(c.names)}</div><div class="note mono">${esc(c.ids)}</div>`;
+  const lead = c && (c.figure
+    ? `<span class="fig" role="img" aria-label="Held-out success: ${esc(c.spoken)}">${esc(c.figure)}</span><span class="rates">${c.rates ? `<b>${esc(c.rates)}</b>` : ""}<span>${esc(c.counts)}</span></span>`
+    : `<span>${esc(cap(c.spoken))}.</span>`);
+  const gain = c && `<div class="gain">${lead}</div><div class="note">${esc(c.sample)}${errored}</div><div>${esc(c.names)}</div><div class="note mono">${esc(c.ids)}</div>`;
   const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;
   // A run is taught and tested on its own instruction, so its rates carry it (SPEC §3.5).
   const said = s.instruction && s.instruction.text;

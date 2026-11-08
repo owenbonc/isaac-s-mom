@@ -309,9 +309,9 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
-  // The held-out claim (SPEC §3.5): the first and the latest evaluation, each its successes out of the episodes that
-  // didn't error, with its n and errored count, named in words, with the checkpoint ids as a note. Null before the
-  // first evaluation.
+  // The held-out claim (SPEC §3.5): the change in percentage points between the first and the latest evaluation, and
+  // each one's rate and successes out of the episodes that didn't error, with its n and errored count, named in words,
+  // with the checkpoint ids as a note. Null before the first evaluation.
   function claim(s) {
     if (!s.rounds.length) return null;
     const first = s.rounds[0];
@@ -320,17 +320,24 @@
     // No-break spaces keep each name on one line when the pair wraps.
     const name = (r) => (r.round === 0 ? "before\u00a0fine-tuning" : `after\u00a0round\u00a0${r.round}`);
     const scored = (r) => r.n - (r.errored ?? 0);
-    const score = (r, of) => (scored(r) > 0 ? `${r.successes}${of}${scored(r)}` : "none");
+    // Whole percentages of the scored episodes; the change is taken between the rates as shown, so the figures agree.
+    const rate = (r) => (scored(r) > 0 ? Math.round((100 * r.successes) / scored(r)) : null);
+    const rates = pair.map(rate);
+    const points = pair.length > 1 && !rates.includes(null) ? rates[1] - rates[0] : null;
     const said = (r) =>
       !r.n
         ? `no held-out episode ran ${name(r)}`
         : scored(r) <= 0
           ? `all ${r.n} held-out episodes errored ${name(r)}`
-          : `${score(r, " of ")} ${name(r)}${r.errored ? `, ${r.errored} errored` : ""}`;
+          : `${rate(r)}%, ${r.successes} of ${scored(r)}, ${name(r)}${r.errored ? `, ${r.errored} errored` : ""}`;
+    const change = points === null ? "" : points === 0 ? "No change: " : `${points > 0 ? "Up" : "Down"} ${Math.abs(points)} percentage points: `;
     const same = pair.every((r) => r.n === first.n) && first.n;
     return {
-      figure: pair.map((r) => score(r, "/")).join(" → "),
-      spoken: pair.map(said).join(", then "),
+      // The change in points, never a relative percentage; with one evaluation, its rate; with nothing scored, none.
+      figure: rates.includes(null) ? null : points === null ? `${rates[0]}%` : `${points < 0 ? "\u2212" : "+"}${Math.abs(points)} pts`,
+      rates: pair.length > 1 ? rates.map((r) => (r === null ? "none" : `${r}%`)).join(" → ") : null,
+      counts: pair.map((r) => (scored(r) > 0 ? `${r.successes}/${scored(r)}` : "none")).join(" → "),
+      spoken: change + pair.map(said).join(", then "),
       sample: same ? `n=${first.n}${pair.length > 1 ? " each" : ""}` : pair.map((r) => (r.n ? `n=${r.n}` : "no held-out episode ran")).join(" and "),
       errored: pair.every((r) => r.errored !== null) ? `${pair.map((r) => r.errored).join(" → ")} errored` : null,
       names: pair.map(name).join(" → "),
