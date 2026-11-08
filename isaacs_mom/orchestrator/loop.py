@@ -1,9 +1,11 @@
 """The teach -> fine-tune loop (SPEC §3.6)."""
 
+import json
 import time
 from collections.abc import Callable
 from functools import partial
 from pathlib import Path
+from typing import Any
 
 from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult
 from isaacs_mom.orchestrator.episode import HEARTBEAT_SECONDS, heartbeat, run_episode
@@ -66,10 +68,27 @@ def evaluate(
 
 
 def moves_bin(demos: int, share: float) -> set[int]:
-    """Which of a round's demonstrations get the lift-triggered bin move: round(share * demos) of them, spread
-    evenly, so 0.25 of 20 is demonstrations 3, 7, 11, 15 and 19."""
+    """Which of a round's demonstrations get the lift-triggered bin move: round(share * demos) of them, rounded half
+    to even (0.25 of 10 is 2, of 2 is none), spread evenly, so 0.25 of 20 is demonstrations 3, 7, 11, 15 and 19."""
     k = round(share * demos)
     return {i for i in range(demos) if (i + 1) * k // demos > i * k // demos}
+
+
+def bin_moves(events_path: Path) -> str:
+    """How many teacher demonstrations the bin really moved in, from the run's events: a scheduled move applies only
+    once the box is lifted, and the sim may refuse it."""
+    events = [json.loads(line) for line in events_path.read_text().splitlines()] if events_path.exists() else []
+
+    def episodes(kind: str, holds: Callable[[dict[str, Any]], bool]) -> set[str]:
+        return {e["data"]["episode_id"] for e in events if e["type"] == kind and holds(e["data"])}
+
+    taught = episodes("decision", lambda d: d["controller"] == "teacher")
+    scheduled = episodes("episode_started", lambda d: bool(d.get("move_bin_after_lift")))
+    moved = episodes("perturbation", lambda d: d["kind"] == "move_bin")
+    return (
+        f"the bin moved right after the lift in {len(moved & taught)} of {len(taught)} teacher demonstrations "
+        f"({len(scheduled & taught)} scheduled)"
+    )
 
 
 def run_loop(

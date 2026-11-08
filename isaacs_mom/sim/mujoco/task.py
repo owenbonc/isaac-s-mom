@@ -141,7 +141,6 @@ TASKS = {
         # The robot stays on its feet and twists its waist to a bin beside it.
         TaskConfig("fixed_feet", walking=False, bin_distance_m=(0.43, 0.45), bin_bearing_deg=(97.0, 112.0)),
         # Fixed-feet layouts the fixed_feet task never uses (§6.10's new_layout): the bin further ahead, or further out.
-        # The scripted policy places in both on 20 of 20 development seeds.
         TaskConfig("fixed_feet_ahead", walking=False, bin_distance_m=(0.43, 0.45), bin_bearing_deg=(85.0, 97.0)),
         TaskConfig("fixed_feet_far", walking=False, bin_distance_m=(0.45, 0.50), bin_bearing_deg=(97.0, 112.0)),
     ]
