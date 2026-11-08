@@ -245,17 +245,17 @@
     return { student: stat(s.latency.student), teacher: stat(s.latency.teacher), finetune: stat(s.finetune.durations) };
   }
 
-  // The head-camera frames to show around the stage frame (`now`): the latest, or the first at or after `focus`.
-  // The first frame after the box or bin moved is flagged `moved`, it and every later one `after`.
+  // The head-camera frames up to the stage frame (`now`), the latest or the first at or after `focus`: it comes last,
+  // so a strip too narrow for all six drops the earliest and keeps it. The first frame after the box or bin moved is
+  // flagged `moved`, it and every later one `after`.
   function filmstrip(ep, focus = null) {
     if (!ep || !ep.frames.length) return [];
     const frames = ep.frames;
     const moved = ep.perturbedStep === null ? null : frames.find((f) => f.step >= ep.perturbedStep);
     const stage = (focus !== null && frames.find((f) => f.step >= focus)) || frames[frames.length - 1];
     const at = frames.indexOf(stage);
-    const start = Math.max(0, Math.min(at - (FILMSTRIP >> 1), frames.length - FILMSTRIP));
     const after = (f) => ep.perturbedStep !== null && f.step !== null && f.step >= ep.perturbedStep;
-    return frames.slice(start, start + FILMSTRIP).map((f) => ({ ...f, moved: f === moved, after: after(f), now: f === stage }));
+    return frames.slice(Math.max(0, at + 1 - FILMSTRIP), at + 1).map((f) => ({ ...f, moved: f === moved, after: after(f), now: f === stage }));
   }
 
   // The shown episode's box or bin move: the frame taken right before it, the first frame after it, and the first

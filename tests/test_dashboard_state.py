@@ -2182,3 +2182,14 @@ def test_a_paused_view_stays_put_when_the_run_stops_while_it_is_paused() -> None
     )
     # finetune_started was written at t=2 and the view paused as it arrived, at t=3
     assert out == [[1, True], [1, True], [None, False]]
+
+
+def test_the_filmstrip_ends_on_the_stage_frame_so_a_strip_that_drops_its_earliest_keeps_it() -> None:
+    steps = [x for step in range(8) for x in (decision(step), executed(step, frame=f"/f/{step}.jpg"))]
+    script = """
+    const s = S.initial();
+    for (const e of events) S.reduce(s, e);
+    const strip = (focus) => S.filmstrip(S.current(s), focus).map((f) => (f.now ? `[${f.step}]` : f.step)).join(" ");
+    return [null, 0, 1, 4].map(strip);
+    """
+    assert run(script, stream(started("a"), *steps)) == ["2 3 4 5 6 [7]", "[0]", "0 [1]", "0 1 2 3 [4]"]
