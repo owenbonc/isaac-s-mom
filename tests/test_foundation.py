@@ -532,24 +532,26 @@ def test_the_cli_sizes_a_round_with_demos_and_dev_trials(tmp_path: Path, monkeyp
     sizes: dict[str, object] = {}
 
     def run_loop_spy(*args: object, **kwargs: object) -> list[object]:
-        sizes.update(demos=kwargs["demos"], dev_trials=kwargs["dev_trials"])
+        sizes.update(demos=kwargs["demos"], dev_trials=kwargs["dev_trials"], share=kwargs["move_bin_share"])
         return []
 
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(cli, "run_loop", run_loop_spy)
     base = ["mom", "run", "--sim", "fake", "--student", "stub", "--rounds", "1"]
-    monkeypatch.setattr(sys, "argv", [*base, "--demos", "80", "--dev-trials", "15"])
+    monkeypatch.setattr(sys, "argv", [*base, "--demos", "80", "--dev-trials", "15", "--move-bin-share", "0.5"])
     cli.main()
-    assert sizes == {"demos": 80, "dev_trials": 15}
+    assert sizes == {"demos": 80, "dev_trials": 15, "share": 0.5}
     monkeypatch.setattr(sys, "argv", base)
     cli.main()
-    assert sizes == {"demos": loop.DEMOS_PER_ROUND, "dev_trials": loop.DEV_TRIALS}
+    assert sizes == {"demos": loop.DEMOS_PER_ROUND, "dev_trials": loop.DEV_TRIALS, "share": loop.MOVE_BIN_SHARE}
 
 
-@pytest.mark.parametrize("flag", ["--demos", "--dev-trials"])
-def test_the_cli_refuses_a_round_size_below_one(flag: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+@pytest.mark.parametrize(("flag", "value"), [("--demos", "0"), ("--dev-trials", "0"), ("--move-bin-share", "1.5")])
+def test_the_cli_refuses_a_round_size_below_one_or_a_share_above_all(
+    flag: str, value: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
     monkeypatch.chdir(tmp_path)
-    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", flag, "0"])
+    monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", flag, value])
     with pytest.raises(SystemExit) as exit_:
         cli.main()
     assert exit_.value.code == 2
@@ -586,3 +588,42 @@ def test_a_finetune_reports_what_it_trained_on_how_long_and_where(tmp_path: Path
     assert completed["examples"] == len(Path(started["training_set"]).read_text().splitlines())
     assert isinstance(completed["duration_s"], float) and completed["duration_s"] >= 0
     assert Path(completed["checkpoint_path"]).parts == (*tmp_path.parts, "some-run", "checkpoints", "ckpt-r1")
+
+
+def test_a_stated_share_of_teacher_demonstrations_gets_the_bin_move(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    real = loop.run_episode
+    asked: list[tuple[str, bool]] = []
+
+    def recorded(sim: FakeSim, policy: Any, **kwargs: Any) -> EpisodeManifest:
+        asked.append((policy.controller, kwargs.get("move_bin_after_lift", False)))
+        return real(sim, policy, **kwargs)
+
+    monkeypatch.setattr(loop, "run_episode", recorded)
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=8,
+        dev_trials=1,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=StubStudent,
+        train_student=stub_finetune,
+        move_bin_share=0.25,
+    )
+    assert [moved for controller, moved in asked if controller == "teacher"] == [False, False, False, True] * 2
+    assert not any(moved for controller, moved in asked if controller == "student")  # trials and held-out: unmoved
+
+
+@pytest.mark.parametrize(
+    ("demos", "share", "moved"), [(20, 0.25, {3, 7, 11, 15, 19}), (5, 0.0, set()), (3, 1.0, {0, 1, 2}), (4, 0.1, set())]
+)
+def test_the_share_is_spread_evenly(demos: int, share: float, moved: set[int]) -> None:
+    assert loop.moves_bin(demos, share) == moved
+
+
+def test_a_share_outside_zero_to_one_is_refused(tmp_path: Path) -> None:
+    with pytest.raises(ValueError, match="share of the demonstrations"):
+        run_loop(FakeSim(), tmp_path, "t", argon=silent_argon(tmp_path, "t"), move_bin_share=1.5)

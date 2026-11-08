@@ -22,6 +22,7 @@ TARGET_RATE = 0.8
 MAX_ROUNDS = 3
 DEMOS_PER_ROUND = 20
 DEV_TRIALS = 10
+MOVE_BIN_SHARE = 0.25  # of each round's teacher demonstrations, the bin moves right after the lift (§3.5)
 
 StudentFactory = Callable[[str], Policy]
 StudentTrainer = Callable[[Path, str, int], str]
@@ -64,6 +65,13 @@ def evaluate(
     return result
 
 
+def moves_bin(demos: int, share: float) -> set[int]:
+    """Which of a round's demonstrations get the lift-triggered bin move: round(share * demos) of them, spread
+    evenly, so 0.25 of 20 is demonstrations 3, 7, 11, 15 and 19."""
+    k = round(share * demos)
+    return {i for i in range(demos) if (i + 1) * k // demos > i * k // demos}
+
+
 def run_loop(
     sim: TruthSim,
     run_dir: Path,
@@ -75,7 +83,10 @@ def run_loop(
     argon: Argon,
     make_student: StudentFactory | None = None,
     train_student: StudentTrainer = finetune,
+    move_bin_share: float = MOVE_BIN_SHARE,
 ) -> list[EvaluationResult]:
+    if not 0 <= move_bin_share <= 1:
+        raise ValueError(f"move_bin_share is a share of the demonstrations, not {move_bin_share}")
     # finetune writes checkpoints beside the run dir, so the default student looks there too.
     make_student = make_student or partial(StudentPolicy, runs_dir=run_dir.parent)
     events = EventLog(run_dir, run_id)
@@ -108,6 +119,7 @@ def run_loop(
             events.emit("diagnosis", episode_id=manifest.episode_id, **diagnosis.model_dump())
             diagnosed.append((manifest.episode_id, diagnosis))
         lessons: list[tuple[str | None, Diagnosis | None]] = [*diagnosed] or [(None, None)]
+        moved = moves_bin(demos, move_bin_share)
         # Rejected trials come back first, in the order of their diagnoses; fresh seeds cycle through the lessons.
         for i, seed in enumerate(choose_scenes(failures, demos, start=trial_start + 500)):
             failed_id, diagnosis = lessons[i % len(lessons)]
@@ -121,6 +133,7 @@ def run_loop(
                 round_=round_,
                 instruction=INSTRUCTION,
                 acting_on=failed_id,
+                move_bin_after_lift=i in moved,
             )
         training_set = build_training_set(run_dir, round_ + 1)
         events.emit("finetune_started", round=round_ + 1, training_set=str(training_set))
