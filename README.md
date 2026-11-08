@@ -33,7 +33,7 @@ Unitree G1 humanoid in MuJoCo · **Argon** (gemini-4-argon) teaches from the clo
 
 Robots learn new skills from **human demonstrations**, and those are slow and costly: DROID needed 50 collectors for 12 months to record 76k trajectories, and RT-1 13 robots for 17 months for 130k episodes. Every new failure costs more operator hours.
 
-**Scaffld hands that job to an agent.** During teaching, scaffolding is support given exactly where a learner struggles, then taken away. Here a cloud teacher, **Argon**, turns one sentence into a checked task, demonstrates it by driving the robot itself, keeps only what an independent validator accepts, and trains a small student that then **runs on the robot alone**.
+**Scaffld hands that job to an agent.** With human training, support given exactly where the learner struggles, which is then taken away. Here a cloud teacher, **Argon**, turns one sentence into a checked task, and demonstrates it by driving the robot itself. Only successful demos an independent validator accepts is kept, and is used to train a small VLM student that then **runs on the robot alone**.
 
 ## How it works
 
@@ -41,11 +41,11 @@ Robots learn new skills from **human demonstrations**, and those are slow and co
 
 <img src="docs/media/pipeline.png" width="100%" alt="Pipeline: one sentence, Argon writes the spec, Argon teachers demonstrate and a validator keeps what works, LoRA fine-tune, student examined alone; elapsed time to scale">
 
-1. **One sentence.** A person types what the robot should learn. Nothing else is task-specific: no teleoperation, no labels.
+1. **One sentence description.** A person types what the robot should learn. Nothing else is task-specific: no teleoperation, no labels.
 2. **Argon writes the task.** The scene, which objects may move, and a **declarative success rule**, all checked by code before any demo runs.
-3. **Argon teaches; a validator keeps what works.** Eight Argon teachers drive the robot in parallel through **the same head camera and skills the student will have**. An independent validator judges each demo from ground truth, and only accepted steps become training data.
+3. **Argon teaches; a validator keeps what works.** Eight Argon teachers drive the robot in parallel through **the same head camera and skills the student will have**. An independent validator judges each demo from ground truth, and only accepted, successful steps become training data.
 4. **The student learns.** SmolVLM2-500M is fine-tuned with LoRA r16 on a laptop GPU to pick the next skill from the head-camera image.
-5. **The student is examined alone** on 20 **sealed** scenes that no demonstration may use: no teacher, no cloud.
+5. **The student is examined alone** on 20 **sealed** scenes that no demonstration may be used: no teacher, no cloud.
 
 **Repair loop** (`mom run`): when the student fails, the validator says why in words, Argon diagnoses the failure from the saved frames, and it demonstrates the fix on those scenes.
 
