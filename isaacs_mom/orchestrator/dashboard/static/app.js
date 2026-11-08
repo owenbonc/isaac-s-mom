@@ -478,7 +478,8 @@ function cardVerdict(e, ep) {
 function seedCard(c, e, ep) {
   const short = c.checkpoint && shortCheckpoint(c.checkpoint);
   const id = short && !c.name.endsWith(short) ? `<span class="mono note">${esc(short)}</span>` : "";
-  const head = `<span class="card-head"><span class="what">${esc(cap(c.name))}</span>${id}</span>`;
+  // A checkpoint named by its id keeps the id's case.
+  const head = `<span class="card-head"><span class="what">${esc(c.name === short ? c.name : cap(c.name))}</span>${id}</span>`;
   const f = ep && ep.frames[ep.frames.length - 1];
   const shot = f
     ? `<span class="shot"${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="The episode's last head-camera frame${f.step === null ? "" : `, step ${esc(f.step)}`}">` : ""}${tag(f.controller, f.checkpoint)}</span>`

@@ -1597,9 +1597,21 @@ def test_an_eval_runs_checkpoints_are_named_by_their_ids_and_a_loop_runs_by_roun
     # `mom eval --ckpt r/ckpt-r3` tests that checkpoint second, so its round is 1, which is no fine-tuning round
     base = conditioned(0, "training_distribution", (1, "failed"))
     *tuned, (kind, result) = conditioned(1, "training_distribution", (1, "succeeded"))
-    out = results(*base, *tuned, (kind, {**result, "checkpoint": "r/ckpt-r3"}))
+    events = [*base, *tuned, (kind, {**result, "checkpoint": "r/ckpt-r3"})]
+    out = results(*events)
     assert [c["name"] for c in out["checkpoints"]] == ["ckpt-r0", "ckpt-r3"]
     assert (out["claim"]["names"], out["claim"]["ids"]) == ("ckpt-r0 → ckpt-r3", "ckpt-r0 → r/ckpt-r3")
+    # a seed's cards head each checkpoint by its id as written, never capitalised
+    script = """
+    vm.runInContext(`
+      chosen = true; MomState.choose(view, "both"); MomState.visit(view, { seed: 1 }); render();
+    `, context);
+    return writes.filter(([id]) => id === "results").pop()[1].match(/<span class="card-head">.*?<\\/span><\\/span>/g);
+    """
+    assert app(REPLAY + script, stream(*events)) == [
+        '<span class="card-head"><span class="what">ckpt-r0</span></span>',
+        '<span class="card-head"><span class="what">ckpt-r3</span></span>',
+    ]
     loop = results(*TWO_EVALUATIONS)
     assert [c["name"] for c in loop["checkpoints"]] == ["before fine-tuning", "after round 1"]
     assert loop["claim"]["names"] == "before fine-tuning → after round 1"
