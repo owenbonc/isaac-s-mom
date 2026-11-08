@@ -28,7 +28,7 @@ def stream(*events: tuple[str, dict]) -> list[dict]:
     return [{"t": float(i), "run_id": "r", "type": type_, "data": data} for i, (type_, data) in enumerate(events)]
 
 
-def run(script: str, events: list[dict]) -> Any:
+def run(script: str, events: list[Any]) -> Any:
     """Run `script` (a JS function body with `S` = state.js and `events`) under node and return its result."""
     stdin = json.dumps({"events": events, "script": script})
     out = subprocess.run(["node", "-e", DRIVER, str(STATE_JS)], input=stdin, capture_output=True, text=True, check=True)
@@ -1145,3 +1145,86 @@ def test_saved_run_files_are_read_only_when_they_have_the_contracts_shape() -> N
     summaries, reports = run(script, files)
     assert summaries == [summary, None, None, None]
     assert reports == [report, None, None, None]
+
+
+def test_the_runs_list_is_read_only_in_the_contracts_shape_and_keeps_the_servers_order() -> None:
+    live = {
+        "run_id": "teach-1",
+        "instruction": "Put the box in the bin",
+        "status": "live",
+        "reason": None,
+        "started_t": 2.0,
+    }
+    refused = {
+        "run_id": "teach-0",
+        "instruction": "Juggle",
+        "status": "not_started",
+        "reason": "No such skill",
+        "started_t": 1.0,
+    }
+    old = {"run_id": "shot", "instruction": None, "status": "recorded", "reason": None, "started_t": 0.0}
+    bad = [
+        {**old, "run_id": 7},
+        {**old, "status": "paused"},
+        {**old, "reason": 3},
+        {**old, "started_t": "yesterday"},
+        {**old, "instruction": ["x"]},
+        None,
+    ]
+    script = "return [S.runsOf(events), S.runsOf({ runs: events }), S.runsOf(null)];"
+    assert run(script, [live, *bad, refused, old]) == [[live, refused, old], [], []]
+
+
+def test_the_page_opens_the_run_its_url_names_or_else_the_first_listed() -> None:
+    runs = [{"run_id": "live"}, {"run_id": "older"}]
+    script = (
+        "const [runs] = events; return [['older', null, ''].map((w) => S.runToOpen(runs, w)), S.runToOpen([], null)];"
+    )
+    assert run(script, [runs]) == [["older", "live", "live"], None]
+
+
+def test_an_instruction_is_1_to_200_characters_once_trimmed_and_the_count_shows_near_the_limit() -> None:
+    texts = ["   ", "x", "y" * 200, "z" * 201, "  " + "w" * 200 + "\n", "a" * 159, "a" * 160]
+    script = "return events.map((t) => [S.instructionProblem(t), S.teachCount(t)]);"
+    out = run(script, texts)
+    empty, fits = "Type what the robot should learn.", None
+    too_long = "At most 200 characters."
+    assert [problem for problem, _ in out] == [empty, fits, fits, too_long, fits, fits, fits]
+    assert [shown for _, shown in out] == [None, None, "200/200", "201/200", "200/200", None, "160/200"]
+
+
+def test_a_teach_answer_is_started_not_started_with_its_reasons_or_a_failure_in_words() -> None:
+    answers = [
+        [201, {"run_id": "teach-1", "started": True}],
+        [200, {"run_id": "teach-2", "started": False, "reasons": ["Not yet: the loop teaches one task"]}],
+        [200, {"run_id": "teach-3", "started": False, "reasons": ['<img src=x onerror="alert(1)">']}],
+        [200, {"run_id": "teach-4", "started": False, "reasons": "unreachable"}],
+        [403, {"detail": "Forbidden"}],
+        [400, {"detail": "1 to 200 characters"}],
+        [500, None],
+        [0, None],
+    ]
+    out = run("return events.map(([status, body]) => S.teachAnswer(status, body));", answers)
+    assert out[0] == {"state": "started", "runId": "teach-1"}
+    assert out[1] == {"state": "refused", "runId": "teach-2", "reasons": ["Not yet: the loop teaches one task"]}
+    # Typed and generated text stays text: the page escapes it where it is shown.
+    assert out[2]["reasons"] == ['<img src=x onerror="alert(1)">']
+    assert [o["state"] for o in out[3:]] == ["failed"] * 5
+    assert out[4]["message"] == "The dashboard takes instructions only from its own page on this computer."
+    assert out[5]["message"] == "An instruction is 1 to 200 characters."
+    assert out[6]["message"] == "The dashboard server could not take it (HTTP 500)."
+    assert out[7]["message"] == "Could not reach the dashboard server."
+
+
+def test_a_runs_instruction_and_why_it_did_not_start_are_read_from_its_events() -> None:
+    refused = fold(
+        ("instruction", {"text": "Juggle three boxes", "source": "teach"}),
+        argon_call(1),
+        ("instruction", {"text": "a second one is not the run's", "source": "cli"}),
+        ("error", {"error": "not started: No such skill; Not yet: the loop teaches one task"}),
+    )["state"]
+    assert refused["instruction"] == {"text": "Juggle three boxes", "source": "teach"}
+    assert refused["refused"] == "No such skill; Not yet: the loop teaches one task"
+    taught = fold(("instruction", {"text": "Put the box in the bin", "source": "cli"}), started("a"))["state"]
+    assert taught["refused"] is None and taught["instruction"]["source"] == "cli"
+    assert fold(started("a"))["state"]["instruction"] is None

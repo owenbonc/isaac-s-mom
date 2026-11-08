@@ -20,6 +20,10 @@ const runFiles = {};
 const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Argon (Gemini API)", finetune: "RTX 5070, local" };
 
 const $ = (id) => document.getElementById(id);
+// The run this page shows (SPEC §3.5): the URL names it; without one, the first in GET /runs' order.
+let runId = new URLSearchParams(location.search).get("run");
+let runs = [];
+let teaching = { state: "idle" };
 // Assigning identical HTML would reload every image and reset scrolling, so panels skip unchanged writes.
 const nativeSetter = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML").set;
 for (const el of document.querySelectorAll("[id]")) {
@@ -86,7 +90,13 @@ function renderHeader() {
   const kind = MomState.provenance(view, now());
   const sim = MomState.simulator(s);
   // One line at 1280 px: the simulator in words (its version and task are in the legend), or a lost stream alone.
-  const status = view.lost ? chip("lost", "Disconnected") : s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)}${sim && sim.name ? ` · ${esc(sim.name)}` : ""}`);
+  const status = view.lost
+    ? chip("lost", "Disconnected")
+    : s.refused !== null
+      ? chip("refused", "Not started")
+      : s.eventCount === 0
+        ? chip("placeholder", runId ? "Waiting" : "No run")
+        : chip(kind, `${label(kind)}${sim && sim.name ? ` · ${esc(sim.name)}` : ""}`);
   $("status").innerHTML = status;
   const robot = s.episodes.length && s.episodes[s.episodes.length - 1].sim;
   const task = sim && sim.task ? `, the ${sim.task === "fixed_feet" ? "fixed-feet" : "walking"} task (<span class="mono">${esc(sim.task)}</span>)` : "";
@@ -127,8 +137,13 @@ function renderControl() {
     return view.lost ? "" : "Fine-tuning the student.";
   }
   if (!ep) {
+    const s = MomState.shown(view);
     el.className = "control";
-    el.innerHTML = '<span class="what">Waiting for the run to start</span>';
+    el.innerHTML = !runId
+      ? '<span class="what">No run yet</span>'
+      : s.refused !== null
+        ? `<span class="what">Not started</span><span class="note">${esc(s.refused)}</span>`
+        : '<span class="what">Waiting for the run to start</span>';
     return "";
   }
   const [kind, where] = kindOf(ep);
@@ -199,7 +214,13 @@ function renderCamera() {
   if (!frames.length) {
     const [kind, where] = ep ? kindOf(ep) : [];
     const note = ep && finished(ep) ? "This episode recorded no head-camera frame." : "The first frame appears after the first skill.";
-    $("stage").innerHTML = (ep ? slate(`${kind} · ${where}`, note) : slate("No episode yet", "The head camera's frames appear here once the run starts.")) + foot("", panelChip(ep));
+    const refused = MomState.shown(view).refused;
+    const empty = !runId
+      ? slate("No runs yet", "Tell the robot what to learn in the Teach box to start one.")
+      : refused !== null
+        ? slate("Not started", esc(refused))
+        : slate("No episode yet", "The head camera's frames appear here once the run starts.");
+    $("stage").innerHTML = (ep ? slate(`${kind} · ${where}`, note) : empty) + foot("", panelChip(ep));
     $("strip").innerHTML = "";
     return;
   }
@@ -363,7 +384,10 @@ function renderRounds() {
   const errored = c && c.errored ? ` · ${esc(c.errored)}` : "";
   const gain = c && `<div class="gain"><span class="fig" role="img" aria-label="Held-out successes: ${esc(c.spoken)}">${esc(c.figure)}</span><span>${esc(c.sample)}${errored}</span></div><div>${esc(c.names)}</div><div class="note mono">${esc(c.ids)}</div>`;
   const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;
-  $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}</div>`;
+  // A run is taught and tested on its own instruction, so its rates carry it (SPEC §3.5).
+  const said = s.instruction && s.instruction.text;
+  const taught = said ? `<p class="taught clamped" title="${esc(said)}">Tested on <q>${esc(said)}</q></p>` : "";
+  $("p-rounds").innerHTML = `<header><h2>Held-out success</h2>${panelChip()}</header><div class="body stack">${body}${taught}</div>`;
 }
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -392,7 +416,7 @@ function renderModels() {
 // A file not written yet says so in words.
 function renderTraining() {
   const s = MomState.shown(view);
-  const missing = (name) => `<span class="ph-text">${name in runFiles || !s.runId ? "Not in the run's files." : "Reading the run's files."}</span>`;
+  const missing = (name) => `<span class="ph-text">${name in runFiles || !runId ? "Not in the run's files." : "Reading the run's files."}</span>`;
   const round = (r) => {
     const t = runFiles[`training_r${r}.summary.json`];
     if (!t) return `<dt>Round ${esc(r)}</dt><dd>${missing(`training_r${r}.summary.json`)}</dd>`;
@@ -417,13 +441,13 @@ function renderTraining() {
 // Reads the run's saved files not found yet, while the run may still write them: its last event under 30 minutes ago.
 async function readRunFiles() {
   const s = MomState.shown(view);
-  if (!s.runId || (Object.keys(runFiles).length && now() - s.lastT > 30 * 60)) return;
+  if (!runId || (Object.keys(runFiles).length && now() - s.lastT > 30 * 60)) return;
   const wanted = [...s.trained.map((r) => [`training_r${r}.summary.json`, MomState.trainingSummary]), ["replay_report.json", MomState.replayReport]];
   const asked = await Promise.all(
     wanted
       .filter(([name]) => !runFiles[name])
       .map(async ([name, parse]) => {
-        const response = await fetch(`/run-files/${encodeURIComponent(s.runId)}/${name}`).catch(() => null);
+        const response = await fetch(`/run-files/${encodeURIComponent(runId)}/${name}`).catch(() => null);
         runFiles[name] = response && response.ok ? parse(await response.json().catch(() => null)) : null;
       }),
   );
@@ -509,15 +533,94 @@ function schedule() {
   requestAnimationFrame(render);
 }
 
-// Labels closes on Escape or a click outside it, as a popover does.
-const legend = document.querySelector(".legend");
+const RUN_STATUS = { live: ["live", "Live"], recorded: ["recorded", "Recorded"], not_started: ["refused", "Not started"] };
+// The run picker: every run in the server's order, live first; a run that did not start says why.
+function renderRuns() {
+  $("runs").hidden = false;
+  $("run-name").textContent = runId || "No runs yet";
+  $("run-list").innerHTML = runs.length
+    ? runs
+        .map((r) => {
+          const [kind, word] = RUN_STATUS[r.status];
+          const what = r.instruction ? esc(r.instruction) : '<span class="ph-text">No instruction recorded</span>';
+          const why = r.status === "not_started" && r.reason ? `<span class="run-why">${esc(r.reason)}</span>` : "";
+          const here = r.run_id === runId ? ' aria-current="page"' : "";
+          return `<li><a href="?run=${esc(encodeURIComponent(r.run_id))}"${here}><span class="chip ${kind}">${word}</span><span class="run-what">${what}</span><span class="run-id mono">${esc(r.run_id)}</span>${why}</a></li>`;
+        })
+        .join("")
+    : '<li class="ph-text">No runs yet. Tell the robot what to learn in the Teach box to start one.</li>';
+}
+
+// The runs list, refreshed every few seconds; null while the server doesn't answer. A page with no run opens the
+// first one to appear.
+async function loadRuns() {
+  const response = await fetch("/runs").catch(() => null);
+  if (!response || !response.ok) return null;
+  runs = MomState.runsOf(await response.json().catch(() => null));
+  if (opened && !runId && runs.length) location.replace(`?run=${encodeURIComponent(runs[0].run_id)}`);
+  renderRuns();
+  return runs;
+}
+
+// The Teach box's count, its state while the generator judges the text, and what came back.
+const TEACH = $("teach");
+const FIELD = $("instruction");
+function renderTeach() {
+  const checking = teaching.state === "checking";
+  $("teach-count").textContent = MomState.teachCount(FIELD.value) || "";
+  FIELD.readOnly = checking;
+  $("teach-go").disabled = checking;
+  $("teach-go").lastElementChild.textContent = checking ? "Checking…" : "Teach";
+  TEACH.setAttribute("aria-busy", String(checking));
+  const said =
+    teaching.state === "refused"
+      ? `<p class="what">Not started</p><ul>${teaching.reasons.map((r) => `<li>${esc(r)}</li>`).join("")}</ul><p class="note">The run is listed as not started, with why.</p>`
+      : teaching.state === "failed"
+        ? `<p class="what">Not sent</p><p>${esc(teaching.message)}</p>`
+        : teaching.state === "started"
+          ? '<p class="what">Started</p><p class="note">Opening the new run.</p>'
+          : "";
+  $("teach-said").innerHTML = said;
+  $("teach-said").hidden = !said;
+  $("teach-status").textContent = checking ? "Checking the instruction." : $("teach-said").textContent;
+}
+
+TEACH.addEventListener("submit", async (e) => {
+  e.preventDefault();
+  if (teaching.state === "checking") return;
+  const problem = MomState.instructionProblem(FIELD.value);
+  teaching = problem ? { state: "failed", message: problem } : { state: "checking" };
+  renderTeach();
+  if (problem) return;
+  const response = await fetch("/teach", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ instruction: FIELD.value.trim() }) }).catch(() => null);
+  teaching = MomState.teachAnswer(response ? response.status : 0, response && (await response.json().catch(() => null)));
+  renderTeach();
+  if (teaching.state === "started") location.assign(`?run=${encodeURIComponent(teaching.runId)}`);
+  else loadRuns();
+});
+FIELD.addEventListener("input", () => {
+  if (teaching.state !== "checking") teaching = { state: "idle" };
+  renderTeach();
+});
+
+// Labels and the run picker close on Escape or a click outside them, as popovers do; so does the Teach answer.
+const POPOVERS = [...document.querySelectorAll("details.legend, details.runs")];
+const dismissTeach = () => {
+  if (teaching.state === "checking" || teaching.state === "idle") return;
+  teaching = { state: "idle" };
+  renderTeach();
+};
 document.addEventListener("keydown", (e) => {
-  if (e.key !== "Escape" || !legend.open) return;
-  legend.open = false;
-  legend.querySelector("summary").focus();
+  if (e.key !== "Escape") return;
+  dismissTeach();
+  const open = POPOVERS.find((d) => d.open);
+  if (!open) return;
+  open.open = false;
+  open.querySelector("summary").focus();
 });
 document.addEventListener("click", (e) => {
-  if (legend.open && !legend.contains(e.target)) legend.open = false;
+  for (const d of POPOVERS) if (d.open && !d.contains(e.target)) d.open = false;
+  if (!TEACH.contains(e.target)) dismissTeach();
 });
 
 $("side").addEventListener("scroll", fadeSide);
@@ -550,31 +653,50 @@ document.querySelector(".presenter").addEventListener("click", (e) => {
   schedule();
 });
 
-const source = new EventSource("/events");
-// The server replays the whole run on every connection, so the view starts over instead of adding to what is shown.
-source.onopen = () => {
-  MomState.reconnect(view);
-  renderedRows = 0;
-  renderedEpisode = null;
-};
-source.onerror = () => {
-  MomState.disconnect(view);
-  schedule();
-};
-// The server marks the end of its replay, so the page shows and announces only where the replay settles.
-source.addEventListener("replayed", () => {
+// The shown run's events (SPEC §3.5).
+function follow() {
+  const source = new EventSource(`/events?run=${encodeURIComponent(runId)}`);
+  // The server replays the whole run on every connection, so the view starts over instead of adding to what is shown.
+  source.onopen = () => {
+    MomState.reconnect(view);
+    renderedRows = 0;
+    renderedEpisode = null;
+  };
+  source.onerror = () => {
+    MomState.disconnect(view);
+    schedule();
+  };
+  // The server marks the end of its replay, so the page shows and announces only where the replay settles.
+  source.addEventListener("replayed", () => {
+    MomState.settle(view);
+    schedule();
+    readRunFiles();
+  });
+  source.onmessage = (message) => {
+    try {
+      MomState.receive(view, JSON.parse(message.data), now());
+    } catch (error) {
+      console.error("bad event", error);
+    }
+    schedule();
+  };
+}
+
+// A page without a run in its URL opens the first listed and names it in the URL; with none listed, it says so.
+let opened = false;
+(async () => {
+  const listed = await loadRuns();
+  if (!runId) {
+    runId = MomState.runToOpen(listed || [], null);
+    if (runId) history.replaceState(null, "", `?run=${encodeURIComponent(runId)}`);
+    if (listed) renderRuns();
+  }
+  opened = true;
+  if (runId) return follow();
   MomState.settle(view);
   schedule();
-  readRunFiles();
-});
-source.onmessage = (message) => {
-  try {
-    MomState.receive(view, JSON.parse(message.data), now());
-  } catch (error) {
-    console.error("bad event", error);
-  }
-  schedule();
-};
+})();
+setInterval(loadRuns, 3000);
 setInterval(schedule, 1000); // live and recorded change with time, and the fine-tune clock ticks
 setInterval(readRunFiles, 10000); // a new round's summary and the replay report are written while the page is open
 schedule();

@@ -8,6 +8,9 @@
   function initial() {
     return {
       runId: null,
+      // The run's instruction (its first `instruction` event), and why a Teach did not start it, if it did not.
+      instruction: null,
+      refused: null,
       lastT: 0,
       eventCount: 0,
       episodes: [],
@@ -172,10 +175,17 @@
         else if (num(d.latency_ms) !== null) a.answers.push(d.latency_ms);
         break;
       }
-      case "error":
-        s.errorCount += 1;
-        if (ep) ep.rows.push({ kind: "error", text: text(d.message) || text(d.error) || "error event" });
+      case "instruction":
+        if (!s.instruction && text(d.text)) s.instruction = { text: d.text, source: text(d.source) };
         break;
+      case "error": {
+        s.errorCount += 1;
+        const said = text(d.message) || text(d.error) || "error event";
+        const refusal = /^not started:\s*/.exec(said);
+        if (refusal && !ep) s.refused = said.slice(refusal[0].length);
+        else if (ep) ep.rows.push({ kind: "error", text: said });
+        break;
+      }
       default:
         break;
     }
@@ -463,7 +473,46 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, argon, trainingSummary, replayReport, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  // The dashboard's runs (SPEC §3.5, `GET /runs`), read only in the contract's shape and kept in the server's order.
+  const STATUSES = ["live", "recorded", "not_started"];
+  const orNull = (v) => v === null || typeof v === "string";
+  function runsOf(list) {
+    if (!Array.isArray(list)) return [];
+    return list.filter((r) => r && typeof r.run_id === "string" && r.run_id && orNull(r.instruction) && STATUSES.includes(r.status) && orNull(r.reason) && num(r.started_t) !== null);
+  }
+  // The run a page opens: the one its URL names, else the first listed (live first, then newest), else none.
+  const runToOpen = (runs, wanted) => wanted || (runs[0] ? runs[0].run_id : null);
+
+  // The Teach box (SPEC §3.5): at most 200 characters once trimmed, as the server takes it.
+  const TEACH_MAX = 200;
+  function instructionProblem(typed) {
+    const length = typed.trim().length;
+    return !length ? "Type what the robot should learn." : length > TEACH_MAX ? `At most ${TEACH_MAX} characters.` : null;
+  }
+  // The count shows as the text nears the limit.
+  const teachCount = (typed) => {
+    const length = typed.trim().length;
+    return length >= TEACH_MAX - 40 ? `${length}/${TEACH_MAX}` : null;
+  };
+  // The server's answer to a Teach: started (the page opens the new run), not started with the generator's reasons,
+  // or a failure in words.
+  function teachAnswer(status, body) {
+    const id = body && typeof body.run_id === "string" ? body.run_id : null;
+    if (status === 201 && id && body.started === true) return { state: "started", runId: id };
+    const reasons = body && Array.isArray(body.reasons) && body.reasons.every((r) => typeof r === "string") ? body.reasons : null;
+    if (status === 200 && id && body.started === false && reasons) return { state: "refused", runId: id, reasons };
+    const message =
+      status === 0
+        ? "Could not reach the dashboard server."
+        : status === 403
+          ? "The dashboard takes instructions only from its own page on this computer."
+          : status === 400
+            ? `An instruction is 1 to ${TEACH_MAX} characters.`
+            : `The dashboard server could not take it (HTTP ${status}).`;
+    return { state: "failed", message };
+  }
+
+  const api = { initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);
