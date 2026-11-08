@@ -87,6 +87,23 @@ def test_mom_run_refuses_an_instruction_the_teach_box_could_not_send(
     assert not (tmp_path / "runs").exists()
 
 
+def test_mom_run_refuses_an_instruction_holding_the_key_and_neither_shows_nor_stores_it(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    key = "dummy-gemini-key-1108"
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("GEMINI_API_KEY", key)
+    code: object = "the run went ahead"
+    try:
+        run_cli(monkeypatch, f"--instruction=put the box in the bin {key}")
+    except SystemExit as stopped:
+        code = stopped.code
+    err = capsys.readouterr().err
+    assert code == 2
+    assert "argument --instruction: the instruction holds GEMINI_API_KEY" in err and key not in err
+    assert not (tmp_path / "runs").exists()
+
+
 def test_mom_run_puts_its_run_in_the_runs_directory_it_is_given(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
