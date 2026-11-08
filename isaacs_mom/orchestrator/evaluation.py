@@ -1,6 +1,6 @@
 """The student evaluation report (SPEC §6 criterion 10): checkpoints, student only, on the sealed held-out seeds, in
-three conditions: the training task, new bin distances (walking tasks only), and the bin moved once right after a
-lift. Reported only: the loop's stop rule (§3.6) stays on `across_room`.
+three conditions: the training task, bin placements it never uses, and the bin moved once right after a lift.
+Reported only: the loop's stop rule (§3.6) stays on the task the loop trains on.
 
     uv run mom eval --task fixed_feet --ckpt <run>/ckpt-r1
 
@@ -48,12 +48,15 @@ class Condition:
     move_bin_after_lift: bool = False
 
 
+# Bin placements the training task never uses: nearer and further walks, or a fixed-feet bin further ahead or out.
+NEW_LAYOUTS = {True: ("near_bin", "far_bin"), False: ("fixed_feet_ahead", "fixed_feet_far")}
+
+
 def conditions_for(task: str, walking: bool) -> tuple[Condition, ...]:
-    """The three conditions on `task`. New bin distances exist only for walking tasks, where the presets vary them."""
-    new_layout = (Condition("new_layout", ("near_bin", "far_bin")),) if walking else ()  # distances never trained on
+    """The three conditions on `task`, a walking or a fixed-feet one."""
     return (
         Condition("training_distribution", (task,)),
-        *new_layout,
+        Condition("new_layout", NEW_LAYOUTS[walking]),
         Condition("move_bin_after_lift", (task,), move_bin_after_lift=True),
     )
 
@@ -198,11 +201,11 @@ def _run_one(
         reason=reason,
         latencies_ms=_latencies(events.path, start),
         device=device,
-        adaptation=_adaptation(events.path, start) if condition.move_bin_after_lift else None,
+        adaptation=adaptation_of(events.path, start) if condition.move_bin_after_lift else None,
     )
 
 
-def _adaptation(events_path: Path, start: int) -> Adaptation:
+def adaptation_of(events_path: Path, start: int) -> Adaptation:
     """Whether this episode's lift-triggered bin move was made, refused, or never due."""
     since = _events_since(events_path, start)
     if any(e["type"] == "perturbation" and e["data"].get("kind") == "move_bin" for e in since):
