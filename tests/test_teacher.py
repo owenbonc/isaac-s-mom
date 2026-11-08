@@ -11,6 +11,8 @@ import pytest
 
 import isaacs_mom.teacher.argon as argon_module
 from isaacs_mom.contracts import (
+    MAX_ANGLE_DEG,
+    MAX_DISTANCE_CM,
     SKILLS,
     Diagnosis,
     EpisodeManifest,
@@ -22,7 +24,7 @@ from isaacs_mom.contracts import (
 )
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
-from isaacs_mom.teacher import ATTEMPTS, ArgonPolicy, choose_scenes, diagnose
+from isaacs_mom.teacher import ATTEMPTS, ROBOT, ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import (
     RETRY_WAITS_S,
     Argon,
@@ -568,3 +570,13 @@ def test_a_budget_spent_on_the_last_attempt_is_reported_as_over_budget(tmp_path:
     assert call is not None and call.skill == "reobserve" and "budget" in call.reason
     a2, _ = argon(tmp_path / "d", down, down, down, budget=ATTEMPTS)
     assert "over budget" in diagnose(failed_episode(), [b"f"], a2).hypothesis
+
+
+def test_the_prompt_tells_argon_every_skill_and_its_parameter_limits(tmp_path: Path) -> None:
+    # Without this, Argon used only the default 30 cm / 30 degrees and walked 0 of 10 demos into the bin.
+    for skill in SKILLS:
+        assert skill in ROBOT, skill
+    assert f'"distance_cm": 0-{MAX_DISTANCE_CM:.0f}' in ROBOT and f'"angle_deg": 0-{MAX_ANGLE_DEG:.0f}' in ROBOT
+    a, fake = argon(tmp_path, STEP)
+    ArgonPolicy(None, a).act(obs(), "hug the box", "start")
+    assert ROBOT in str(fake.prompts[0][0])  # it reaches every act prompt
