@@ -171,7 +171,8 @@ function renderControl() {
   const k = row ? row.episodes.findIndex((x) => x.id === ep.id) : -1;
   const at = k < 0 ? "" : `, ${esc(r.checkpoints[k].name)}`;
   const among = position(ep);
-  const back = place === "episode" ? `<button type="button" class="back" data-back data-f="control-back" aria-label="Back" data-tip="Back · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
+  const backTo = view.side === "both" ? `Back to seed ${esc(view.seed)}` : "Back to the run";
+  const back = place === "episode" ? `<button type="button" class="back" data-back data-f="control-back" aria-label="${backTo}" data-tip="Back · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
   const head = `${back}<span class="kind"><span class="what">${kind}</span><span class="note">${where}${at}${among ? ` · ${among.toLowerCase()}` : ""}</span></span>`;
   if (!ep.controller) {
     el.className = "control";
@@ -447,12 +448,13 @@ function renderStrip() {
         })
         .join("")
     : `<li class="none note">${MomState.shown(view).refused !== null ? "Not started." : "Each held-out seed shows here once the student has been tested on it."}</li>`;
-  // With no seed open the switch has nothing to compare, so it stays in view, dimmed, and says why.
+  // With no seed open the switch has nothing to compare, so it stays in view, dimmed, and says why in its description.
   const idle = view.seed === null;
   for (const b of $("sides").querySelectorAll("button")) {
     b.setAttribute("aria-pressed", String(b.dataset.side === view.side));
     b.setAttribute("aria-disabled", String(idle));
     b.dataset.tip = idle ? "Choose a seed to compare" : SIDES[b.dataset.side];
+    b.setAttribute("aria-description", b.dataset.tip);
   }
 }
 const SIDES = { before: "Before: the seed's first checkpoint", both: "Both: every checkpoint side by side", after: "After: the seed's latest checkpoint" };
@@ -488,7 +490,7 @@ function seedDetail() {
   const s = MomState.shown(view);
   const r = MomState.results(s);
   const row = r.seeds.find((x) => x.seed === view.seed);
-  const back = `<button type="button" class="back" data-back data-f="back" aria-label="Back" data-tip="Back · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>`;
+  const back = `<button type="button" class="back" data-back data-f="back" aria-label="Back to the run" data-tip="Back · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>`;
   const title = `<h2>Seed ${esc(view.seed)}${row ? `${markIcon(row.mark)}<span class="sr">, ${MARK[row.mark].toLowerCase()}</span>` : ""}</h2>`;
   if (!row) return `<header class="seed-head">${back}${title}</header><p class="empty note">This run's events hold no held-out episode on seed ${esc(view.seed)}.</p>`;
   const count = r.checkpoints.length;

@@ -1533,6 +1533,35 @@ def test_the_step_keys_tooltips_name_what_they_step_through() -> None:
     }
 
 
+def test_each_back_button_is_named_by_where_it_goes_and_the_switch_describes_itself() -> None:
+    script = """
+    const last = (id) => writes.filter(([at]) => at === id).pop()[1];
+    const back = (html) => html.match(/class="back"[^>]*aria-label="([^"]*)"/)[1];
+    const buttons = ["before", "both", "after"].map((side) => ({
+      dataset: { side }, attrs: {}, setAttribute(k, x) { this.attrs[k] = x; },
+    }));
+    doc.getElementById("sides").querySelectorAll = () => buttons;
+    const said = () => buttons.map((b) => b.attrs["aria-description"]);
+    vm.runInContext("render()", context);
+    const idle = said();
+    vm.runInContext("MomState.visit(view, MomState.showSeed(view, 1)); render();", context);
+    const [shown, open] = [back(last("control")), said()];
+    vm.runInContext(`chosen = true; MomState.choose(view, "both"); render();`, context);
+    const seed = back(last("results"));
+    vm.runInContext(`MomState.visit(view, { opened: "h0-1" }); render();`, context);
+    return { idle, open, shown, seed, card: back(last("control")) };
+    """
+    out = app(REPLAY + script, stream(*TWO_EVALUATIONS))
+    assert out["idle"] == ["Choose a seed to compare"] * 3
+    assert out["open"] == [
+        "Before: the seed's first checkpoint",
+        "Both: every checkpoint side by side",
+        "After: the seed's latest checkpoint",
+    ]
+    # the harness's narrow stage defaults the switch to After, whose episode goes back to the run
+    assert (out["shown"], out["seed"], out["card"]) == ("Back to the run", "Back to the run", "Back to seed 1")
+
+
 def conditioned(round_: int, condition: str, *outcomes: tuple[object, str | None]) -> list[tuple[str, dict]]:
     *episodes, (kind, result) = evaluated(round_, *outcomes)
     return [*episodes, (kind, {**result, "condition": condition})]
