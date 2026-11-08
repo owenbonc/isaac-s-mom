@@ -2,8 +2,8 @@ import argparse
 import time
 from pathlib import Path
 
-from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import run_loop
+from isaacs_mom.orchestrator.events import EventLog, read_events
+from isaacs_mom.orchestrator.loop import INSTRUCTION, instruction_text, run_loop
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -27,6 +27,13 @@ def run_id(text: str) -> str:
     return text
 
 
+def instruction(text: str) -> str:
+    try:
+        return instruction_text(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
 def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
     if name == "fake":
         from isaacs_mom.sim.fake import FakeSim
@@ -44,9 +51,15 @@ def main() -> None:
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--rounds", type=int, default=3)
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
-    dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a run directory")
-    dashboard.add_argument("--run", type=Path, required=True)
+    run.add_argument(
+        "--instruction", type=instruction, default=INSTRUCTION, help="what the robot learns; held-out tests use it too"
+    )
+    dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a runs directory")
+    dashboard.add_argument("--runs", type=Path, required=True, help="a directory of run directories, e.g. runs/")
     dashboard.add_argument("--port", type=int, default=8200)
+    dashboard.add_argument(
+        "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset a Teach-started run trains on"
+    )
     demo = commands.add_parser("demo", help="the judged single take, recorded to an MP4")
     demo.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     demo.add_argument("--ckpt", required=True)
@@ -66,11 +79,12 @@ def main() -> None:
         command.add_argument(
             "--task", choices=sorted(TASKS), default=DEFAULT_TASK.name, help="the task preset (SPEC §3.1)"
         )
+        command.add_argument("--runs", type=Path, default=Path("runs"), help="the directory the run directory goes in")
     args = parser.parse_args()
     if args.command == "dashboard":
         from isaacs_mom.orchestrator.dashboard.server import serve
 
-        serve(args.run, args.port)
+        serve(args.runs, args.port, args.task)
         return
     if args.sim == "fake" and args.task != DEFAULT_TASK.name:
         parser.error(f"--sim fake plays only the default task, {DEFAULT_TASK.name}")
@@ -78,9 +92,14 @@ def main() -> None:
         run.error(NO_CUDA)
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
-    run_dir = Path("runs") / args.run_id
+    run_dir = args.runs / args.run_id
+    events = EventLog(run_dir, args.run_id)
+    earlier = read_events(run_dir)  # a Teach-started run already holds its instruction and the task generator's calls
+    if args.command == "run" and not any(e.type == "instruction" for e in earlier):
+        events.emit("instruction", text=args.instruction, source="cli")
     # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
-    argon = Argon(EventLog(run_dir, args.run_id), generate=stub_generate if teacher == "stub" else None)
+    argon = Argon(events, generate=stub_generate if teacher == "stub" else None)
+    argon.calls = sum(e.type == "argon_call" for e in earlier)
     if teacher == "argon":
         argon.check()  # the stub has no key or model to check, so it spends nothing
     if args.command == "demo":
@@ -108,9 +127,14 @@ def main() -> None:
         argon=argon,
         make_student=make_student,
         train_student=train_student,
+        instruction=args.instruction,
     )
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"
         print(f"round {r.round} {r.checkpoint}: {scored}")
     print(argon.summary() + (" (stub teacher)" if teacher == "stub" else ""))
     print(f"run saved to {run_dir}")
+
+
+if __name__ == "__main__":  # the Teach box starts a run as `python -m isaacs_mom.orchestrator.cli run ...`
+    main()

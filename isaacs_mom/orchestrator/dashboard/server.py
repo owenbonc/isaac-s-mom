@@ -1,15 +1,23 @@
-"""Dashboard server (SPEC §3.5): one HTML page, `events.jsonl` as server-sent events, frame JPEGs from the run."""
+"""Dashboard server (SPEC §3.5) over a runs directory: one HTML page, and for each run its `events.jsonl` as
+server-sent events, its frame JPEGs and its training and replay summaries; the Teach box starts a new run."""
 
 import asyncio
+import re
+import time
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import FileResponse, StreamingResponse
+from fastapi.concurrency import run_in_threadpool
+from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import ValidationError
+from pydantic import BaseModel, ValidationError
 
-from isaacs_mom.contracts import Event
+from isaacs_mom.contracts import Event, ReplayReport, TrainingSetSummary
+from isaacs_mom.orchestrator.loop import instruction_text
+from isaacs_mom.orchestrator.runs import Launch, RunSummary, find_run, launch_run, list_runs, teach
+from isaacs_mom.sim.mujoco.task import DEFAULT_TASK
+from isaacs_mom.teacher.argon import Generate
 
 STATIC = Path(__file__).parent / "static"
 POLL_SECONDS = 0.25
@@ -18,6 +26,12 @@ FRAME_SUFFIXES = {".jpg", ".jpeg"}
 FRAME_KEYS = {"frame", "before_frame"}
 # Sent once a connection has replayed every event already written, so the page shows only where the replay settles.
 REPLAYED = "event: replayed\ndata: {}\n\n"
+TRAINING_SUMMARY = re.compile(r"training_r[0-9]+\.summary\.json")
+LOCAL_CLIENTS = {"127.0.0.1", "::1"}
+
+
+class TeachRequest(BaseModel):
+    instruction: str
 
 
 class FreshStatic(StaticFiles):
@@ -30,11 +44,12 @@ class FreshStatic(StaticFiles):
 
 
 def frame_url(frame: object, run_dir: Path) -> str | None:
-    """The `/frames/...` URL for an event's frame path, which is relative to the run directory; None outside it."""
+    """The `/frames/<run_id>/...` URL for an event's frame path, which is relative to the run directory; None outside
+    it."""
     if not isinstance(frame, str):
         return None
     try:
-        return "/frames/" + (run_dir / frame).resolve().relative_to(run_dir.resolve()).as_posix()
+        return f"/frames/{run_dir.name}/" + (run_dir / frame).resolve().relative_to(run_dir.resolve()).as_posix()
     except ValueError:
         return None
 
@@ -54,15 +69,8 @@ async def tail_events(
     run_dir: Path, stopped: Callable[[], Awaitable[bool]], poll: float = POLL_SECONDS
 ) -> AsyncIterator[str]:
     """Every complete event line from the start of events.jsonl, then `REPLAYED`, then new appends until `stopped()`."""
-    path = run_dir / "events.jsonl"
-    replayed = not path.exists()
-    if replayed:
-        yield REPLAYED  # nothing written yet, so nothing to replay
-    while not path.exists():
-        if await stopped():
-            return
-        await asyncio.sleep(poll)
-    with path.open() as f:
+    replayed = False
+    with (run_dir / "events.jsonl").open() as f:
         while True:
             position = f.tell()
             line = f.readline()
@@ -80,37 +88,90 @@ async def tail_events(
                 await asyncio.sleep(poll)
 
 
-def create_app(run_dir: Path) -> FastAPI:
+def create_app(
+    runs_dir: Path,
+    *,
+    port: int = 8200,
+    task: str = DEFAULT_TASK.name,
+    generate: Generate | None = None,
+    launch: Launch = launch_run,
+) -> FastAPI:
+    """`task` is what a Teach-started run trains on; `generate` answers for Argon (None: Gemini) and `launch` starts
+    `mom run`."""
     app = FastAPI(title="Isaac's Mom dashboard")
+    own_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
+
+    def served(run_id: str) -> Path:
+        """The run directory an id from a URL names, or 404."""
+        if (run_dir := find_run(runs_dir, run_id)) is None:
+            raise HTTPException(status_code=404)
+        return run_dir
 
     @app.get("/")
     def page() -> FileResponse:
         return FileResponse(STATIC / "index.html", headers={"Cache-Control": "no-cache"})
 
+    @app.get("/runs")
+    def runs() -> list[RunSummary]:
+        return list_runs(runs_dir, time.time())
+
     @app.get("/events")
-    def events(request: Request) -> StreamingResponse:
+    def events(run: str, request: Request) -> StreamingResponse:
         return StreamingResponse(
-            tail_events(run_dir, request.is_disconnected),
+            tail_events(served(run), request.is_disconnected),
             media_type="text/event-stream",
             headers={"Cache-Control": "no-cache"},
         )
 
-    @app.get("/frames/{path:path}")
-    def frames(path: str) -> FileResponse:
+    @app.get("/frames/{run_id}/{path:path}")
+    def frames(run_id: str, path: str) -> FileResponse:
+        run_dir = served(run_id).resolve()
         target = (run_dir / path).resolve()
-        if not target.is_relative_to(run_dir.resolve()) or target.suffix not in FRAME_SUFFIXES or not target.is_file():
+        if not target.is_relative_to(run_dir) or target.suffix not in FRAME_SUFFIXES or not target.is_file():
             raise HTTPException(status_code=404)
         # The recorder writes each frame once under a unique episode id, so a URL's bytes never change.
         return FileResponse(
             target, media_type="image/jpeg", headers={"Cache-Control": "public, max-age=31536000, immutable"}
         )
 
+    @app.get("/run-files/{run_id}/{name}")
+    def run_files(run_id: str, name: str) -> TrainingSetSummary | ReplayReport:
+        if name == "replay_report.json":
+            model = ReplayReport
+        elif TRAINING_SUMMARY.fullmatch(name):
+            model = TrainingSetSummary
+        else:
+            raise HTTPException(status_code=404)
+        try:
+            return model.model_validate_json((served(run_id) / name).read_bytes())
+        except (OSError, ValidationError):
+            raise HTTPException(status_code=404) from None
+
+    @app.post("/teach")
+    async def teach_box(request: Request) -> JSONResponse:
+        # Checked before the body is read: only this dashboard's own page, on this machine, starts a run (SPEC §3.5).
+        client = request.client
+        if client is None or client.host not in LOCAL_CLIENTS or request.headers.get("origin") not in own_origins:
+            raise HTTPException(status_code=403, detail="Teach takes an instruction only from this dashboard's page")
+        try:
+            instruction = instruction_text(TeachRequest.model_validate_json(await request.body()).instruction)
+        except ValidationError:
+            raise HTTPException(status_code=400, detail='send JSON: {"instruction": "<text>"}') from None
+        except ValueError as error:
+            raise HTTPException(status_code=400, detail=str(error)) from None
+        run_id, reasons = await run_in_threadpool(
+            teach, runs_dir, instruction, task=task, generate=generate, launch=launch
+        )
+        if reasons:
+            return JSONResponse({"run_id": run_id, "started": False, "reasons": reasons})
+        return JSONResponse({"run_id": run_id, "started": True}, status_code=201)
+
     app.mount("/static", FreshStatic(directory=STATIC))
     return app
 
 
-def serve(run_dir: Path, port: int) -> None:
+def serve(runs_dir: Path, port: int, task: str) -> None:
     import uvicorn
 
     # An open event stream never ends on its own, so shutdown would wait for it forever.
-    uvicorn.run(create_app(run_dir), host="127.0.0.1", port=port, timeout_graceful_shutdown=1)
+    uvicorn.run(create_app(runs_dir, port=port, task=task), host="127.0.0.1", port=port, timeout_graceful_shutdown=1)

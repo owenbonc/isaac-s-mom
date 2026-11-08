@@ -18,6 +18,7 @@ from isaacs_mom.validator.rules import RECORDING_ERROR
 from isaacs_mom.validator.training import build_training_set
 
 INSTRUCTION = "Hug the orange box, lift it, and put it in the green bin."
+MAX_INSTRUCTION_CHARS = 200  # the Teach box's limit (SPEC §3.5)
 TARGET_RATE = 0.8
 MAX_ROUNDS = 3
 DEMOS_PER_ROUND = 20
@@ -27,6 +28,16 @@ StudentFactory = Callable[[str], Policy]
 StudentTrainer = Callable[[Path, str, int], str]
 
 
+def instruction_text(text: str) -> str:
+    """A run's instruction, stripped: 1 to 200 characters and no NUL, as it travels as one argument of `mom run`."""
+    text = text.strip()
+    if not 1 <= len(text) <= MAX_INSTRUCTION_CHARS:
+        raise ValueError(f"an instruction is 1 to {MAX_INSTRUCTION_CHARS} characters, not {len(text)}")
+    if "\0" in text:
+        raise ValueError("an instruction can't hold a NUL character")
+    return text
+
+
 def evaluate(
     sim: TruthSim,
     checkpoint: str,
@@ -34,6 +45,7 @@ def evaluate(
     run_dir: Path,
     events: EventLog,
     make_student: StudentFactory = StudentPolicy,
+    instruction: str = INSTRUCTION,
 ) -> EvaluationResult:
     seeds = sorted(heldout_seeds())
     successes = errored = 0
@@ -48,7 +60,7 @@ def evaluate(
                 seed=seed,
                 split="heldout",
                 round_=round_,
-                instruction=INSTRUCTION,
+                instruction=instruction,
             )
         except Exception as error:  # a crash is the system's fault, not the student's, so it's counted apart (§3.5)
             errored += 1
@@ -75,6 +87,7 @@ def run_loop(
     argon: Argon,
     make_student: StudentFactory | None = None,
     train_student: StudentTrainer = finetune,
+    instruction: str = INSTRUCTION,
 ) -> list[EvaluationResult]:
     # finetune writes checkpoints beside the run dir, so the default student looks there too.
     make_student = make_student or partial(StudentPolicy, runs_dir=run_dir.parent)
@@ -82,7 +95,7 @@ def run_loop(
     checkpoint = BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):
-        results.append(evaluate(sim, checkpoint, round_, run_dir, events, make_student))
+        results.append(evaluate(sim, checkpoint, round_, run_dir, events, make_student, instruction))
         if results[-1].rate >= TARGET_RATE or round_ == max_rounds:
             break
         trial_start = DEV_SEED_START + 1000 * round_
@@ -96,9 +109,11 @@ def run_loop(
                 seed=seed,
                 split="dev",
                 round_=round_,
-                instruction=INSTRUCTION,
+                instruction=instruction,
             )
-            if manifest.validation and not manifest.validation.accepted:
+            verdict = manifest.validation
+            # A recording error is a simulator bug, never a lesson, so the teacher doesn't diagnose it.
+            if verdict and not verdict.accepted and not verdict.reason.startswith(RECORDING_ERROR):
                 failures.append(manifest)
         diagnosed: list[tuple[str, Diagnosis]] = []
         for manifest in failures:
@@ -119,7 +134,7 @@ def run_loop(
                 seed=seed,
                 split="dev",
                 round_=round_,
-                instruction=INSTRUCTION,
+                instruction=instruction,
                 acting_on=failed_id,
             )
         training_set = build_training_set(run_dir, round_ + 1)

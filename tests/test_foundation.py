@@ -8,12 +8,20 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, SkillCall, SkillTarget
+from isaacs_mom.contracts import (
+    Controller,
+    EpisodeManifest,
+    ExecResult,
+    Observation,
+    Perturbation,
+    SkillCall,
+    SkillTarget,
+)
 from isaacs_mom.orchestrator import cli, loop
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import evaluate, run_loop
-from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
+from isaacs_mom.seeds import DEV_SEED_START, SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
 from isaacs_mom.teacher import choose_scenes
@@ -416,6 +424,55 @@ def test_a_recording_error_verdict_is_errored_not_a_student_failure(
     assert (result.successes, result.errored) == (0, 1)
 
 
+class MiscountsOn(FakeSim):
+    """A sim bug on some seeds: every skill reports one timestamp more than the actions it executed (rule 4)."""
+
+    def __init__(self, seeds: set[int]) -> None:
+        self.bad_seeds = seeds  # before super().__init__(), which resets
+        super().__init__()
+
+    def reset(self, seed: int) -> str:
+        self.seed = seed
+        return super().reset(seed)
+
+    def execute(self, call: SkillCall) -> ExecResult:
+        result = super().execute(call)
+        if self.seed in self.bad_seeds:
+            return result.model_copy(update={"timestamps": [*result.timestamps, 0.0]})
+        return result
+
+
+def test_a_step_the_recorder_refuses_ends_that_episode_as_a_recording_error_and_the_run_goes_on(
+    tmp_path: Path,
+) -> None:
+    heldout, trial = sorted(heldout_seeds())[0], DEV_SEED_START
+    results = run_loop(
+        MiscountsOn({heldout, trial}),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=1,
+        dev_trials=2,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=StubStudent,
+        train_student=stub_finetune,
+    )
+    assert [(r.round, r.n, r.errored) for r in results] == [(0, len(heldout_seeds()), 1), (1, len(heldout_seeds()), 1)]
+    manifests = [EpisodeManifest.model_validate_json(p.read_text()) for p in tmp_path.glob("episodes/*/manifest.json")]
+    refused = {m.episode_id: m for m in manifests if m.seed in (heldout, trial)}
+    assert len(refused) == 3  # the held-out seed in both evaluations, and the trial
+    for manifest in refused.values():
+        assert manifest.validation is not None and not manifest.validation.accepted
+        assert manifest.validation.reason.startswith("recording error: ")
+        assert len(manifest.steps) == 0  # the refused step is never saved
+    events = [json.loads(line) for line in (tmp_path / "events.jsonl").read_text().splitlines()]
+    errors = {e["data"].get("episode_id"): e["data"]["error"] for e in events if e["type"] == "error"}
+    verdicts = {e["data"]["episode_id"]: e["data"]["reason"] for e in events if e["type"] == "validation"}
+    assert all(errors[i] == verdicts[i] == m.validation.reason for i, m in refused.items() if m.validation)
+    diagnosed = {e["data"]["episode_id"] for e in events if e["type"] == "diagnosis"}
+    assert diagnosed and not diagnosed & refused.keys()  # a simulator bug is never a lesson
+
+
 def test_a_student_that_cannot_be_built_stops_the_evaluation(tmp_path: Path) -> None:
     def missing(checkpoint: str) -> GiveUp:
         raise FileNotFoundError(f"no adapter for {checkpoint}")
@@ -452,6 +509,26 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
     )
     assert built[0] == "ckpt-r0"
     assert "trained-1" in built
+
+
+def test_a_run_is_tested_trialled_and_taught_on_its_own_instruction(tmp_path: Path) -> None:
+    instruction = "Drop the orange box into the green bin, gently."
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=1,
+        dev_trials=1,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=StubStudent,
+        train_student=stub_finetune,
+        instruction=instruction,
+    )
+    manifests = [EpisodeManifest.model_validate_json(p.read_text()) for p in tmp_path.glob("episodes/*/manifest.json")]
+    kinds = {(m.split, m.driver) for m in manifests}
+    assert kinds == {("heldout", "student"), ("dev", "student"), ("dev", "teacher")}
+    assert {m.instruction for m in manifests} == {instruction}
 
 
 def test_the_cli_refuses_a_run_id_a_checkpoint_id_could_not_carry(

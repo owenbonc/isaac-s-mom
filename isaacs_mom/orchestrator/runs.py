@@ -1,0 +1,128 @@
+"""The runs directory the dashboard serves (SPEC §3.5 "Teach and runs"): which runs it holds, what each is doing, and
+a new run for each instruction typed into the Teach box."""
+
+import secrets
+import subprocess
+import sys
+import time
+from collections.abc import Callable
+from pathlib import Path
+from typing import Literal
+
+from pydantic import BaseModel
+
+from isaacs_mom.contracts import Event
+from isaacs_mom.orchestrator.events import EventLog, read_events
+from isaacs_mom.student import valid_run_id
+from isaacs_mom.tasks import Refusal, TaskSpec, argon_proposer, generate_task
+from isaacs_mom.tasks.spec import Bin, Inside
+from isaacs_mom.teacher.argon import Argon, Generate
+
+FRESH_SECONDS = 20.0
+FINETUNE_SECONDS = 30 * 60.0
+NOT_STARTED = "not started: "  # the error a Teach that started nothing leaves as its run's last word
+NOT_YET = "Not yet: the loop teaches one task"
+Launch = Callable[[list[str], Path], None]  # a command, and the log its output goes to
+
+
+class RunSummary(BaseModel):
+    run_id: str
+    instruction: str | None
+    status: Literal["live", "recorded", "not_started"]
+    reason: str | None
+    started_t: float
+
+
+def find_run(runs_dir: Path, run_id: str) -> Path | None:
+    """The run an id from a URL names: a direct child of the runs directory with an events file; None otherwise."""
+    if not valid_run_id(run_id):  # no separator and no leading dot, so it can only name a child
+        return None
+    run_dir = runs_dir / run_id
+    return run_dir if (run_dir / "events.jsonl").is_file() else None
+
+
+def summarize(run_id: str, events: list[Event], now: float) -> RunSummary:
+    """Live while the last event is under 20 s old, or a fine-tune started under 30 minutes ago hasn't completed."""
+    instruction = reason = None
+    finetune_t: float | None = None
+    for event in events:
+        match event.type, event.data:
+            case "instruction", {"text": str(text)} if instruction is None:
+                instruction = text
+            case "error", {"error": str(error)} if error.startswith(NOT_STARTED):
+                reason = error.removeprefix(NOT_STARTED)
+            case "finetune_started", _:
+                finetune_t = event.t
+            case "finetune_completed", _:
+                finetune_t = None
+    fresh = now - events[-1].t < FRESH_SECONDS
+    tuning = finetune_t is not None and now - finetune_t < FINETUNE_SECONDS
+    status = "not_started" if reason is not None else "live" if fresh or tuning else "recorded"
+    return RunSummary(run_id=run_id, instruction=instruction, status=status, reason=reason, started_t=events[0].t)
+
+
+def list_runs(runs_dir: Path, now: float) -> list[RunSummary]:
+    """Live runs first, then the newest. A run with no event yet is left out: it has nothing to show."""
+    if not runs_dir.is_dir():
+        return []
+    # shortcut: every call re-reads each run's events; cache by file size and mtime once a runs dir holds many runs.
+    found = [(child.name, read_events(child)) for child in runs_dir.iterdir() if find_run(runs_dir, child.name)]
+    runs = [summarize(run_id, events, now) for run_id, events in found if events]
+    return sorted(runs, key=lambda run: (run.status != "live", -run.started_t))
+
+
+def launch_run(command: list[str], log: Path) -> None:
+    """Starts the command in its own session, so a run outlives the dashboard and a Ctrl-C there never reaches it."""
+    with log.open("ab") as out:
+        subprocess.Popen(
+            command, stdin=subprocess.DEVNULL, stdout=out, stderr=subprocess.STDOUT, start_new_session=True
+        )
+
+
+def is_the_loops_task(spec: TaskSpec) -> bool:
+    """The loop teaches one task: the box inside the bin (SPEC §3.5)."""
+    return isinstance(spec.scene.destination, Bin) and any(isinstance(fact, Inside) for fact in spec.success.all_of)
+
+
+def teach(
+    runs_dir: Path, instruction: str, *, task: str, generate: Generate | None, launch: Launch
+) -> tuple[str, list[str]]:
+    """A new run whose first event is the instruction. The task generator judges it, its Argon call counted in the
+    run's own budget (rule 5), and `mom run` starts there when it asks for the loop's task. Returns the run id and why
+    nothing started, empty when the run did."""
+    run_id, run_dir = _new_run(runs_dir)
+    events = EventLog(run_dir, run_id)
+    events.emit("instruction", text=instruction, source="teach")
+    reasons = _judge(instruction, events, generate)
+    if not reasons:
+        # One argument whatever the text holds, even a leading "-" that would read as an option.
+        cli = [sys.executable, "-m", "isaacs_mom.orchestrator.cli", "run", "--runs", str(runs_dir.resolve())]
+        try:
+            launch([*cli, "--run-id", run_id, f"--instruction={instruction}", "--task", task], run_dir / "run.log")
+        except OSError as error:
+            reasons = [f"mom run could not start: {error}"]
+    if reasons:
+        events.emit("error", error=NOT_STARTED + "; ".join(reasons))
+    return run_id, reasons
+
+
+def _new_run(runs_dir: Path) -> tuple[str, Path]:
+    """A fresh run directory, made exclusively, so two Teaches in the same second never share one."""
+    while True:
+        run_id = f"{time.strftime('teach-%Y%m%d-%H%M%S')}-{secrets.token_hex(2)}"
+        try:
+            (runs_dir / run_id).mkdir(parents=True)
+        except FileExistsError:
+            continue
+        return run_id, runs_dir / run_id
+
+
+def _judge(instruction: str, events: EventLog, generate: Generate | None) -> list[str]:
+    """Why the instruction can't start the loop; empty when it asks for the loop's task."""
+    try:
+        task = generate_task(instruction, argon_proposer(Argon(events, generate=generate)))
+    except Exception as error:  # a missing key or a fatal Argon error refuses this Teach, and its run says why
+        return [f"task generator failed: {type(error).__name__}: {error}"]
+    if isinstance(task, Refusal):
+        return task.reasons
+    return [] if is_the_loops_task(task) else [NOT_YET]
