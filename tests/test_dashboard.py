@@ -7,6 +7,7 @@ import threading
 import time
 from pathlib import Path
 
+import httpx
 import pytest
 from fastapi.testclient import TestClient
 from httpx2 import Response
@@ -112,7 +113,9 @@ def test_the_event_stream_is_only_for_a_run_of_the_runs_directory(tmp_path: Path
     (tmp_path / "runs" / ".hidden" / "events.jsonl").touch()
     (tmp_path / "runs" / "no-events").mkdir()
     (tmp_path / "events.jsonl").touch()  # the runs dir's parent is never a run
-    assert runs_client(tmp_path).get("/events", params={"run": run}).status_code == 404
+    # Streamed, so a broken guard fails here instead of tailing that file forever.
+    with runs_client(tmp_path).stream("GET", "/events", params={"run": run}) as response:
+        assert response.status_code == 404
 
 
 def write_events(run_dir: Path, *events: tuple[float, EventType, dict]) -> None:
@@ -205,6 +208,10 @@ def test_run_files_are_only_the_summaries_and_the_replay_report_and_only_when_th
         (run_dir / name).write_text(SUMMARY.model_dump_json())
     (run_dir / "training_r\u0661.summary.json").write_text(SUMMARY.model_dump_json())  # an Arabic-Indic one
     (tmp_path / "runs" / "summary.json").write_text(SUMMARY.model_dump_json())
+    # Valid files outside a run: beside the runs directory, and in a directory with no events file.
+    (tmp_path / "replay_report.json").write_text(REPORT.model_dump_json())
+    (tmp_path / "runs" / "no-events").mkdir()
+    (tmp_path / "runs" / "no-events" / "training_r1.summary.json").write_text(SUMMARY.model_dump_json())
     client = runs_client(tmp_path)
     for path in [
         "r1/training_r1.summary.json",
@@ -219,6 +226,8 @@ def test_run_files_are_only_the_summaries_and_the_replay_report_and_only_when_th
         "r1/%2e%2e%2fsummary.json",
         "r9/training_r1.summary.json",
         "%2e%2e/summary.json",
+        "%2e%2e/replay_report.json",
+        "no-events/training_r1.summary.json",
     ]:
         assert client.get(f"/run-files/{path}").status_code == 404, path
 
@@ -669,6 +678,35 @@ def test_a_task_generator_that_fails_leaves_the_run_not_started_with_why(tmp_pat
     calls = [data for kind, data in run_events(tmp_path, response.json()["run_id"]) if kind == "argon_call"]
     assert [(c["purpose"], c["ok"]) for c in calls] == [("task", False)]  # counted against the run's budget
     assert launched == []
+
+
+def test_the_task_generator_runs_off_the_event_loop_so_the_dashboard_answers_while_argon_thinks(tmp_path: Path) -> None:
+    asked, answer = threading.Event(), threading.Event()
+    released: list[bool] = []
+
+    def generate(purpose: Purpose, parts: list[Part]) -> str:
+        asked.set()
+        # On a blocked event loop nothing can set `answer`, so this times out and the test fails instead of hanging.
+        released.append(answer.wait(timeout=10))
+        return json.dumps(REFUSES)
+
+    def launch(args: list[str], log: Path) -> None:
+        pytest.fail("a refused instruction launched a run")
+
+    app = create_app(tmp_path / "runs", port=8200, task="fixed_feet", generate=generate, launch=launch)
+
+    async def teach_while_listing() -> tuple[int, int]:
+        async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url=LOCAL) as client:
+            body = {"instruction": "put the box in the bin"}
+            teaching = asyncio.create_task(client.post("/teach", json=body, headers={"Origin": ORIGIN}))
+            while not asked.is_set():
+                await asyncio.sleep(0.01)
+            listed = await client.get("/runs")
+            answer.set()
+            return listed.status_code, (await teaching).status_code
+
+    assert asyncio.run(teach_while_listing()) == (200, 200)
+    assert released == [True]
 
 
 def test_a_valid_task_the_loop_does_not_train_on_is_not_yet(tmp_path: Path) -> None:
