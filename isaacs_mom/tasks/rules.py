@@ -7,7 +7,7 @@ words and without measurements, and a fall, a joint-limit violation or a penetra
 import math
 
 from isaacs_mom.contracts import GroundTruth, Validation
-from isaacs_mom.sim.mujoco.scene import BIN_FLOOR_Z, BIN_WALL
+from isaacs_mom.sim.mujoco.scene import BIN_WALL
 from isaacs_mom.sim.mujoco.task import BIN_INNER_HALF
 from isaacs_mom.tasks.spec import AtRest, Inside, On, Platform, RobotStanding, TaskSpec
 
@@ -25,9 +25,9 @@ def judge(spec: TaskSpec, gt: GroundTruth) -> Validation:
                 if not (touching and _centre_within(gt, BIN_INNER_HALF)):
                     problems.append(f"{fact.object} not inside the {dest.kind}")
             case On():
-                top = dest.top_m if isinstance(dest, Platform) else BIN_FLOOR_Z
                 # Centre above the top and over it: resting on it, not leaning on its edge from the floor.
-                if not (touching and gt.box_xyz[2] > top and _centre_within(gt, BIN_INNER_HALF + BIN_WALL)):
+                above = isinstance(dest, Platform) and gt.box_xyz[2] > dest.top_m
+                if not (touching and above and _centre_within(gt, BIN_INNER_HALF + BIN_WALL)):
                     problems.append(f"{fact.object} not on the {dest.kind}")
             case AtRest():
                 if not gt.box_at_rest:

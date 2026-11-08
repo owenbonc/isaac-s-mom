@@ -4,6 +4,7 @@
 can't do it, judged by a declarative rule, and replayed on exactly the task it was recorded on. No network: every
 proposal comes from a fake Argon."""
 
+import ast
 import copy
 import json
 import math
@@ -20,7 +21,7 @@ from isaacs_mom.sim.mujoco import MujocoSim
 from isaacs_mom.sim.mujoco.scene import TABLE_TOP_Z
 from isaacs_mom.tasks import Refusal, TaskSpec, argon_proposer, generate_task, judge
 from isaacs_mom.tasks.example import OFFLINE_PROPOSAL, run_example
-from isaacs_mom.tasks.generate import PROMPT
+from isaacs_mom.tasks.generate import MAX_ANSWER_CHARS, MAX_REASON_CHARS, PROMPT
 from isaacs_mom.teacher.argon import Argon, Part, Purpose
 
 INSTRUCTION = "put the box on the shelf"
@@ -52,7 +53,7 @@ def _fixed(answer: object) -> Any:
 
 
 def _spec(proposal: dict[str, Any] = OFFLINE_PROPOSAL) -> TaskSpec:
-    return TaskSpec.model_validate({**proposal, "instruction": INSTRUCTION})
+    return TaskSpec.model_validate_json(json.dumps({**proposal, "instruction": INSTRUCTION}))
 
 
 def _gt(**changes: Any) -> GroundTruth:
@@ -139,11 +140,22 @@ def test_inside_a_bin_needs_the_floor_and_the_walls() -> None:
         ("put it on the shelf", "Argon's answer is not JSON"),
         ([1, 2], "Argon's answer is not a JSON object"),
         ({"refuse": "pouring needs a grasp"}, "Argon declined: pouring needs a grasp"),
+        ("[" * 100_000, f"Argon's answer is longer than {MAX_ANSWER_CHARS} characters"),
+        ("[" * MAX_ANSWER_CHARS, "Argon's answer is not JSON"),  # as deep as the cap allows, still no RecursionError
+        (json.dumps(OFFLINE_PROPOSAL)[:-1] + ', "name": "evil_name"}', "Argon's answer repeats the key 'name'"),
+        ('{"scene": {"box": {"id": "box", "id": "lid"}}}', "Argon's answer repeats the key 'id'"),
     ],
 )
 def test_an_answer_that_is_not_a_spec_is_refused(answer: object, reason: str) -> None:
     refusal = generate_task(INSTRUCTION, _fixed(answer))
     assert isinstance(refusal, Refusal) and refusal.reasons == [reason]
+
+
+def test_a_reason_quoting_the_answer_back_is_cut_short() -> None:
+    long_key = generate_task(INSTRUCTION, _fixed({**OFFLINE_PROPOSAL, "k" * 3000: 1}))
+    long_kind = generate_task(INSTRUCTION, _fixed(_changed(OFFLINE_PROPOSAL, "scene.box.kind", "c" * 3000)))
+    for refusal in (long_key, long_kind):
+        assert isinstance(refusal, Refusal) and len(refusal.reasons[0]) == MAX_REASON_CHARS
 
 
 @pytest.mark.parametrize(
@@ -153,6 +165,11 @@ def test_an_answer_that_is_not_a_spec_is_refused(answer: object, reason: str) ->
         ("scene.destination.kind", "table", "unsupported destination 'table'"),
         ("scene.box.colour", "red", "scene.box.colour: Extra inputs are not permitted"),
         ("scene.box.mass_kg", "heavy", "scene.box.mass_kg"),
+        ("scene.box.mass_kg", "0.8", "scene.box.mass_kg: Input should be a valid number"),
+        ("scene.box.mass_kg", True, "scene.box.mass_kg: Input should be a valid number"),  # not 1.0 kg
+        ("scene.box.mass_kg", math.nan, "scene.box.mass_kg: Input should be a finite number"),
+        ("scene.destination.distance_m", [1.0, math.inf],
+         "scene.destination.shelf.distance_m.1: Input should be a finite number"),
         ("name", "Box On Shelf", "name: String should match pattern"),
         ("success.all_of", [], "success.all_of: List should have at least 1 item"),
         ("success.all_of.0.support", "table", "on needs the shelf or platform as its support, not 'table'"),
@@ -182,17 +199,34 @@ def test_a_spec_outside_the_schema_or_its_own_scene_is_refused_with_the_reason(
         ("scene.box.half_m", [0.125, 0.20, 0.125], "box half-width 0.2 is outside 0.1-0.17"),
         ("scene.box.mass_kg", 3.0, "box mass 3.0 is outside 0.05-2.0"),
         ("scene.destination.top_m", 0.60, "platform top 0.6 m is outside the 0.4-0.45 m the drop lands on"),
-        ("scene.destination.distance_m", [0.3, 0.6], "bin distance (0.3, 0.6) must run from at least 0.5 m upwards"),
+        ("scene.destination.distance_m", [0.3, 0.6], "bin distance (0.3, 0.6) must run low to high within 0.5-2.2 m"),
+        ("scene.destination.distance_m", [49, 50], "bin distance (49.0, 50.0) must run low to high within 0.5-2.2 m"),
         ("scene.box.offset_m", 0.10, "box offset 0.1 m is past the 0.06 m clear of the waiting arms"),
+        ("scene.box.mass_kg", 2.0, "box mass 2.0 kg is past the 1.0 kg measured on a platform"),
+        ("scene.box.half_m", [0.125, 0.15, 0.15],
+         "box half-size (0.125, 0.15, 0.15) is past the (0.125, 0.15, 0.125) m measured on a platform"),
     ],
-)
+)  # fmt: skip
 def test_a_task_past_the_robots_limits_is_refused_with_the_reason(path: str, value: object, reason: str) -> None:
     refusal = generate_task(INSTRUCTION, _fixed(_changed(OFFLINE_PROPOSAL, path, value)))
     assert isinstance(refusal, Refusal) and reason in refusal.reasons
 
 
+def test_a_bin_still_takes_the_heaviest_box() -> None:
+    heavy = _changed(BIN_PROPOSAL, "scene.box.mass_kg", 2.0)
+    assert isinstance(generate_task(INSTRUCTION, _fixed(heavy)), TaskSpec)
+
+
 def test_the_prompt_states_the_limits_the_checks_enforce() -> None:
-    for limit in ["0.4 to 0.45 m", "up to 0.06", "from 0.5 m up", "mass_kg up to 2.0"]:
+    limits = [
+        "0.4 to 0.45 m",
+        "up to 0.06",
+        "from 0.5 to 2.2 m",
+        "mass_kg up to 2.0",
+        "(0.125, 0.15, 0.125)",
+        "up to 1.0.",
+    ]
+    for limit in limits:
         assert limit in PROMPT, limit
 
 
@@ -265,12 +299,29 @@ def test_argon_proposes_through_the_budgeted_door_and_sees_only_the_instruction(
     assert isinstance(refusal, Refusal) and refusal.reasons == ["no task proposed: Argon did not answer"]
 
 
+def _imported(source: Path, package: str) -> set[str]:
+    """Every module and name `source` imports, relative imports resolved against its `package`."""
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(source.read_text())):
+        if isinstance(node, ast.Import):
+            found |= {alias.name for alias in node.names}
+        elif isinstance(node, ast.ImportFrom):
+            base = package.rsplit(".", node.level - 1)[0] if node.level else ""
+            module = ".".join(part for part in (base, node.module) if part)
+            found |= {module} | {f"{module}.{alias.name}" for alias in node.names}
+    return found
+
+
 def test_the_teacher_and_student_never_import_the_task_rules() -> None:
     # Rule 1: the scene and rule data reach only the validator and orchestrator side.
     root = Path(__file__).resolve().parents[1] / "isaacs_mom"
     for folder in ("teacher", "student"):
         for source in (root / folder).rglob("*.py"):
-            assert "isaacs_mom.tasks" not in source.read_text(), source
+            package = ".".join(["isaacs_mom", *source.parent.relative_to(root).parts])
+            leaks = {
+                m for m in _imported(source, package) if m == "isaacs_mom.tasks" or m.startswith("isaacs_mom.tasks.")
+            }
+            assert not leaks, (source, leaks)
 
 
 # End to end on the real scene

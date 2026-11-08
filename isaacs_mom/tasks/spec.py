@@ -13,7 +13,9 @@ Range = tuple[float, float]
 
 
 class Strict(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
+    """Validated from JSON: a number is a finite number, never a string, a bool or Infinity."""
+
+    model_config = ConfigDict(extra="forbid", frozen=True, strict=True, allow_inf_nan=False)
 
 
 class Box(Strict):

@@ -19,7 +19,10 @@ from isaacs_mom.sim.mujoco.task import (
     BOX_HALF_DEPTH_RANGE,
     BOX_HALF_HEIGHT_RANGE,
     BOX_HALF_WIDTH_RANGE,
+    MAX_BIN_DISTANCE_M,
     MAX_BOX_MASS_KG,
+    MAX_PLATFORM_BOX_HALF,
+    MAX_PLATFORM_BOX_MASS_KG,
     MIN_BIN_DISTANCE_M,
     PLATFORM_TOP_RANGE_M,
 )
@@ -39,7 +42,10 @@ START_DRIFT_M = 0.005  # a stable start leaves the box where it began
 # Further off-centre, the waiting arms nudge the box as the robot steps in place (5-14 mm on 15 of 50 seeds at 0.10 m;
 # none of 50 at 0.06 m), so a generated task starts it no further out.
 MAX_START_OFFSET_M = 0.06
+# A spec is ~0.5 KB, ~1 KB pretty-printed; a longer answer is refused unread, so nesting can't exhaust the parser.
+MAX_ANSWER_CHARS = 4000
 MAX_REASONS = 8
+MAX_REASON_CHARS = 300  # a reason may quote Argon's own words or keys back
 
 PROMPT = f"""You turn a person's instruction for a Unitree G1 humanoid into a task specification, as JSON only.
 
@@ -59,8 +65,10 @@ Answer with exactly one JSON object of this shape (an example, not the answer):
   {BOX_HALF_HEIGHT_RANGE} m; mass_kg up to {MAX_BOX_MASS_KG}; offset_m, how far off the table's centre line it may
   start, up to {MAX_START_OFFSET_M}.
 - destination: kind "bin" (walls, a floor), or "shelf" or "platform" (a flat top with no walls, with "top_m" from
-  {PLATFORM_TOP_RANGE_M[0]} to {PLATFORM_TOP_RANGE_M[1]} m). distance_m from {MIN_BIN_DISTANCE_M} m up, low to high;
-  bearing_deg anticlockwise from straight ahead, low to high, between 0 and 360 (the table is at 0).
+  {PLATFORM_TOP_RANGE_M[0]} to {PLATFORM_TOP_RANGE_M[1]} m). A box for a shelf or platform has half_m up to
+  {MAX_PLATFORM_BOX_HALF} and mass_kg up to {MAX_PLATFORM_BOX_MASS_KG}.
+  distance_m from {MIN_BIN_DISTANCE_M} to {MAX_BIN_DISTANCE_M} m, low to high; bearing_deg anticlockwise from straight
+  ahead, low to high, between 0 and 360 (the table is at 0).
 - success.all_of: facts that must all hold at the end. "inside" (object, container: a bin), "on" (object, support: a
   shelf or platform), "at_rest" (object), "robot_standing". Say where the box must end up.
 - perturbations: the objects that may be moved mid-run (the box, the destination, or neither).
@@ -79,23 +87,28 @@ def argon_proposer(argon: Argon) -> Propose:
 
 def generate_task(instruction: str, propose: Propose, check_seeds: Sequence[int] = CHECK_SEEDS) -> TaskSpec | Refusal:
     def refuse(*reasons: str) -> Refusal:
-        return Refusal(instruction=instruction, reasons=list(reasons[:MAX_REASONS]))
+        return Refusal(instruction=instruction, reasons=[reason[:MAX_REASON_CHARS] for reason in reasons[:MAX_REASONS]])
 
     answer = propose(instruction)
     if answer is None:
         return refuse("no task proposed: Argon did not answer")
+    if len(answer) > MAX_ANSWER_CHARS:
+        return refuse(f"Argon's answer is longer than {MAX_ANSWER_CHARS} characters")
     try:
-        data = json.loads(answer)
+        data = json.loads(answer, object_pairs_hook=_unique_keys)
+    except _RepeatedKeyError as error:
+        return refuse(f"Argon's answer repeats the key {error.args[0]!r}")
     except json.JSONDecodeError:
         return refuse("Argon's answer is not JSON")
     if not isinstance(data, dict):
         return refuse("Argon's answer is not a JSON object")
     if isinstance(data.get("refuse"), str):
-        return refuse(f"Argon declined: {data['refuse'][:300]}")
+        return refuse(f"Argon declined: {data['refuse']}")
     if unsupported := _unsupported_kinds(data):
         return refuse(*unsupported)
     try:
-        spec = TaskSpec.model_validate({**data, "instruction": instruction})
+        # As JSON, so strict validation still reads a list as a tuple.
+        spec = TaskSpec.model_validate_json(json.dumps({**data, "instruction": instruction}))
     except ValidationError as error:
         return refuse(*(f"{'.'.join(map(str, e['loc']))}: {e['msg']}" for e in error.errors()))
     if problems := _inconsistencies(spec):
@@ -109,6 +122,20 @@ def generate_task(instruction: str, propose: Propose, check_seeds: Sequence[int]
             f"box offset {spec.scene.box.offset_m} m is past the {MAX_START_OFFSET_M} m clear of the waiting arms"
         )
     return _check_on_scene(spec, MujocoSim(task), check_seeds, refuse) or spec
+
+
+class _RepeatedKeyError(Exception):
+    pass
+
+
+def _unique_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """A JSON object's keys, each once: json.loads alone keeps the last of a repeated key silently."""
+    data: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in data:
+            raise _RepeatedKeyError(key)
+        data[key] = value
+    return data
 
 
 def _unsupported_kinds(data: dict[str, Any]) -> list[str]:
