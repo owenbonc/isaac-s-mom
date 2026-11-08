@@ -196,6 +196,7 @@ def test_a_generated_task_trains_on_its_accepted_demonstrations_and_is_examined_
     lines = (run_dir / "training_r1.jsonl").read_text().splitlines()
     examples = [TrainingExample.model_validate_json(line) for line in lines]
     assert len(examples) == sum(len(m.steps) for m in accepted)  # every scripted step is the teacher's
+    assert {e.instruction for e in examples} == {m.instruction for m in demos} == {INSTRUCTION}  # the person's words
     assert {Path(e.image).parents[1].name for e in examples} == {m.episode_id for m in accepted}  # rule 3
     summary = TrainingSetSummary.model_validate_json((run_dir / "training_r1.summary.json").read_text())
     assert (summary.demonstrations, summary.accepted, summary.rejected, summary.examples) == (3, 2, 1, len(examples))
@@ -216,7 +217,7 @@ def test_a_generated_task_trains_on_its_accepted_demonstrations_and_is_examined_
     for checkpoint in report.exam:
         examined = _manifests(run_dir / "exam" / checkpoint.replace("/", "_") / "episodes")
         assert [(m.seed, m.split, m.driver) for m in examined] == [(seed, "heldout", "student") for seed in held_out]
-        assert {m.run_id for m in examined} == {report.run_id}
+        assert {m.run_id for m in examined} == {report.run_id} and {m.instruction for m in examined} == {INSTRUCTION}
 
 
 def test_a_demonstration_the_specs_rule_rejects_gives_no_training_examples(tmp_path: Path) -> None:
