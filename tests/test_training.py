@@ -148,3 +148,28 @@ def test_a_students_recording_error_is_not_counted_as_a_demonstration(tmp_path: 
     assert (summary.demonstrations, summary.rejected) == (0, 0)
     assert summary.rejected_by == {}
     assert summary.empty_dev_episodes == 1
+
+
+def ending_with(last: Controller) -> EpisodeManifest:
+    """An accepted demo whose final step is a `reobserve` by `last`."""
+    episode = manifest(controllers=("teacher", "teacher", last))
+    closing = episode.steps[-1].model_copy(update={"skill_call": SkillCall(skill="reobserve")})
+    return episode.model_copy(update={"steps": [*episode.steps[:-1], closing]})
+
+
+def test_a_demo_ending_with_the_teachers_reobserve_also_teaches_the_second_one(tmp_path: Path) -> None:
+    examples = training_examples(tmp_path, ending_with("teacher"))
+    assert [e.target.skill for e in examples] == ["reach_left", "reach_left", "reobserve", "reobserve"]
+    closing = examples[-1]
+    # The student's done rule is a second reobserve in a row (SPEC §3.2), so the last example shows exactly that.
+    assert closing.feedback == "reobserve: ok"
+    assert closing.image == examples[-2].image
+    assert closing.target.params == {}
+
+
+def test_a_demo_that_doesnt_end_with_the_teachers_reobserve_gets_no_closing_example(tmp_path: Path) -> None:
+    assert [e.feedback for e in training_examples(tmp_path, manifest(controllers=("teacher", "teacher")))] == [
+        "start",
+        "reach_left: ok",
+    ]
+    assert all(e.feedback != "reobserve: ok" for e in training_examples(tmp_path, ending_with("student")))
