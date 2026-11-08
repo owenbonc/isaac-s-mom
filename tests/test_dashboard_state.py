@@ -1039,8 +1039,8 @@ def evaluation(checkpoint: str, round_: int, successes: int, n: int, errored: in
     return "evaluation_result", data
 
 
-def heldout(episode_id: str, checkpoint: str, judged: bool = True) -> list[tuple[str, dict]]:
-    events = [("episode_started", {**started(episode_id)[1], "split": "heldout"}), decision(0)]
+def heldout(episode_id: str, checkpoint: str, judged: bool = True, seed: int = 1) -> list[tuple[str, dict]]:
+    events = [("episode_started", {**started(episode_id)[1], "split": "heldout", "seed": seed}), decision(0)]
     events[-1][1]["checkpoint"] = checkpoint
     return [*events, verdict(False)] if judged else events
 
@@ -1201,12 +1201,23 @@ def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_eva
         decision(0),
         verdict(False),
         *heldout("h2", "ckpt-r1"),
-        *heldout("h3", "ckpt-r1"),
+        *heldout("h3", "ckpt-r1", seed=2),
         started("take-is-dev"),
     )
     assert run(CLAIM, later)[1] == {"checkpoint": "ckpt-r1", "run": 2, "of": 20}
     done = stream(*heldout("h1", "ckpt-r0"), evaluation("ckpt-r0", 0, 0, 20), started("trial"))
     assert run(CLAIM, done)[1] is None
+    # a seed counts once it has run, whether it reached a verdict or crashed before or during its episode
+    first = evaluated(0, (1, "failed"), (2, "failed"), (3, "failed"))
+    crashing = [
+        *first,
+        started("trial"),
+        *held_out(1, 1, "failed"),
+        crashed(2, 1),
+        *held_out(1, 3, None),
+        crashed(3, 1),
+    ]
+    assert run(CLAIM, stream(*crashing))[1] == {"checkpoint": "r/ckpt-r1", "run": 3, "of": 3}
 
 
 VERDICTS = {
@@ -1224,6 +1235,11 @@ def held_out(round_: int, seed: object, outcome: str | None) -> list[tuple[str, 
         return [start, test]
     task, reason = VERDICTS[outcome]
     return [start, test, ("validation", {"task_success": task, "physics_valid": True, "reason": reason})]
+
+
+def crashed(seed: int, round_: int) -> tuple[str, dict]:
+    """The loop's error for a held-out episode on `seed` that raised, before or after it started."""
+    return "error", {"seed": seed, "split": "heldout", "round": round_, "error": "RuntimeError: reset failed"}
 
 
 def evaluated(round_: int, *outcomes: tuple[object, str | None]) -> list[tuple[str, dict]]:
@@ -1301,6 +1317,9 @@ def test_with_one_evaluation_every_seed_is_pending_and_mid_evaluation_so_is_ever
     assert mid["checkpoints"][1] == {"round": 1, "checkpoint": "r/ckpt-r1", "name": "after round 1", "done": False}
     running = results(*held_out(0, 1, "failed"), *held_out(0, 2, None))
     assert running["rows"] == [[1, "pending", ["failed"]], [2, "pending", ["pending"]]]
+    # a seed whose episode crashed in the evaluation under way is errored before that evaluation's result
+    crash = results(*first, started("trial"), *held_out(1, 1, "succeeded"), *held_out(1, 2, None), crashed(2, 1))
+    assert [2, "error", ["succeeded", "errored"]] in crash["rows"]
 
 
 def test_with_three_checkpoints_the_mark_compares_the_first_and_the_latest_and_lists_every_one() -> None:

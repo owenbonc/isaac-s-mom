@@ -443,14 +443,16 @@
     return failures.every(Boolean) ? { replayed: f.replayed, reproduced: f.reproduced, failures } : null;
   }
 
-  // The held-out evaluation under way: its checkpoint, how many of its episodes have a verdict, and out of how many,
-  // which only an earlier evaluation of the same sealed seeds tells. Null while none runs.
+  // The held-out evaluation under way: its checkpoint, how many of its seeds have run (to a verdict or a crash), and out
+  // of how many, which only an earlier evaluation of the same sealed seeds tells. Null while none runs.
   function testing(s) {
     const last = s.rounds[s.rounds.length - 1];
     const tests = s.episodes.slice(last ? last.after : 0).filter((e) => e.split === "heldout");
-    if (!tests.length) return null;
+    const crashed = s.crashes.filter((c) => c.evaluation === s.rounds.length).map((c) => c.seed);
+    if (!tests.length && !crashed.length) return null;
     const decided = tests.flatMap((e) => e.rows).findLast((r) => r.kind === "decision" && r.checkpoint);
-    return { checkpoint: decided ? decided.checkpoint : null, run: tests.filter((e) => e.verdict).length, of: last ? last.n : null };
+    const run = new Set([...tests.filter((e) => e.verdict).map((e) => e.seed), ...crashed]).size;
+    return { checkpoint: decided ? decided.checkpoint : null, run, of: last ? last.n : null };
   }
 
   // What a fine-tune learns from (SPEC §3.5); a demonstration with no frame is counted, not shown.
