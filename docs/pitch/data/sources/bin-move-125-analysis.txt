@@ -1,0 +1,41 @@
+| seed | (a) no move: turns -> net | accepted | (b) bin -> 125 deg @ 0.45 m: turns -> net | accepted | skill sequence changed? |
+|---|---|---|---|---|---|
+| 1 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 2 | 10 turns (L/R alternating) -> 90 deg | yes | 14 turns (L/R alternating) -> 90 deg | no | YES |
+| 3 | L45 L45 -> 90 deg | no | L45 L45 R45 L45 L45 -> 135 deg | yes | YES |
+| 4 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 5 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 6 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 7 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 8 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 9 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 10 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 11 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 12 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 13 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 14 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 15 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 16 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 17 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 18 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 19 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+| 20 | L45 L45 -> 90 deg | yes | L45 L45 -> 90 deg | no | no (identical) |
+
+(a) accepted 19/20; (b) accepted 1/20; skill sequence changed on 2/20 seeds; bin move applied in (b) on 20/20; move ever applied in (a): False
+(b) bin poses: [(125.0, 0.45)] move before step: [2, 3]
+seconds per episode (a,b): 3.8 3.9
+seed 2: a = hug lift turn_left 45 turn_left 45 turn_right 45 turn_left 45 turn_right 45 turn_left 45 turn_right 45 turn_left 45 turn_right 45 turn_left 45 place reobserve
+        b = hug lift turn_left 45 turn_left 45 turn_right 45 turn_left 45 turn_right 45 turn_left 45 turn_right 45 turn_left 45 turn_right 45 turn_left 45 turn_right 45 turn_left 45 turn_right 45 turn_left 45 place reobserve
+seed 3: a = reach_left 5 hug lift turn_left 45 turn_left 45 place reobserve
+        b = reach_left 5 hug lift turn_left 45 turn_left 45 turn_right 45 turn_left 45 turn_left 45 place reobserve
+
+Determinism (separate processes, same seed/condition):
+  seed 3 (b): rerun steps identical=True, box_xyz [-0.181, 0.33, 0.44] vs [-0.181, 0.33, 0.44], accepted True vs True
+  seed 1 explore-125 vs (b): steps identical=True, box_xyz [0.001, 0.335, 0.62] vs [0.001, 0.335, 0.62]
+  seed 2 explore-125 vs (b): steps identical=True, box_xyz [0.262, 0.806, 0.12] vs [0.262, 0.806, 0.12]
+  seed 3 explore-125 vs (b): steps identical=True, box_xyz [-0.181, 0.33, 0.44] vs [-0.181, 0.33, 0.44]
+
+explore-50 (n=3):
+  seed 1: L45 L45 -> net 90; accepted False; vs (a): identical=True
+  seed 2: L45 L45 R45 L45 -> net 90; accepted False; vs (a): identical=False
+  seed 3: L45 L45 R45 L45 -> net 90; accepted False; vs (a): identical=False

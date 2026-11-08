@@ -10,3 +10,6 @@ rehearsal/
 .claude/worktrees/
 .DS_Store
 .impeccable/
+docs/live-demo/videos/
+docs/live-demo/logs/
+docs/technical-summary/build/

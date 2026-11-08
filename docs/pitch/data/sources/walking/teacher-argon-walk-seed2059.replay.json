@@ -1,0 +1,19 @@
+{
+ "episode": "ep-2059-c8323b",
+ "seed": 2059,
+ "steps": 11,
+ "stored_verdict": {
+  "task_success": true,
+  "physics_valid": true,
+  "reason": "box at rest inside bin"
+ },
+ "replayed_verdict": {
+  "task_success": true,
+  "physics_valid": true,
+  "reason": "box at rest inside bin"
+ },
+ "per_step_divergence": null,
+ "official_replay_valid": true,
+ "frames": 12,
+ "video": "<ws1-scratchpad>/walking-clips/teacher-argon-walk-seed2059.mp4"
+}
