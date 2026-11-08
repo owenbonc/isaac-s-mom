@@ -25,13 +25,14 @@ let runId = new URLSearchParams(location.search).get("run");
 let runs = [];
 let teaching = { state: "idle" };
 // Assigning identical HTML would reload every image and reset scrolling, so panels skip unchanged writes.
-const nativeSetter = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML").set;
+const native = Object.getOwnPropertyDescriptor(Element.prototype, "innerHTML");
 for (const el of document.querySelectorAll("[id]")) {
   Object.defineProperty(el, "innerHTML", {
+    get: () => native.get.call(el),
     set(html) {
       if (el.dataset.html === html) return;
       el.dataset.html = html;
-      nativeSetter.call(el, html);
+      native.set.call(el, html);
     },
   });
 }

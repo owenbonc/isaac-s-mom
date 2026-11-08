@@ -1710,8 +1710,8 @@ class FakeElement {
   focus() { doc.activeElement = this; }
 }
 Object.defineProperty(FakeElement.prototype, "innerHTML", {
-  get() { return ""; },
-  set(html) { writes.push([this.id, html]); },
+  get() { return this.html ?? ""; },
+  set(html) { this.html = html; writes.push([this.id, html]); },
   configurable: true,
 });
 const IDS = ["status", "run-meta", "announce", "control", "stage", "strip", "log", "chip-log", "p-rounds",
@@ -2031,3 +2031,8 @@ def test_the_run_picker_closes_when_the_focus_moves_past_it_or_on_escape_and_not
     return { escape: picker.open, link: left(link), text: left(null), past: left(doc.getElementById("tabs")) };
     """
     assert app(REPLAY + script, stream(started("a"))) == {"escape": False, "link": True, "text": True, "past": False}
+
+
+def test_a_panel_reads_back_the_html_written_to_it() -> None:
+    script = 'return doc.getElementById("p-rounds").innerHTML;'
+    assert "Held-out success" in app(REPLAY + script, stream(started("a")))

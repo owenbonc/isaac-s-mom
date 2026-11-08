@@ -4,7 +4,7 @@
 --edge:#37373b;--edge-strong:#4a4a4f;
 /* Measured: ink 10.3:1 on a panel, muted 5.9:1 (5.0:1 on a raised row), dim 5.1:1 on the surround, its only ground. */
 --ink:#d8d8da;--muted:#a3a3a8;--dim:#8e8e93;
---student:#8eb2eb;--student-mark:#78a1e2;--teacher:#66ccbe;--ok:#84d98a;--bad:#df9099;
+--student:#8eb2eb;--teacher:#66ccbe;--ok:#84d98a;--bad:#df9099;
 /* Results marks: a change at full strength, the unchanged a step quieter (5.6:1 and 4.8:1 on a panel), errored yellow. */
 --ok-quiet:#71ad76;--bad-quiet:#bd848b;--warn:#e6c46e;
 --accent:#fff;--on-accent:#1e1e20;--focus:#fff;--selection:rgb(92 139 214 / .5);
@@ -53,7 +53,8 @@ header.bar h1{font-size:1rem;flex:none}
 .legend section>.note{margin:.45rem 0 0;font-size:var(--t-label)}
 .legend dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.4rem .7rem;margin:0;align-items:baseline}
 .legend dt{display:flex;flex-wrap:wrap;gap:.3rem;font-size:var(--t-label);font-weight:600}
-.legend dd{margin:0}
+/* No line of a key's meaning ends on one word alone. */
+.legend dd{margin:0;text-wrap:pretty}
 .legend .keys dt{align-items:center;color:var(--muted)}
 .legend .note.run{grid-column:1 / -1;margin:.45rem 0 0;font-size:var(--t-label)}
 .legend dt .mark{width:1.1rem;height:1.1rem}
