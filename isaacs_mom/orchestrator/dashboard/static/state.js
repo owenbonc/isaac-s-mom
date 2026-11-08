@@ -364,8 +364,8 @@
     if (tail || s.crashes.some((c) => c.evaluation === ends.length)) {
       const test = testing(s);
       const checkpoint = test ? test.checkpoint : null;
-      // Until its result says where it came from, a round 0 on another checkpoint than the base is only under way.
-      const round = tail && !(tail.round === 0 && checkpoint !== null && checkpoint !== BASE_CHECKPOINT) ? tail.round : null;
+      // Until its result says where it came from, a round 0 not yet seen on the base checkpoint is only under way.
+      const round = tail && !(tail.round === 0 && checkpoint !== BASE_CHECKPOINT) ? tail.round : null;
       checkpoints.push({ round, checkpoint, name: roundName({ round, from: null }), done: false });
     }
     const rows = new Map();

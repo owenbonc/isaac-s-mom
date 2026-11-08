@@ -1169,6 +1169,8 @@ def test_a_run_started_from_an_earlier_run_names_round_0_by_that_run_and_counts_
         ("decision", {**decision(0)[1], "checkpoint": "x"}),
     ]
     assert run(FROM, stream(*started_from))["checkpoints"] == ["the\u00a0evaluation\u00a0under\u00a0way"]
+    # and so is one before its first decision, which could be on another checkpoint
+    assert run(FROM, stream(*started_from[:1]))["checkpoints"] == ["the\u00a0evaluation\u00a0under\u00a0way"]
     assert run(FROM, stream(*held_out(0, 1, None)))["checkpoints"] == ["before\u00a0fine-tuning"]
 
 
