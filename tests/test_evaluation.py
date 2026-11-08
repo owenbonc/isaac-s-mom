@@ -144,7 +144,6 @@ def test_each_checkpoints_condition_closes_with_an_evaluation_result(tmp_path: P
     for report, result in zip(reports, results, strict=True):
         assert (result["n"], result["successes"], result["errored"]) == (report.n, report.successes, report.errored)
         assert result["rate"] == report.successes / report.scored
-    # Each result closes exactly its block's episodes, right after the last one's verdict.
     for start, end, result in zip([-1, *ends[:-1]], ends, results, strict=True):
         key = (result["checkpoint"], result["condition"])
         block = [r["episode_id"] for r in records if (r["checkpoint"], r["condition"]) == key]

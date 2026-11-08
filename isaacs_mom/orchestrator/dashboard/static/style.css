@@ -160,20 +160,17 @@ button.back::after{left:0;--tx:0%}
 .taught{margin:0;color:var(--muted)}
 .taught q{color:var(--ink)}
 
-/* The results strip: the Status row leads in colour and size; Before and After are a step down, uncoloured. Its labels
-   stay put while the columns scroll. */
 /* Above the main area, so the switch's tooltips show over the panels. */
 .results-strip{--top:1.75rem;--row:1.1rem;position:relative;z-index:2;flex:none;display:flex;margin:.35rem .75rem 0;background:var(--panel);border:1px solid var(--edge);border-radius:var(--r)}
 .results-strip .labels{flex:none;display:grid;grid-template-rows:var(--top) var(--row) var(--row);align-items:center;margin:0;padding:.2rem .7rem .2rem .85rem;border-right:1px solid var(--edge);font-size:var(--t-label);line-height:1;color:var(--muted)}
 .results-strip .labels .status{color:var(--ink);font-weight:600}
 .columns{flex:1;min-width:0;display:flex;list-style:none;margin:0;padding:.2rem .3rem;overflow-x:auto;scrollbar-width:thin}
-/* Twenty columns fit at 1280 px; more scroll. */
+/* Twenty columns fit at 1280 px. */
 .columns li{flex:1 0 3.4rem;display:flex}
 .columns .none{align-self:center;padding:0 .5rem;font-size:var(--t-label)}
 .column{flex:1;display:grid;grid-template-rows:var(--top) var(--row) var(--row);place-items:center;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--ink);cursor:pointer;transition:background-color .15s}
 @media (hover:hover){.column:hover{background:var(--row)}}
 .column:focus-visible{background:var(--raised);outline-offset:-2px}
-/* The open seed is marked as a held key is: a short bar in the accent. */
 .column[aria-current]{box-shadow:inset 0 -2px 0 var(--accent);background:var(--row)}
 .column .mark{width:1.5rem;height:1.5rem}
 .column .plain{width:.95rem;height:.95rem;color:var(--muted)}
@@ -181,7 +178,6 @@ button.back::after{left:0;--tx:0%}
 .switch button[aria-disabled="true"]{color:var(--dim);cursor:default}
 .switch button[aria-disabled="true"][aria-pressed="true"]::before{opacity:.45}
 
-/* A seed's tests take the stage's place; the rest of the view stays where it was. */
 #results,main[data-view="seed"]>.camera{display:none}
 main[data-view="seed"]>#results{display:flex;flex-direction:column;overflow:hidden}
 .seed-head{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .6rem;padding:.3rem .45rem;border-bottom:1px solid var(--edge)}

@@ -261,7 +261,6 @@ def test_only_an_episode_naming_fakesim_makes_a_run_placeholder_and_one_with_no_
     assert provenance(stream(started("a", "fake-1")), now=1.0) == "placeholder"
     assert provenance(stream(started("a", "fake-1"), started("b")), now=2.0) == "placeholder"
     assert provenance(stream(started("a", None)), now=1.0) == "live"
-    # a Teach-started run before its first episode_started names its simulator
     taught = stream(("instruction", {"text": "put the box in the bin", "source": "teach"}), argon_call(1))
     assert provenance(taught, now=2.0) == "live"
     assert provenance(taught, now=30.0) == "recorded"
@@ -818,7 +817,6 @@ def test_end_follows_the_episode_in_progress_while_the_run_is_live_and_the_view_
         """,
         stream(*BEATS),
     )
-    # End closes the seed open and follows the run, onto t6 once it starts; a stopped run leaves End nowhere new
     assert out == ["d4", ["run", None, "t5"], "t6", "t6", None]
 
 
@@ -835,7 +833,6 @@ def test_navigation_targets_say_where_each_key_leads_and_null_for_nowhere_new() 
         stream(*BEATS),
     )
     pin = lambda id_: {"selected": id_, "seed": None, "opened": None}  # noqa: E731
-    # following the latest: ← pins t5, nothing lies to the right and End is where the view already is
     assert out[0] == {
         "ArrowLeft": pin("t5"),
         "ArrowRight": None,
@@ -1390,7 +1387,7 @@ def test_a_seed_opens_over_the_run_arrows_step_its_neighbours_and_escape_returns
         open();
         press("ArrowLeft");
         const was = look().episode;
-        S.visit(v, { seed: 1 });  // a click, or Enter, on seed 1's column
+        S.visit(v, { seed: 1 });
         const seen = [[S.where(v), v.seed, look().episode]];
         for (const key of ["ArrowLeft", "ArrowRight", "ArrowRight", "ArrowRight"]) {
           press(key);
@@ -1409,13 +1406,10 @@ def test_a_seed_opens_over_the_run_arrows_step_its_neighbours_and_escape_returns
         """,
         stream(*TWO_EVALUATIONS),
     )
-    # the run walks every episode, so ← from its trial reaches the held-out test before it
     assert out["was"] == "h0-3"
-    # the seed's tests cover the stage; ← and → step the seeds in seed order and stop at the ends
     assert out["seen"] == [["seed", 1, "h0-3"], ["seed", 1], ["seed", 2], ["seed", 3], ["seed", 3]]
     assert out["episodes"] == ["h0-1", "h1-1", "h1-1", "h0-1"]
     assert out["seed"] == ["seed", 1]
-    # Escape returns to the episode the view was on; there, Escape is not the view's to take
     assert out["back"] == ["run", "h0-3"]
     assert out["claims"] is False
 
@@ -1439,7 +1433,6 @@ def test_the_run_walks_every_episode_in_order_held_out_tests_included_and_move_o
         """,
         events,
     )
-    # a finished run opens on its latest teaching episode; ← walks back to the held-out test before it
     assert out["seen"] == ["t1", "t0", "h0-1", "h0-1", "t0"]
     assert out["moved"] == ["run", "h1-1", 0]
     assert out["back"] == "t0"
@@ -1450,9 +1443,9 @@ def test_the_strips_switch_shows_a_seeds_first_or_latest_episode_in_full_or_both
         """
         open();
         const at = () => [S.where(v), v.seed, look().episode];
-        S.choose(v, "before");  // with no seed open the switch only remembers
+        S.choose(v, "before");
         const idle = at();
-        S.visit(v, S.showSeed(v, 1));  // a click on seed 1's column
+        S.visit(v, S.showSeed(v, 1));
         const seen = [at()];
         press("ArrowRight"); seen.push(at());
         S.choose(v, "after"); seen.push(at());
@@ -1474,7 +1467,6 @@ def test_the_strips_switch_shows_a_seeds_first_or_latest_episode_in_full_or_both
         ["seed", 3, "t0"],
         ["seed", 2, "t0"],
     ]
-    # Escape from an episode the switch shows returns to where the view was, not to the seed
     assert out["back"] == ["run", None, "t0"]
 
 
@@ -1503,7 +1495,6 @@ def test_the_switch_is_dimmed_until_a_seed_is_chosen() -> None:
 
 
 def conditioned(round_: int, condition: str, *outcomes: tuple[object, str | None]) -> list[tuple[str, dict]]:
-    """A `mom eval` block: `round_`'s checkpoint on `condition`, its result naming the condition."""
     *episodes, (kind, result) = evaluated(round_, *outcomes)
     return [*episodes, (kind, {**result, "condition": condition})]
 
@@ -1931,7 +1922,6 @@ return {
 
 def test_no_value_from_an_event_or_the_runs_list_becomes_markup_in_any_view() -> None:
     script = """
-    // Every place the page can show: the run's episodes with the strip, a seed, its episodes, and Move.
     vm.runInContext(`
       MomState.visit(view, { seed: 7 }); render();
       MomState.visit(view, { opened: MomState.results(MomState.shown(view)).seeds[0].episodes[0].id }); render();
@@ -2006,7 +1996,6 @@ return [...html.matchAll(button)].map((m) => ({
 
 
 def strip(events: list[dict]) -> list[dict]:
-    """The results strip's columns as the page last wrote them."""
     return app(REPLAY + STRIP, events)
 
 
@@ -2017,7 +2006,6 @@ def test_the_strip_has_a_column_per_seed_in_seed_order_its_coloured_mark_over_it
         (2, "Seed 2: regressed, succeeded before, failed after", ["mark down", "plain pass", "plain fail"]),
         (3, "Seed 3: still fails, failed before, failed after", ["mark fail", "plain fail", "plain fail"]),
     ]
-    # the name is also the tooltip, and the strip is one Tab stop: its first column
     assert all(c["tip"] == c["name"] for c in columns)
     assert [c["tab"] for c in columns] == ["0", "-1", "-1"]
 
@@ -2038,7 +2026,6 @@ def test_more_than_20_seeds_keep_seed_order_and_an_after_not_run_reads_as_not_ru
         "Seed 30: pending, succeeded before, not run after",
         ["mark pending", "plain pass", "plain pending"],
     )
-    # with one evaluation, After has not run
     assert strip(stream(*evaluated(0, (1, "failed"))))[0]["name"] == "Seed 1: pending, failed before, not run after"
 
 
@@ -2060,7 +2047,6 @@ def test_arrows_in_the_strip_move_between_its_columns_and_enter_on_one_opens_its
     return { seen, tab, run, open: vm.runInContext("[MomState.where(view), view.seed]", context) };
     """
     out = app(REPLAY + script, stream(*TWO_EVALUATIONS))
-    # → moves to the next column and stops at the last; ← past the first stays; the arrows never move the run's view
     assert out["seen"] == [
         ['[data-column="2"]', True],
         ['[data-column="3"]', True],

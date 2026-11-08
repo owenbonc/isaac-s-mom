@@ -116,7 +116,7 @@ function position(ep) {
   return MomState.where(view) === "episode" || !ep ? "" : `Episode ${s.episodes.indexOf(ep) + 1} of ${s.episodes.length}`;
 }
 
-// Screen readers hear what changed (episode, control, verdict, the seed open, pause, connection), never every step.
+// Screen readers hear only what changed, never every step.
 function announce(text) {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
@@ -429,11 +429,9 @@ const outcomes = (row) => {
   return row.episodes.length < 2 ? OUTCOME[first.outcome] : `${OUTCOME[first.outcome]} → ${OUTCOME[latest.outcome]}`;
 };
 
-// Before and After are uncoloured, so only the Status row's marks carry colour.
 const VERDICT = { succeeded: ["pass", "succeeded"], failed: ["fail", "failed"], errored: ["error", "errored"], pending: ["pending", "not run"] };
 const verdictIcon = (o) => `<svg class="i plain" aria-hidden="true"><use href="#m-${VERDICT[o][0]}"/></svg>`;
 const columnName = (c) => `Seed ${c.seed}: ${MARK[c.mark].toLowerCase()}, ${VERDICT[c.before][1]} before, ${VERDICT[c.after][1]} after`;
-// The column that takes the strip's one Tab stop: the seed open, else the one last focused, else the first.
 let stripFocus = null;
 function renderStrip() {
   const cols = MomState.columns(MomState.shown(view));
@@ -458,7 +456,6 @@ function renderStrip() {
 const SIDES = { before: "Before: the seed's first checkpoint", both: "Both: every checkpoint side by side", after: "After: the seed's latest checkpoint" };
 
 const FRAME_MIN = 280;
-// Until the presenter chooses, the switch shows Both where each card keeps a readable frame in the stage, else After.
 let chosen = false;
 const stageWidth = () => $("results").clientWidth || document.querySelector(".camera").clientWidth;
 function defaultSide() {
@@ -628,7 +625,6 @@ let renderedPlace = null;
 let renderedSeed = null;
 let seedMoved = false;
 let leftEpisode = null;
-// Opening a seed, an episode or going back moves the focus with the view; back on the run, to the seed's column.
 function placeFocus() {
   const place = MomState.where(view);
   const moved = seedMoved || (renderedPlace !== null && place !== renderedPlace);
@@ -792,7 +788,6 @@ function press(e) {
   schedule();
   return true;
 }
-// ← and → move between the strip's columns while the focus is in it; Enter on one is its button's click.
 function stripKey(e) {
   const column = e.target.closest?.("[data-column]");
   if (!column || (e.key !== "ArrowLeft" && e.key !== "ArrowRight") || e.metaKey || e.ctrlKey || e.altKey) return false;

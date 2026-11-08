@@ -29,9 +29,6 @@
   // story once finished); `compare` is the box or bin move that Move shows, with the view to return to when pressed again;
   // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down; `settling`
   // while a connection's replay of the events already written streams in, which the page neither shows nor announces.
-  // `seed` is the held-out seed open from the results strip and `opened` its episode open, over the episode shown;
-  // `side` is the strip's Before | Both | After choice, which shows a seed's first or latest episode in full, or
-  // every checkpoint's side by side, and holds from seed to seed.
   const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true, seed: null, opened: null, side: "both" });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
@@ -224,10 +221,7 @@
   const running = (s, now) =>
     !s.stopped && (now - s.lastT < FRESH_SECONDS || (s.finetune.pending !== null && now - s.finetune.pending.t < FINETUNE_SECONDS));
 
-  // Rule 6 for what the view shows: placeholder once a shown episode names FakeSim, so a run with no episode yet is
-  // labelled by liveness alone; live while the run is and its stream is connected, paused instead of live while the
-  // presenter holds the view, recorded otherwise. Pass an episode for a panel that shows one: only the run's current,
-  // unjudged episode can be live.
+  // Rule 6: placeholder only once a shown episode names FakeSim, never for a run with no episode yet.
   function provenance(v, now, ep = null) {
     const s = shown(v);
     if ((ep ? [ep] : s.episodes).some((e) => isFake(e.sim))) return "placeholder";
@@ -339,8 +333,7 @@
   }
   // The base model's checkpoint (student/checkpoints.py): a round 0 tested on another came from an earlier run.
   const BASE_CHECKPOINT = "ckpt-r0";
-  // A `mom eval` block on another condition closes its segment of held-out episodes but is no evaluation of the
-  // training task, so the strip, the figure and a seed's tests leave it out (SPEC §6.10).
+  // A `mom eval` block on another condition still closes a segment but is no evaluation of the training task (SPEC §6.10).
   const counted = (r) => r.condition === null || r.condition === "training_distribution";
 
   function outcome(cell, done) {
@@ -357,7 +350,6 @@
     if (first === "succeeded") return latest === "succeeded" ? "pass" : "down";
     return latest === "succeeded" ? "up" : "fail";
   }
-  // Every held-out seed in seed order, with its outcome at each checkpoint; the checkpoint under way comes last.
   function results(s) {
     // An evaluation's held-out episodes follow the previous evaluation's result, as testing() reads them.
     const ends = s.rounds.map((r) => r.after);
@@ -372,7 +364,6 @@
       const round = tail && !(tail.round === 0 && checkpoint !== BASE_CHECKPOINT) ? tail.round : null;
       checkpoints.push({ round, checkpoint, name: roundName({ round, from: null }), done: false });
     }
-    // The checkpoint a segment of held-out episodes counts for, or -1 for a block on another condition.
     const slot = (segment) => (segment === ends.length ? kept.length : kept.indexOf(segment));
     const rows = new Map();
     const cell = (seed, k) => {
@@ -397,11 +388,8 @@
     return { checkpoints, seeds };
   }
 
-  // The results strip (SPEC §3.5): a column per held-out seed, its mark over its outcome before fine-tuning and after
-  // the latest round, which has not run while the first evaluation is the only one.
   const columns = (s) =>
     results(s).seeds.map((r) => ({ seed: r.seed, mark: r.mark, before: r.episodes[0].outcome, after: r.episodes.length > 1 ? r.episodes[r.episodes.length - 1].outcome : "pending" }));
-  // The seed `step` columns from `seed` in the strip, or null past its ends.
   function neighbour(s, seed, step) {
     const seeds = results(s).seeds.map((r) => r.seed);
     const at = seeds.indexOf(seed);
@@ -490,14 +478,11 @@
   }
 
   const teaches = (e) => e.split !== "heldout";
-  // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds, else
-  // its latest teaching episode, else its latest episode.
   const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || s.episodes.findLast(teaches) || current(s);
 
   const where = (v) => (v.opened !== null ? "episode" : v.seed !== null ? "seed" : "run");
 
-  // The episode the view shows: one opened from a seed, or the run's. A view that saw the run live keeps its episode
-  // in progress once it stops; one opened later gets the story. A seed's detail covers only the stage.
+  // A view that saw the run live keeps its episode in progress once it stops; one opened later gets the story.
   function episode(v, now) {
     const s = shown(v);
     const find = (id) => (id !== null && s.episodes.find((e) => e.id === id)) || null;
@@ -516,15 +501,12 @@
   const BEATS = { d: (e) => e.diagnosis !== null && teaches(e), t: (e) => teacherDrove(e) && teaches(e), m: (e) => e.perturbedStep !== null };
 
   const home = (ep) => ({ selected: ep.id, seed: null, opened: null });
-  // The fields that show `seed` as the strip's switch says: its first or latest checkpoint's episode in full, or
-  // every checkpoint's side by side, which an episode not run yet also falls back to.
   function showSeed(v, seed) {
     const row = results(shown(v)).seeds.find((r) => r.seed === seed);
     const ids = row ? row.episodes.map((e) => e.id) : [];
     const id = v.side === "before" ? ids[0] : v.side === "after" ? ids[ids.length - 1] : null;
     return { seed, opened: id ?? null };
   }
-  // The switch's choice, applied at once to the seed open.
   function choose(v, side) {
     v.side = side;
     if (v.seed !== null) visit(v, showSeed(v, v.seed));
