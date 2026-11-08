@@ -300,7 +300,7 @@
   // The pause key's label, which is also its accessible name (WCAG 2.5.3): what Space does next.
   const pauseLabel = (v) => (v.frozen ? `Resume · ${buffered(v)} new` : "Pause");
   // A paused view judges the run as it was when paused, so it stays put if the run ends meanwhile.
-  const following = (v, now) => running(v.live, v.frozen ? v.frozen.at : now);
+  const following = (v, now) => running(shown(v), v.frozen ? v.frozen.at : now);
 
   const accepted = (ep) => ep.verdict !== null && ep.verdict.task && ep.verdict.physics;
   const RECORDING_ERROR = "recording error";

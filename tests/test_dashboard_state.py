@@ -2142,3 +2142,22 @@ def test_a_crash_carrying_another_seed_never_lands_in_the_current_episodes_log()
         "mom run stopped (exit 1)",
     ]
     assert [c["seed"] for c in out["state"]["crashes"]] == [105, 104]
+
+
+def test_a_paused_view_stays_put_when_the_run_stops_while_it_is_paused() -> None:
+    stopped = ("error", {"error": "mom run stopped (exit 1)"})
+    events = stream(started("a"), verdict(True), ("finetune_started", {"round": 1}), stopped)
+    out = presenter(
+        """
+        feed(3);
+        press(" ");
+        const paused = [S.finetuning(v, now), S.following(v, now)];
+        feed(1);
+        const stopped = [S.finetuning(v, now), S.following(v, now)];
+        press(" ");
+        return [paused, stopped, [S.finetuning(v, now), S.following(v, now)]];
+        """,
+        events,
+    )
+    # finetune_started was written at t=2 and the view paused as it arrived, at t=3
+    assert out == [[1, True], [1, True], [None, False]]
