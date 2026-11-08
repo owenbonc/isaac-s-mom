@@ -2,6 +2,8 @@ import threading
 import time
 from pathlib import Path
 
+from pydantic import ValidationError
+
 from isaacs_mom.contracts import Event, EventType
 
 # One lock per events file, shared by every EventLog on it: the loop's, its heartbeat thread's and the teacher's.
@@ -22,3 +24,17 @@ class EventLog:
             event = Event(t=time.time(), run_id=self.run_id, type=type_, data=data)
             with self.path.open("a") as f:
                 f.write(event.model_dump_json() + "\n")
+
+
+def read_events(run_dir: Path) -> list[Event]:
+    """The events already in runs/<run_id>/events.jsonl, without any line that isn't one (a crash can cut the last)."""
+    path = run_dir / "events.jsonl"
+    if not path.exists():
+        return []
+    events = []
+    for line in path.read_bytes().splitlines():
+        try:
+            events.append(Event.model_validate_json(line))
+        except ValidationError:
+            continue
+    return events

@@ -38,6 +38,7 @@ EventType = Literal[
     "argon_call",
     "error",
     "heartbeat",
+    "instruction",
 ]
 
 

@@ -2,8 +2,8 @@ import argparse
 import time
 from pathlib import Path
 
-from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import run_loop
+from isaacs_mom.orchestrator.events import EventLog, read_events
+from isaacs_mom.orchestrator.loop import INSTRUCTION, instruction_text, run_loop
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.mujoco.task import DEFAULT_TASK, TASKS
 from isaacs_mom.student import (
@@ -27,6 +27,13 @@ def run_id(text: str) -> str:
     return text
 
 
+def instruction(text: str) -> str:
+    try:
+        return instruction_text(text)
+    except ValueError as error:
+        raise argparse.ArgumentTypeError(str(error)) from None
+
+
 def make_sim(name: str, task: str = DEFAULT_TASK.name) -> TruthSim:
     if name == "fake":
         from isaacs_mom.sim.fake import FakeSim
@@ -44,6 +51,9 @@ def main() -> None:
     run.add_argument("--sim", choices=["fake", "mujoco"], default="mujoco")
     run.add_argument("--rounds", type=int, default=3)
     run.add_argument("--run-id", type=run_id, default=time.strftime("run-%Y%m%d-%H%M%S"))
+    run.add_argument(
+        "--instruction", type=instruction, default=INSTRUCTION, help="what the robot learns; held-out tests use it too"
+    )
     dashboard = commands.add_parser("dashboard", help="serve the live dashboard over a run directory")
     dashboard.add_argument("--run", type=Path, required=True)
     dashboard.add_argument("--port", type=int, default=8200)
@@ -79,8 +89,13 @@ def main() -> None:
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
     run_dir = Path("runs") / args.run_id
+    events = EventLog(run_dir, args.run_id)
+    earlier = read_events(run_dir)  # a Teach-started run already holds its instruction and the task generator's calls
+    if args.command == "run" and not any(e.type == "instruction" for e in earlier):
+        events.emit("instruction", text=args.instruction, source="cli")
     # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
-    argon = Argon(EventLog(run_dir, args.run_id), generate=stub_generate if teacher == "stub" else None)
+    argon = Argon(events, generate=stub_generate if teacher == "stub" else None)
+    argon.calls = sum(e.type == "argon_call" for e in earlier)
     if teacher == "argon":
         argon.check()  # the stub has no key or model to check, so it spends nothing
     if args.command == "demo":
@@ -108,6 +123,7 @@ def main() -> None:
         argon=argon,
         make_student=make_student,
         train_student=train_student,
+        instruction=args.instruction,
     )
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"

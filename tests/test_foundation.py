@@ -454,6 +454,26 @@ def test_loop_runs_the_given_student_and_trainer(tmp_path: Path) -> None:
     assert "trained-1" in built
 
 
+def test_a_run_is_tested_trialled_and_taught_on_its_own_instruction(tmp_path: Path) -> None:
+    instruction = "Drop the orange box into the green bin, gently."
+    run_loop(
+        FakeSim(),
+        tmp_path,
+        "t",
+        max_rounds=1,
+        demos=1,
+        dev_trials=1,
+        argon=silent_argon(tmp_path, "t"),
+        make_student=StubStudent,
+        train_student=stub_finetune,
+        instruction=instruction,
+    )
+    manifests = [EpisodeManifest.model_validate_json(p.read_text()) for p in tmp_path.glob("episodes/*/manifest.json")]
+    kinds = {(m.split, m.driver) for m in manifests}
+    assert kinds == {("heldout", "student"), ("dev", "student"), ("dev", "teacher")}
+    assert {m.instruction for m in manifests} == {instruction}
+
+
 def test_the_cli_refuses_a_run_id_a_checkpoint_id_could_not_carry(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
