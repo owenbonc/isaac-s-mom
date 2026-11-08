@@ -114,6 +114,7 @@ function announce(text) {
 function renderControl() {
   const ep = MomState.episode(view, now());
   const el = $("control");
+  // The bar names the fine-tune; the stage shows what it learns from.
   if (MomState.finetuning(view, now()) !== null) {
     el.className = "control";
     el.innerHTML = view.lost
@@ -156,20 +157,42 @@ function renderControl() {
   return `${said}${words ? ` Verdict: ${words}.` : ""}`;
 }
 
+// A frame-sized card on the stage where no head-camera frame can be shown yet.
+const slate = (title, note) => `<div class="frame"><div class="cell"><div class="shot slate"><p class="what">${title}</p><p class="note">${note}</p></div></div></div>`;
+// The contact sheet holds at most 4 × 4 frames, so each stays large enough to read.
+const SHEET = 16;
+
+// While the student fine-tunes no robot moves, so the stage shows what it learns from: the last frame of each
+// accepted teacher demonstration so far, with the counts behind them and the time since the fine-tune started.
+function fineTuneStage(seconds) {
+  const l = MomState.lessons(MomState.shown(view));
+  const shown = l.frames.slice(-SHEET);
+  // A lost stream can't tell whether the fine-tune still runs, so the clock says only when it started.
+  const clock = `<span class="tag ink">${view.lost ? "Connection lost · " : ""}${elapsed(seconds)} since the fine-tune started</span>`;
+  const counts = `${l.accepted} accepted · ${l.rejected} rejected (n=${l.n})`;
+  const sheet = shown.length
+    ? `<div class="frame"><div class="cell"><div class="shot sheet"><ol style="--n:${Math.ceil(Math.sqrt(shown.length))}" aria-label="The last frame of each accepted teacher demonstration">${shown
+        .map((f) => `<li${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="Episode ${f.number}'s last frame">` : ""}</li>`)
+        .join("")}</ol><div class="over">${clock}</div></div></div></div>`
+    : slate("No accepted demonstration to learn from", `${clock} Teacher demonstrations: ${counts}.`);
+  const latest = l.frames.length > shown.length ? `, the latest ${shown.length} of ${l.frames.length} shown` : "";
+  const caption = shown.length ? `<p class="caption" title="The last frame of each accepted teacher demonstration${latest}.">Learning from teacher demonstrations: ${counts}</p>` : "";
+  return sheet + foot(caption, panelChip());
+}
+
 function renderCamera() {
-  // While the student fine-tunes no robot moves, so the stage shows the wait instead of the last episode's frame.
   const tuning = MomState.finetuning(view, now());
   if (tuning !== null) {
-    // A lost stream can't tell whether the fine-tune still runs, so the stage says only what is known.
-    const what = view.lost ? "Connection lost, retrying" : "Fine-tuning the student";
-    $("stage").innerHTML = `<div class="tuning"><p class="what">${what}</p><p class="fig">${elapsed(tuning)}</p><p class="note">since the fine-tune started</p></div>${foot("", panelChip())}`;
+    $("stage").innerHTML = fineTuneStage(tuning);
     $("strip").innerHTML = "";
     return;
   }
   const ep = MomState.episode(view, now());
   const frames = MomState.filmstrip(ep, MomState.stageStep(view));
   if (!frames.length) {
-    $("stage").innerHTML = `<div class="empty">${ep && finished(ep) ? "This episode recorded no head-camera frame." : "No head-camera frame yet. The latest frame appears here after each executed skill."}</div>${foot("", panelChip(ep))}`;
+    const [kind, where] = ep ? kindOf(ep) : [];
+    const note = ep && finished(ep) ? "This episode recorded no head-camera frame." : "The first frame appears after the first skill.";
+    $("stage").innerHTML = (ep ? slate(`${kind} · ${where}`, note) : slate("No episode yet", "The head camera's frames appear here once the run starts.")) + foot("", panelChip(ep));
     $("strip").innerHTML = "";
     return;
   }
@@ -329,7 +352,7 @@ function renderRounds() {
   const test = MomState.testing(s);
   // A run that stopped arriving mid-evaluation can't say the test still runs.
   const live = MomState.following(view, now()) && !view.lost;
-  const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? "" : ` of ${test.of}`} run${live ? "" : " when its events stopped"}.`;
+  const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? " run so far" : ` of ${test.of} run`}${live ? "" : " when its events stopped"}.`;
   // First and latest only: the change is the claim.
   const gain = c && `<div class="gain"><span class="fig" role="img" aria-label="Held-out successes: ${esc(c.spoken)}">${esc(c.figure)}</span><span>${esc(c.sample)}</span></div><div>${esc(c.names)} <span class="note mono">${esc(c.ids)}</span></div>`;
   const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;

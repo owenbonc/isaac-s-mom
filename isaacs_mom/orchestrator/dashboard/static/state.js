@@ -307,6 +307,19 @@
     return { checkpoint: decided ? decided.checkpoint : null, run: tests.filter((e) => e.verdict).length, of: last ? last.n : null };
   }
 
+  // What a fine-tune learns from (SPEC §3.5): the last frame of each accepted teacher demonstration so far, with its
+  // number in the run, and how many demonstrations were judged and how. One with no frame is counted, not shown.
+  function lessons(s) {
+    const judged = s.episodes.filter((e) => kind(e) === "demonstration" && e.verdict);
+    const kept = judged.filter(accepted);
+    return {
+      frames: kept.filter((e) => e.frames.length).map((e) => ({ url: e.frames[e.frames.length - 1].url, number: s.episodes.indexOf(e) + 1 })),
+      accepted: kept.length,
+      rejected: judged.length - kept.length,
+      n: judged.length,
+    };
+  }
+
   // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
   const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || current(s);
 
@@ -392,7 +405,7 @@
     return true;
   }
 
-  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
+  const api = { initial, view, reconnect, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, lessons, teacherDrove, episode, finetuning, target, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

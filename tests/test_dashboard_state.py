@@ -998,3 +998,31 @@ def test_the_simulator_is_named_in_words_with_its_full_version_and_task_kept_for
     assert run(script, stream(started("a", None)))["name"] == "simulator not stated"
     assert run(script, stream(started("a", "isaac-1.2")))["name"] == "isaac-1.2"
     assert run(script, []) is None
+
+
+def test_the_fine_tune_shows_each_accepted_demonstrations_last_frame_and_counts_every_judged_demonstration() -> None:
+    def demonstrated(episode_id: str, frames: list[str | None], accepted: bool | None) -> list[tuple[str, dict]]:
+        steps = [x for i, url in enumerate(frames) for x in (decision(i, controller="teacher"), executed(i, frame=url))]
+        return [("episode_started", {**started(episode_id)[1], "acting_on": "t"}), *steps] + (
+            [] if accepted is None else [verdict(accepted)]
+        )
+
+    events = stream(
+        started("t"),
+        decision(0),
+        executed(0, frame="/f/t.jpg"),
+        verdict(True),  # an accepted student trial is not a lesson
+        *demonstrated("kept", ["/f/k0.jpg", "/f/k1.jpg"], accepted=True),
+        *demonstrated("blind", [], accepted=True),  # no frame to show, but counted
+        *demonstrated("dropped", ["/f/d0.jpg"], accepted=False),
+        *demonstrated("missing", [None], accepted=True),
+        *demonstrated("unjudged", ["/f/u0.jpg"], accepted=None),
+        ("finetune_started", {"round": 1}),
+    )
+    script = "const s = S.initial(); for (const e of events) S.reduce(s, e); return S.lessons(s);"
+    assert run(script, events) == {
+        "frames": [{"url": "/f/k1.jpg", "number": 2}, {"url": None, "number": 5}],
+        "accepted": 3,
+        "rejected": 1,
+        "n": 4,
+    }

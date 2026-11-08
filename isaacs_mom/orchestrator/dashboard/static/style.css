@@ -118,11 +118,14 @@ footer.models .v{color:var(--muted)}
 @container (width < 24rem){.over .said{font-size:var(--step-1)}}
 .over .tag{background:var(--panel);box-shadow:var(--shadow)}
 .over .tag.ink{background:var(--ink);color:var(--panel)}
-.empty{display:grid;place-items:center;text-align:center;color:var(--ph);padding:1rem;max-width:30ch;margin:auto}
-.tuning{margin:auto;text-align:center}
-.tuning p{margin:0}
-.tuning .what{font-size:var(--step-2);font-weight:700}
-.tuning .fig{margin:.5rem 0 .2rem}
+/* Frame-sized, so the stage keeps its shape between episodes and while nothing is on camera yet. */
+.slate{display:grid;place-content:center;gap:.4rem;padding:1.5rem;text-align:center;text-wrap:balance}
+.slate p{margin:0}
+.slate .what{font-size:var(--step-2);font-weight:700}
+/* The fine-tune's contact sheet: n × n frames of 4:3 fill the 4:3 frame. */
+.sheet ol{position:absolute;inset:0;margin:0;padding:0;list-style:none;display:grid;grid-template:repeat(var(--n),minmax(0,1fr))/repeat(var(--n),minmax(0,1fr));gap:2px}
+.sheet li{position:relative;overflow:hidden;background:var(--frame-bg)}
+.sheet img{display:block;width:100%;height:100%;object-fit:cover}
 
 /* The filmstrip takes only the height the frame leaves, and shows once its thumbnails can be read. */
 .strip{list-style:none;margin:0;padding:.1rem .7rem .7rem;display:grid;grid-template-columns:repeat(6,minmax(0,1fr));align-content:start;gap:.4rem;flex:1 1 0;min-height:0;container-type:size}
@@ -195,7 +198,7 @@ ol.log li.event .d{font-weight:400;overflow-wrap:anywhere}
 ol.log li.event.take{background:var(--teacher-bg);color:var(--teacher)}
 ol.log li.event.bad{background:var(--bad-bg);color:var(--bad)}
 ol.log li.event.good{background:var(--ok-bg);color:var(--ok)}
-ol.log li.empty{display:block;max-width:none;margin:0;text-align:left;border-bottom:0}
+ol.log li.empty{display:block;color:var(--ph);border-bottom:0}
 ol.log li.event.moved{background:var(--ink);color:var(--panel)}
 ol.log li.event.moved .n{color:var(--panel)}
 ol.log li.focus{box-shadow:inset 0 0 0 3px var(--ink),inset 0 0 0 5px var(--panel)}
