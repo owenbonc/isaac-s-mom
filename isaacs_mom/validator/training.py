@@ -57,12 +57,12 @@ def build_training_set(run_dir: Path, round_: int) -> Path:
     write_atomically(out, "".join(line + "\n" for line in lines))
     write_atomically(
         out.with_suffix(".summary.json"),
-        _summarise(round_, [m for _, m in manifests], len(lines)).model_dump_json(indent=2),
+        _summarise(round_, [m for _, m in manifests], len(lines), run_dir.name).model_dump_json(indent=2),
     )
     return out
 
 
-def _summarise(round_: int, manifests: list[EpisodeManifest], examples: int) -> TrainingSetSummary:
+def _summarise(round_: int, manifests: list[EpisodeManifest], examples: int, run_id: str) -> TrainingSetSummary:
     # A demonstration is a dev episode the teacher drove, from its first step or after a takeover.
     demos = [m for m in manifests if m.split == "dev" and (m.driver == "teacher" or _teacher_stepped(m))]
     verdicts = [m.validation for m in demos if m.validation is not None]
@@ -72,6 +72,7 @@ def _summarise(round_: int, manifests: list[EpisodeManifest], examples: int) -> 
         episodes_scanned=len(manifests),
         demonstrations=len(demos),
         accepted=len(verdicts) - len(rejected),
+        carried=sum(m.run_id != run_id for m in demos if m.validation is not None and m.validation.accepted),
         rejected=len(rejected),
         unfinished=len(demos) - len(verdicts),
         rejected_by=dict(Counter(c for v in rejected for c in failure_categories(v.reason) or ["other"])),
