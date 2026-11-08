@@ -1,6 +1,7 @@
 """Dashboard server (SPEC §3.5): one HTML page, `events.jsonl` as server-sent events, frame JPEGs from the run."""
 
 import asyncio
+import logging
 from collections.abc import AsyncIterator, Awaitable, Callable
 from pathlib import Path
 
@@ -11,6 +12,7 @@ from pydantic import ValidationError
 
 from isaacs_mom.contracts import Event
 
+log = logging.getLogger(__name__)
 STATIC = Path(__file__).parent / "static"
 POLL_SECONDS = 0.25
 FRAME_SUFFIXES = {".jpg", ".jpeg"}
@@ -35,15 +37,16 @@ def frame_url(frame: object, run_dir: Path) -> str | None:
         return None
     try:
         return "/frames/" + (run_dir / frame).resolve().relative_to(run_dir.resolve()).as_posix()
-    except ValueError:
+    except (ValueError, OSError, RuntimeError):  # outside the run, a NUL byte, or a symlink loop
         return None
 
 
-def to_sse(line: str, run_dir: Path) -> str | None:
-    """One events.jsonl line as an SSE message with its frame paths turned into URLs; None for a malformed line."""
+def to_sse(line: str, number: int, run_dir: Path) -> str | None:
+    """Line `number` of events.jsonl as an SSE message, its frame paths as URLs; None, logged, if malformed."""
     try:
         event = Event.model_validate_json(line)
-    except ValidationError:
+    except ValidationError as error:
+        log.warning("events.jsonl line %d is not an event, skipped: %s", number, error)
         return None
     for key in FRAME_KEYS & event.data.keys():
         event.data[key] = frame_url(event.data[key], run_dir)
@@ -62,12 +65,15 @@ async def tail_events(
         if await stopped():
             return
         await asyncio.sleep(poll)
-    with path.open() as f:
+    # A line torn by a crash mid-write decodes with replacement characters, fails validation and is skipped.
+    with path.open(errors="replace") as f:
+        number = 0
         while True:
             position = f.tell()
             line = f.readline()
             if line.endswith("\n"):
-                if message := to_sse(line, run_dir):
+                number += 1
+                if message := to_sse(line, number, run_dir):
                     yield message
                 continue
             f.seek(position)  # a partial line is still being written
@@ -97,7 +103,10 @@ def create_app(run_dir: Path) -> FastAPI:
 
     @app.get("/frames/{path:path}")
     def frames(path: str) -> FileResponse:
-        target = (run_dir / path).resolve()
+        try:
+            target = (run_dir / path).resolve()
+        except (ValueError, OSError, RuntimeError):  # a NUL byte or a symlink loop
+            raise HTTPException(status_code=404) from None
         if not target.is_relative_to(run_dir.resolve()) or target.suffix not in FRAME_SUFFIXES or not target.is_file():
             raise HTTPException(status_code=404)
         # The recorder writes each frame once under a unique episode id, so a URL's bytes never change.

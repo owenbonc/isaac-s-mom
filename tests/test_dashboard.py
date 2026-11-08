@@ -1,5 +1,6 @@
 import asyncio
 import json
+import logging
 import threading
 import time
 from pathlib import Path
@@ -50,6 +51,14 @@ def test_frames_reject_traversal_and_non_frames(tmp_path: Path) -> None:
     assert client.get("/frames//etc/passwd").status_code == 404
 
 
+def test_frames_that_cannot_resolve_are_not_found(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    (run_dir / "episodes" / "ep-1" / "frames" / "loop.jpg").symlink_to("loop.jpg")
+    client = TestClient(create_app(run_dir), raise_server_exceptions=False)
+    for path in ["episodes/ep-1/frames/loop.jpg", "episodes/ep-1/frames/0000%00.jpg", "%00"]:
+        assert client.get(f"/frames/{path}").status_code == 404
+
+
 def stream_of(run_dir: Path, appended: list[str] | None = None) -> list[str]:
     """Every SSE message, appending `appended` one line at a time once the existing lines have been read, then stop."""
     seen: list[str] = []
@@ -63,11 +72,14 @@ def stream_of(run_dir: Path, appended: list[str] | None = None) -> list[str]:
         return True
 
     async def read() -> None:
-        async for message in tail_events(run_dir, stopped, poll=0):
-            assert message.endswith("\n\n")
-            seen.append(message)
+        try:
+            async for message in tail_events(run_dir, stopped, poll=0):
+                seen.append(message)
+        except Exception as error:  # a raise ends the response: the client sees the stream stop and reconnects
+            seen.append(f"stream died: {error!r}")
 
     asyncio.run(read())
+    assert all(message.endswith("\n\n") for message in seen), seen
     return seen
 
 
@@ -104,11 +116,37 @@ def test_stream_waits_for_a_partial_line_to_complete(tmp_path: Path) -> None:
     assert collect(run_dir, [line[20:], "\n"]) == [json.loads(line)]
 
 
-def test_stream_skips_malformed_lines(tmp_path: Path) -> None:
+def test_stream_skips_a_line_that_is_not_an_event_and_logs_its_line_number(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     run_dir = make_run(tmp_path)
-    (run_dir / "events.jsonl").write_text("not json\n")
-    EventLog(run_dir, "r1").emit("error", message="boom")
-    assert [e["type"] for e in collect(run_dir)] == ["error"]
+    log = EventLog(run_dir, "r1")
+    log.emit("episode_started", seed=1)
+    with (run_dir / "events.jsonl").open("a") as f:
+        f.write("not json\n")
+    log.emit("error", message="boom")
+    with caplog.at_level(logging.WARNING, logger="isaacs_mom.orchestrator.dashboard.server"):
+        assert [e["type"] for e in collect(run_dir)] == ["episode_started", "error"]
+    assert [r.getMessage().split(":")[0] for r in caplog.records] == ["events.jsonl line 2 is not an event, skipped"]
+
+
+def test_stream_goes_on_past_a_line_that_is_not_utf8(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    first, last = (Event(t=t, run_id="r1", type="error", data={}).model_dump_json() for t in (1.0, 2.0))
+    torn = b'{"t": 1.5, "data": "\xff\xfe"}\n'  # a crash mid-write
+    (run_dir / "events.jsonl").write_bytes(f"{first}\n".encode() + torn + f"{last}\n".encode())
+    messages = stream_of(run_dir)
+    assert [m if m == REPLAYED else json.loads(m.removeprefix("data: "))["t"] for m in messages] == [1.0, 2.0, REPLAYED]
+
+
+def test_frame_paths_that_cannot_resolve_are_hidden_and_the_stream_goes_on(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    (run_dir / "episodes" / "ep-1" / "frames" / "loop.jpg").symlink_to("loop.jpg")
+    log = EventLog(run_dir, "r1")
+    log.emit("action_executed", frame="episodes/ep-1/frames/loop.jpg")
+    log.emit("action_executed", frame="episodes/ep-1/frames/0000\x00.jpg")
+    log.emit("action_executed", frame="episodes/ep-1/frames/0000.jpg")
+    assert [e["data"]["frame"] for e in collect(run_dir)] == [None, None, "/frames/episodes/ep-1/frames/0000.jpg"]
 
 
 def test_stream_turns_frame_paths_into_urls_and_hides_outside_paths(tmp_path: Path) -> None:
