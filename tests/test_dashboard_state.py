@@ -1,6 +1,7 @@
 """Behaviour of the dashboard's event reducer (static/state.js), run under node."""
 
 import json
+import re
 import shutil
 import subprocess
 from pathlib import Path
@@ -2032,6 +2033,17 @@ def test_after_a_move_the_stage_marks_it_on_every_later_frame_and_only_icons_car
     out = app(REPLAY + script, stream(*TAKE))
     assert "Box moved at step 1" in out["stage"]
     assert out["notIcons"] == []
+
+
+STYLE_CSS = STATE_JS.parent / "style.css"
+
+
+def test_no_rule_redeclares_a_root_token_so_the_strips_hover_and_open_seed_take_their_tint() -> None:
+    rules = re.findall(r"([^{}]*)\{([^{}]*)\}", STYLE_CSS.read_text())
+    declared = [(selector.strip(), set(re.findall(r"(--[\w-]+)\s*:", body))) for selector, body in rules]
+    tokens = set().union(*(names for selector, names in declared if ":root" in selector))
+    shadowed = {selector: names & tokens for selector, names in declared if ":root" not in selector and names & tokens}
+    assert shadowed == {}
 
 
 STRIP = r"""

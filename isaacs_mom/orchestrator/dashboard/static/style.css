@@ -161,14 +161,14 @@ button.back::after{left:0;--tx:0%}
 .taught q{color:var(--ink)}
 
 /* Above the main area, so the switch's tooltips show over the panels. */
-.results-strip{--top:1.75rem;--row:1.1rem;position:relative;z-index:2;flex:none;display:flex;margin:.35rem .75rem 0;background:var(--panel);border:1px solid var(--edge);border-radius:var(--r)}
-.results-strip .labels{flex:none;display:grid;grid-template-rows:var(--top) var(--row) var(--row);align-items:center;margin:0;padding:.2rem .7rem .2rem .85rem;border-right:1px solid var(--edge);font-size:var(--t-label);line-height:1;color:var(--muted)}
+.results-strip{--top:1.75rem;--line:1.1rem;position:relative;z-index:2;flex:none;display:flex;margin:.35rem .75rem 0;background:var(--panel);border:1px solid var(--edge);border-radius:var(--r)}
+.results-strip .labels{flex:none;display:grid;grid-template-rows:var(--top) var(--line) var(--line);align-items:center;margin:0;padding:.2rem .7rem .2rem .85rem;border-right:1px solid var(--edge);font-size:var(--t-label);line-height:1;color:var(--muted)}
 .results-strip .labels .status{color:var(--ink);font-weight:600}
 .columns{flex:1;min-width:0;display:flex;list-style:none;margin:0;padding:.2rem .3rem;overflow-x:auto;scrollbar-width:thin}
 /* Twenty columns fit at 1280 px. */
 .columns li{flex:1 0 3.4rem;display:flex}
 .columns .none{align-self:center;padding:0 .5rem;font-size:var(--t-label)}
-.column{flex:1;display:grid;grid-template-rows:var(--top) var(--row) var(--row);place-items:center;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--ink);cursor:pointer;transition:background-color .15s}
+.column{flex:1;display:grid;grid-template-rows:var(--top) var(--line) var(--line);place-items:center;padding:0;border:0;border-radius:var(--r-sm);background:none;color:var(--ink);cursor:pointer;transition:background-color .15s}
 @media (hover:hover){.column:hover{background:var(--row)}}
 .column:focus-visible{background:var(--raised);outline-offset:-2px}
 .column[aria-current]{box-shadow:inset 0 -2px 0 var(--accent);background:var(--row)}
