@@ -235,7 +235,13 @@ function fineTuneStage(seconds) {
   const caption = shown.length
     ? `<p class="caption wrap" title="The last frame of each accepted teacher demonstration in this run${latest}.">Learning from ${total} accepted teacher demonstration${total === 1 ? "" : "s"}${from} (${here}) · ${clock}</p>`
     : "";
-  return sheet + foot(caption, panelChip());
+  // A lost stream shows no bar, since nothing reads as still running.
+  const percent = MomState.shown(view).finetune.pending.progress;
+  const value = percent === null ? 'aria-valuetext="Starting"' : `aria-valuemin="0" aria-valuemax="100" aria-valuenow="${percent}"`;
+  const bar = view.lost
+    ? ""
+    : `<div class="progress" role="progressbar" aria-label="Fine-tune progress" ${value}><span class="track"><span class="fill" style="--p:${(percent ?? 0) / 100}"></span></span><span class="pct">${percent === null ? "Starting" : `${percent}%`}</span></div>`;
+  return sheet + bar + foot(caption, panelChip());
 }
 
 function renderCamera() {
@@ -623,8 +629,8 @@ function render() {
   fadeSide();
   keepFocus(focused);
   placeFocus();
-  // Every live dot pulses in step, a rewritten one included, from the timeline's start.
-  for (const a of document.getAnimations()) if (a.animationName === "pulse") a.startTime = 0;
+  // Every live dot pulses in step and the starting fine-tune's bar sweeps on, a rewritten one included, from the timeline's start.
+  for (const a of document.getAnimations()) if (a.animationName === "pulse" || a.animationName === "sweep") a.startTime = 0;
 }
 
 let renderedPlace = null;
