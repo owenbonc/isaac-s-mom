@@ -76,12 +76,11 @@ def _divergence(sim: TruthSim, manifest: EpisodeManifest, episode_dir: Path) -> 
     """Where a re-run first differs from the recording, or None when it reproduces."""
     sim.reset(manifest.seed)
     for i, step in enumerate(manifest.steps):
-        applied = _perturb_before(sim, manifest, i)
+        if not _perturb_before(sim, manifest, i):
+            return f"step {i}: a recorded perturbation no longer applies"
         result = sim.execute(step.skill_call)
         stored = np.load(episode_dir / step.actions)
         actual = np.asarray(result.executed_actions, dtype=np.float32)
-        if not applied:
-            return f"step {i}: a recorded perturbation no longer applies"
         if result.ok != step.ok:
             return f"step {i}: outcome differs"
         if actual.shape != stored.shape or not np.allclose(actual, stored, atol=TOLERANCE):
