@@ -8,6 +8,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
+from pydantic import ValidationError
 
 import isaacs_mom.teacher.argon as argon_module
 from isaacs_mom.contracts import (
@@ -24,7 +25,7 @@ from isaacs_mom.contracts import (
 )
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.seeds import SealedSeedError, heldout_seeds
-from isaacs_mom.teacher import ATTEMPTS, ROBOT, ArgonPolicy, choose_scenes, diagnose
+from isaacs_mom.teacher import ATTEMPTS, ROBOT, ArgonPolicy, FailureMode, choose_scenes, diagnose, diagnose_round
 from isaacs_mom.teacher.argon import (
     RETRY_WAITS_S,
     Argon,
@@ -592,3 +593,171 @@ def test_the_prompt_tells_argon_every_skill_and_its_parameter_limits(tmp_path: P
     a, fake = argon(tmp_path, STEP)
     ArgonPolicy(None, a).act(obs(), "hug the box", "start")
     assert ROBOT in str(fake.prompts[0][0])  # it reaches every act prompt
+
+
+def trial(seed: int, skills: list[tuple[str, bool]], accepted: bool, reason: str = "box right of the bin"):
+    """A student trial with real-looking ids, and a distinct frame before each step."""
+    steps = [
+        StepRecord(
+            step=i,
+            sim_time=0.0,
+            frame=f"frames/{i:04d}.jpg",
+            joint_state=[],
+            skill_call=SkillCall.model_validate({"skill": skill}),
+            controller="student",
+            checkpoint="c",
+            actions=f"actions/{i:04d}.npy",
+            timestamps=[0.0],
+            ok=ok,
+            error=None if ok else "past the limit",
+        )
+        for i, (skill, ok) in enumerate(skills)
+    ]
+    episode = EpisodeManifest(
+        episode_id=f"ep-{seed}-{seed:06x}",
+        run_id="run",
+        seed=seed,
+        split="dev",
+        round=0,
+        instruction="hug the box and put it in the bin",
+        sim_version="fake",
+        robot_config="fake",
+        steps=steps,
+        validation=Validation(task_success=accepted, physics_valid=True, reason="in the bin" if accepted else reason),
+    )
+    return episode, [f"{seed}-{i}".encode() for i in range(len(steps))]
+
+
+TWISTED_FAR = [("hug", True), ("lift", True), ("turn_left", True), ("turn_left", False), ("turn_left", False)]
+STOPPED_SHORT = [("hug", True), ("lift", True), ("turn_left", True), ("place", True)]
+ROUND = [
+    trial(1000, TWISTED_FAR, False),
+    trial(1001, TWISTED_FAR, False),
+    trial(1002, STOPPED_SHORT, False),
+    trial(1003, [("hug", True), ("lift", True), ("turn_left", True), ("place", True)], True),
+]
+FAILED = [episode.episode_id for episode, _ in ROUND[:3]]
+
+
+def modes(*explains: list[str], cite: str = "") -> str:
+    return json.dumps(
+        {
+            "modes": [
+                {
+                    "hypothesis": f"mode {i}",
+                    "evidence": f"seen in {len(ids)} trials{cite}",
+                    "confidence": 0.8,
+                    "lesson": f"lesson {i}",
+                    "explains": ids,
+                }
+                for i, ids in enumerate(explains)
+            ]
+        }
+    )
+
+
+def test_a_round_diagnosis_groups_the_failures_and_names_the_ones_each_mode_explains(tmp_path: Path) -> None:
+    a, fake = argon(tmp_path, modes([*FAILED[:2], FAILED[0]], FAILED[2:]))  # a failure named twice counts once
+    found = diagnose_round(ROUND, a)
+    assert found is not None
+    assert [(m.diagnosis.hypothesis, m.diagnosis.lesson, m.explains) for m in found] == [
+        ("mode 0", "lesson 0", FAILED[:2]),
+        ("mode 1", "lesson 1", FAILED[2:]),
+    ]
+    assert all(isinstance(m, FailureMode) and isinstance(m.diagnosis, Diagnosis) for m in found)
+    assert found[0].diagnosis.evidence == "seen in 3 trials" and len(events(tmp_path, "argon_call")) == 1  # rule 5
+
+
+def test_a_failure_mode_explains_at_least_one_failure() -> None:
+    lesson = Diagnosis(hypothesis="h", evidence="e", confidence=0.5, lesson="l")
+    with pytest.raises(ValidationError):
+        FailureMode(diagnosis=lesson, explains=[])  # lesson_plan shares demos by it, so none would divide by zero
+
+
+def test_the_round_prompt_gives_each_trial_its_verdict_and_skill_calls_only(tmp_path: Path) -> None:
+    a, fake = argon(tmp_path, modes(FAILED))
+    diagnose_round(ROUND, a)
+    prompt = str(fake.prompts[0][0])
+    blocks = []
+    for episode, _ in ROUND:
+        failed = episode.episode_id in FAILED
+        outcome, verdict = ("failed", "box right of the bin") if failed else ("succeeded", "in the bin")
+        calls = [
+            f"  step {s.step} [student] {s.skill_call.model_dump_json(exclude={'reason'})} -> "
+            + ("ok" if s.ok else "refused: past the limit")
+            for s in episode.steps
+        ]
+        blocks.append(
+            "\n".join([f"trial {episode.episode_id} ({outcome}), the validator's verdict: {verdict}", *calls])
+        )
+    listed = prompt.split("and the independent validator's verdict:\n", 1)[1].split("\nThe images are", 1)[0]
+    assert listed == "\n".join(blocks)  # rule 1: no sim_version, robot_config, joint_state or sim_time
+
+
+def test_the_round_diagnosis_sees_frames_calls_and_verdicts_only_at_the_moments_trials_decided(tmp_path: Path) -> None:
+    a, fake = argon(tmp_path, modes(FAILED))
+    diagnose_round(ROUND, a)
+    _, *shown = fake.prompts[0]
+    labels, frames = shown[0::2], shown[1::2]
+    given = {frame for _, trial_frames in ROUND for frame in trial_frames}
+    assert all(isinstance(label, str) for label in labels) and set(frames) <= given  # rule 1: nothing else
+    # Failed trials first: the first refusal of each twist-too-far trial (not the refusals after it), then place.
+    assert frames[:3] == [b"1000-3", b"1001-3", b"1002-3"] and b"1000-4" not in frames and b"1003-3" in frames
+    assert len(frames) <= 8 and labels[0] == f"trial {FAILED[0]}, step 3, before turn_left (refused):"
+
+
+def test_a_failed_trial_that_never_placed_or_was_refused_shows_its_last_frame(tmp_path: Path) -> None:
+    short = trial(1004, [("hug", True), ("lift", True), ("walk_back", True), ("reobserve", True)], False, "short")
+    a, fake = argon(tmp_path, modes([short[0].episode_id]))
+    diagnose_round([short, ROUND[3]], a)
+    _, label, frame, *_ = fake.prompts[0]
+    assert (label, frame) == (f"trial {short[0].episode_id}, step 3, before reobserve (ok):", b"1004-3")
+
+
+def test_the_round_diagnosis_shows_at_most_eight_frames(tmp_path: Path) -> None:
+    many = [trial(1100 + i, STOPPED_SHORT, False) for i in range(12)]
+    a, fake = argon(tmp_path, modes([many[0][0].episode_id]))
+    diagnose_round(many, a)
+    assert sum(isinstance(part, bytes) for part in fake.prompts[0][1:]) == 8
+
+
+@pytest.mark.parametrize(
+    "answer",
+    [
+        modes([*FAILED[:2], ROUND[3][0].episode_id]),  # a success called a failure
+        modes(["ep-9999-abcdef"]),  # a trial that isn't in the round
+        modes(FAILED, cite=" like ep-9999-abcdef"),  # evidence citing a trial that isn't in the round
+        modes(FAILED[:1], FAILED[1:2], FAILED[2:], FAILED[:1]),  # more than ROUND_MODES
+        json.dumps({"modes": [{**json.loads(modes(FAILED))["modes"][0], "severity": "high"}]}),  # a key no mode has
+        json.dumps({"modes": []}),
+        json.dumps(
+            {"modes": [{"hypothesis": "x", "evidence": "y", "confidence": 2, "lesson": "z", "explains": FAILED}]}
+        ),
+        "not json",
+    ],
+)
+def test_an_unusable_round_diagnosis_falls_back_after_one_call(answer: str, tmp_path: Path) -> None:
+    a, _ = argon(tmp_path, answer, modes(FAILED))  # a usable spare: a retry would take it
+    assert diagnose_round(ROUND, a) is None  # fell back, not "nothing failed"
+    assert len(events(tmp_path, "argon_call")) == 1 and events(tmp_path, "error")  # logged, never retried
+
+
+def test_an_unreachable_or_spent_argon_falls_back(tmp_path: Path) -> None:
+    a, fake = argon(tmp_path, ArgonUnavailable("ServerError: 503"), modes(FAILED))
+    assert diagnose_round(ROUND, a) is None and len(fake.prompts) == 1  # never retried
+    spent, _ = argon(tmp_path / "spent", budget=0)
+    assert diagnose_round(ROUND, spent) is None and not (tmp_path / "spent" / "events.jsonl").read_text().count(
+        "argon_call"
+    )
+
+
+def test_a_round_with_no_failure_asks_nothing(tmp_path: Path) -> None:
+    a, fake = argon(tmp_path, modes(FAILED))
+    assert diagnose_round([ROUND[3]], a) == [] and fake.prompts == []
+
+
+@pytest.mark.parametrize("error", [MissingKey("GEMINI_API_KEY"), RuntimeError("ClientError: 400 bad request")])
+def test_a_missing_key_or_a_fatal_error_on_the_round_call_stops_the_run(error: Exception, tmp_path: Path) -> None:
+    a, _ = argon(tmp_path, error, modes(FAILED))
+    with pytest.raises(type(error)):
+        diagnose_round(ROUND, a)
