@@ -8,7 +8,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from isaacs_mom.contracts import Controller, Event, ExecResult, Observation, SkillCall
-from isaacs_mom.orchestrator.dashboard.server import create_app, tail_events
+from isaacs_mom.orchestrator.dashboard.server import REPLAYED, create_app, tail_events
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import run_loop
@@ -50,9 +50,9 @@ def test_frames_reject_traversal_and_non_frames(tmp_path: Path) -> None:
     assert client.get("/frames//etc/passwd").status_code == 404
 
 
-def collect(run_dir: Path, appended: list[str] | None = None) -> list[dict]:
-    """Read the stream, appending `appended` after the existing lines have been read, then stop."""
-    seen: list[dict] = []
+def stream_of(run_dir: Path, appended: list[str] | None = None) -> list[str]:
+    """Every SSE message, appending `appended` one line at a time once the existing lines have been read, then stop."""
+    seen: list[str] = []
     pending = list(appended or [])
 
     async def stopped() -> bool:
@@ -64,11 +64,16 @@ def collect(run_dir: Path, appended: list[str] | None = None) -> list[dict]:
 
     async def read() -> None:
         async for message in tail_events(run_dir, stopped, poll=0):
-            assert message.startswith("data: ") and message.endswith("\n\n")
-            seen.append(json.loads(message.removeprefix("data: ")))
+            assert message.endswith("\n\n")
+            seen.append(message)
 
     asyncio.run(read())
     return seen
+
+
+def collect(run_dir: Path, appended: list[str] | None = None) -> list[dict]:
+    """The events in the stream, without its end-of-replay marker."""
+    return [json.loads(m.removeprefix("data: ")) for m in stream_of(run_dir, appended) if m != REPLAYED]
 
 
 def test_stream_replays_from_the_start_then_follows_appends(tmp_path: Path) -> None:
@@ -79,6 +84,17 @@ def test_stream_replays_from_the_start_then_follows_appends(tmp_path: Path) -> N
     appended = [Event(t=3.0, run_id="r1", type="validation", data={}).model_dump_json() + "\n"]
     types = [e["type"] for e in collect(run_dir, appended)]
     assert types == ["episode_started", "decision", "validation"]
+
+
+def test_stream_marks_where_its_replay_of_the_events_already_written_ends(tmp_path: Path) -> None:
+    run_dir = make_run(tmp_path)
+    log = EventLog(run_dir, "r1")
+    log.emit("episode_started", seed=1)
+    log.emit("decision", controller="student")
+    appended = [Event(t=3.0, run_id="r1", type="validation", data={}).model_dump_json() + "\n"]
+    messages = stream_of(run_dir, appended)
+    assert messages.count(REPLAYED) == 1 and messages.index(REPLAYED) == 2  # after both written, before the new one
+    assert stream_of(tmp_path / "not-started")[0] == REPLAYED  # nothing written yet: nothing to replay
 
 
 def test_stream_waits_for_a_partial_line_to_complete(tmp_path: Path) -> None:

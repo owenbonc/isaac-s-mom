@@ -949,8 +949,8 @@ def test_the_held_out_claim_names_its_rounds_in_words_with_the_checkpoints_as_a_
 
 def test_a_held_out_evaluation_with_no_episodes_says_so_in_words() -> None:
     claim, _ = run(CLAIM, stream(evaluation("ckpt-r0", 0, 0, 20), evaluation("ckpt-r1", 1, 0, 0)))
-    assert (claim["figure"], claim["sample"]) == ("0/20 → none run", "n=20 and no held-out episode ran")
-    assert claim["spoken"] == "0 of 20 before fine-tuning, then none run after round 1"
+    assert (claim["figure"], claim["sample"]) == ("0/20 → none", "n=20 and no held-out episode ran")
+    assert claim["spoken"] == "0 of 20 before fine-tuning, then no held-out episode ran after round 1"
 
 
 def test_a_running_evaluation_counts_its_judged_episodes_out_of_the_previous_evaluations_n() -> None:
@@ -995,8 +995,9 @@ def test_the_simulator_is_named_in_words_with_its_full_version_and_task_kept_for
         "version": "fake-3",
         "task": None,
     }
-    assert run(script, stream(started("a", None)))["name"] == "simulator not stated"
-    assert run(script, stream(started("a", "isaac-1.2")))["name"] == "isaac-1.2"
+    assert run(script, stream(started("a", None))) == {"name": None, "version": None, "task": None}
+    other = run(script, stream(started("a", "isaac-sim-4.5.0-preview.2 task=across_room")))
+    assert (other["name"], other["task"]) == ("isaac-sim", "across_room")
     assert run(script, []) is None
 
 

@@ -16,6 +16,8 @@ POLL_SECONDS = 0.25
 FRAME_SUFFIXES = {".jpg", ".jpeg"}
 # An executed step's frame, and the view right before a box or bin move (SPEC §3.5).
 FRAME_KEYS = {"frame", "before_frame"}
+# Sent once a connection has replayed every event already written, so the page shows only where the replay settles.
+REPLAYED = "event: replayed\ndata: {}\n\n"
 
 
 class FreshStatic(StaticFiles):
@@ -51,8 +53,11 @@ def to_sse(line: str, run_dir: Path) -> str | None:
 async def tail_events(
     run_dir: Path, stopped: Callable[[], Awaitable[bool]], poll: float = POLL_SECONDS
 ) -> AsyncIterator[str]:
-    """Every complete event line from the start of events.jsonl, then new appends until `stopped()`."""
+    """Every complete event line from the start of events.jsonl, then `REPLAYED`, then new appends until `stopped()`."""
     path = run_dir / "events.jsonl"
+    replayed = not path.exists()
+    if replayed:
+        yield REPLAYED  # nothing written yet, so nothing to replay
     while not path.exists():
         if await stopped():
             return
@@ -64,10 +69,14 @@ async def tail_events(
             if line.endswith("\n"):
                 if message := to_sse(line, run_dir):
                     yield message
+                continue
+            f.seek(position)  # a partial line is still being written
+            if not replayed:
+                replayed = True
+                yield REPLAYED
             elif await stopped():
                 return
             else:
-                f.seek(position)  # a partial line is still being written
                 await asyncio.sleep(poll)
 
 

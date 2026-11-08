@@ -24,9 +24,10 @@ h2{font-size:var(--step-1)}
 .ph-text{color:var(--ph)}
 
 header.bar{flex:none;background:var(--panel);border-bottom:1px solid var(--rule)}
-.bar .top{display:flex;align-items:center;gap:.4rem .75rem;padding:.45rem 1.1rem .3rem;flex-wrap:wrap}
+/* The bars share the main grid's .8rem gutter, which leaves the top row room for every status at 1280 px. */
+.bar .top{display:flex;align-items:center;gap:.4rem .6rem;padding:.45rem .8rem .3rem;flex-wrap:wrap}
 header.bar h1{font-size:var(--step-2)}
-.bar .where{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem 1rem;padding:0 1.1rem .4rem}
+.bar .where{display:flex;flex-wrap:wrap;align-items:center;gap:.2rem 1rem;padding:0 .8rem .4rem}
 #episode-line{margin:0;font-weight:600;white-space:nowrap}
 #episode-line .lost{color:var(--bad)}
 /* The run at a glance: one mark per episode, tall for the teacher, short for the student, hollow when rejected. */
@@ -38,7 +39,7 @@ header.bar h1{font-size:var(--step-2)}
 .rail li.teacher.rejected{box-shadow:inset 0 0 0 2px var(--teacher)}
 .rail li.open{opacity:.4}
 .rail li.here{outline:2px solid var(--ink);outline-offset:2px}
-.control{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem;padding:.5rem 1.1rem;border-bottom:1px solid var(--rule);background:var(--panel);min-height:2.6rem}
+.control{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.4rem .9rem;padding:.5rem .8rem;border-bottom:1px solid var(--rule);background:var(--panel);min-height:2.6rem}
 .control .verdict{margin-left:auto}
 .legend{position:relative;flex:none}
 .legend summary{list-style:none;cursor:pointer;font-weight:600;padding:.1rem .4rem;border-radius:4px;text-decoration:underline dotted;text-underline-offset:.2em}
@@ -74,7 +75,7 @@ main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minm
 .side .panel{flex:none}
 
 /* The row wraps by whole items wherever it runs out of width, so no value or label is ever clipped. */
-footer.models{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem 1rem;padding:.45rem 1.1rem;background:var(--panel);border-top:1px solid var(--rule)}
+footer.models{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.3rem 1rem;padding:.45rem .8rem;background:var(--panel);border-top:1px solid var(--rule)}
 footer.models .item{white-space:nowrap}
 footer.models .chip:last-child{margin-left:auto}
 footer.models .v{color:var(--muted)}
@@ -150,6 +151,9 @@ footer.models .v{color:var(--muted)}
 .foot>.chip:last-child{margin-left:auto}
 .caption{flex:1;min-width:0;margin:0;padding:.35rem .6rem;border-radius:3px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .caption.moved{background:var(--ink);color:var(--panel);font-weight:600;white-space:normal;text-wrap:pretty}
+.caption.wrap{white-space:normal;text-wrap:pretty}
+/* A clamped caption's padding would show the top of the line after its last; a transparent border keeps that gap blank. */
+.caption.clamped{padding-block:0;border-block:.35rem solid transparent}
 /* Two columns: the stage takes the left half at full height; the side column folds into a band over the decisions. */
 @media (min-width:1001px){
   main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:fit-content(60%) minmax(0,1fr);grid-template-areas:"cam side" "cam log"}
@@ -165,6 +169,8 @@ footer.models .v{color:var(--muted)}
   /* P is the take's peak: the pair fills the whole width, and the caption carries the log's marked row. */
   main:has(#stage .cell + .cell){grid-template-areas:"cam cam" "cam cam"}
   main:has(#stage .cell + .cell) :is(.side,.decisions){display:none}
+  /* Two 4:3 frames side by side, so the caption sits right under the pair. */
+  .frame:has(.cell + .cell){aspect-ratio:8/3}
 }
 /* Narrower than the projector's 1280 px the band has no room for two panels side by side, so they stack. */
 @media (min-width:1001px) and (max-width:1279px){.side{grid-template-columns:minmax(0,1fr)}}

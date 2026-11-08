@@ -171,15 +171,16 @@
 
   const isReal = (sim) => sim !== null && !sim.version.startsWith("fake");
 
-  // The run's simulator in words for the header, and its full version and task (a MuJoCo version's `task=` part) for
-  // the legend's run line. A run with any FakeSim or unnamed episode is named by that. Null before any episode.
+  // The run's simulator in words for the header, with its full version and task (`task=…`) for the legend; a run with
+  // any FakeSim or unnamed episode is named by that, an unnamed one not at all. Null before any episode.
   function simulator(s) {
     const sims = s.episodes.map((e) => e.sim);
     if (!sims.length) return null;
-    if (sims.includes(null)) return { name: "simulator not stated", version: null, task: null };
+    if (sims.includes(null)) return { name: null, version: null, task: null };
     const sim = sims.find((x) => !isReal(x)) || sims[sims.length - 1];
     const task = /(?:^|\s)task=(\S+)/.exec(sim.version);
-    const name = !isReal(sim) ? "FakeSim" : sim.version.startsWith("mujoco") ? "MuJoCo" : sim.version;
+    // Any other simulator is named by its version's leading word, so a long version never wraps the header.
+    const name = !isReal(sim) ? "FakeSim" : sim.version.startsWith("mujoco") ? "MuJoCo" : sim.version.split(/\s/)[0].replace(/-\d.*$/, "");
     return { name, version: sim.version, task: task ? task[1] : null };
   }
 
@@ -293,11 +294,11 @@
     const last = s.rounds[s.rounds.length - 1];
     const pair = first === last ? [first] : [first, last];
     const name = (r) => (r.round === 0 ? "before fine-tuning" : `after round ${r.round}`);
-    const score = (r, of) => (r.n ? `${r.successes}${of}${r.n}` : "none run");
+    const score = (r, of) => (r.n ? `${r.successes}${of}${r.n}` : "none");
     const same = pair.every((r) => r.n === first.n) && first.n;
     return {
       figure: pair.map((r) => score(r, "/")).join(" → "),
-      spoken: pair.map((r) => `${score(r, " of ")} ${name(r)}`).join(", then "),
+      spoken: pair.map((r) => (r.n ? `${score(r, " of ")} ${name(r)}` : `no held-out episode ran ${name(r)}`)).join(", then "),
       sample: same ? `n=${first.n}${pair.length > 1 ? " each" : ""}` : pair.map((r) => (r.n ? `n=${r.n}` : "no held-out episode ran")).join(" and "),
       names: pair.map(name).join(" → "),
       ids: pair.map((r) => r.checkpoint).join(" → "),

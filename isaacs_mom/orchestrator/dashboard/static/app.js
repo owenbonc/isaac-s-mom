@@ -81,14 +81,12 @@ function renderHeader() {
   const s = MomState.shown(view);
   const kind = MomState.provenance(view, now());
   const sim = MomState.simulator(s);
-  // The simulator in words keeps the header on one line; its version and task are in the legend's run line.
-  const named = (word) => `${word}${sim ? ` · ${esc(sim.name)}` : ""}`;
-  // A lost stream says so in its own style; nothing it shows is live until the connection returns.
-  const status = view.lost ? chip("lost", named("Disconnected")) : s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, named(label(kind)));
+  // One line at 1280 px: the simulator in words (its version and task are in the legend), or a lost stream alone.
+  const status = view.lost ? chip("lost", "Disconnected") : s.eventCount === 0 ? chip("placeholder", "Waiting") : chip(kind, `${label(kind)}${sim && sim.name ? ` · ${esc(sim.name)}` : ""}`);
   $("status").innerHTML = status;
   const robot = s.episodes.length && s.episodes[s.episodes.length - 1].sim;
   const task = sim && sim.task ? `, the ${sim.task === "fixed_feet" ? "fixed-feet" : "walking"} task (<span class="mono">${esc(sim.task)}</span>)` : "";
-  const on = sim && sim.version ? ` on <span class="mono">${esc(sim.version)}</span>${task}` : "";
+  const on = !sim ? "" : sim.version ? ` on <span class="mono">${esc(sim.version)}</span>${task}` : ", which names no simulator";
   $("run-meta").innerHTML = s.eventCount
     ? `Run <b class="mono">${esc(s.runId)}</b>${on}${robot ? `, robot <span class="mono">${esc(robot.robot)}</span>` : ""}: ${s.episodes.length} episode${s.episodes.length === 1 ? "" : "s"}, ${s.eventCount} events.`
     : "";
@@ -172,14 +170,16 @@ function fineTuneStage(seconds) {
   const shown = l.frames.slice(-SHEET);
   // A lost stream can't tell whether the fine-tune still runs, so the clock says only when it started.
   const clock = `<span class="tag ink">${view.lost ? "Connection lost · " : ""}${elapsed(seconds)} since the fine-tune started</span>`;
-  const counts = `${l.accepted} accepted · ${l.rejected} rejected (n=${l.n})`;
   const sheet = shown.length
     ? `<div class="frame"><div class="cell"><div class="shot sheet"><ol style="--n:${Math.ceil(Math.sqrt(shown.length))}" aria-label="The last frame of each accepted teacher demonstration">${shown
         .map((f) => `<li${f.url ? "" : " data-missing"}>${f.url ? `<img src="${esc(f.url)}" alt="Episode ${f.number}'s last frame">` : ""}</li>`)
         .join("")}</ol><div class="over">${clock}</div></div></div></div>`
-    : slate("No accepted demonstration to learn from", `${clock} Teacher demonstrations: ${counts}.`);
+    : slate("No accepted demonstration to learn from", `${clock} Teacher demonstrations: ${l.accepted} accepted · ${l.rejected} rejected (n=${l.n}).`);
   const latest = l.frames.length > shown.length ? `, the latest ${shown.length} of ${l.frames.length} shown` : "";
-  const caption = shown.length ? `<p class="caption" title="The last frame of each accepted teacher demonstration${latest}.">Learning from teacher demonstrations: ${counts}</p>` : "";
+  // The counts lead and the line wraps, so no width ever cuts a number off.
+  const caption = shown.length
+    ? `<p class="caption wrap" title="The last frame of each accepted teacher demonstration${latest}.">Learning from ${l.accepted} accepted teacher demonstration${l.accepted === 1 ? "" : "s"} (${l.rejected} rejected, n=${l.n})</p>`
+    : "";
   return sheet + foot(caption, panelChip());
 }
 
@@ -243,8 +243,7 @@ const foot = (caption, provenance) => `<div class="foot">${caption}${provenance}
 // The decision that chose a skill from frame `f`, or null.
 const skillRow = (ep, f) => (f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill)) || null;
 
-// One frame on the stage with its label, the skill `row` chose from it and any mark after them; a missing frame keeps
-// its place, hatched.
+// One frame on the stage: its labels, the skill `row` chose from it, then `mark`; a missing frame stays, hatched.
 function cell(f, label, row, moved, mark = "") {
   const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : ` at step ${esc(f.step)}`}">` : "";
   // The skill joins the labels in the frame's top band, which shows floor; the hands, box and bin are in the bottom.
@@ -446,18 +445,7 @@ function fadeSide() {
   side.toggleAttribute("data-more", side.scrollHeight - side.scrollTop - side.clientHeight > 1);
 }
 
-// The server replays the whole run on every connection, so the page holds still until that backlog has streamed in
-// and shows and announces only where it settles: once no event has arrived for this long.
-const SETTLE_MS = 200;
-let settleTimer = null;
-function holdUntilSettled() {
-  clearTimeout(settleTimer);
-  settleTimer = setTimeout(() => {
-    MomState.settle(view);
-    schedule();
-  }, SETTLE_MS);
-}
-
+// While a connection replays the events already written the page holds still (MomState.settle).
 function schedule() {
   if (renderQueued || view.settling) return;
   renderQueued = true;
@@ -511,21 +499,23 @@ source.onopen = () => {
   MomState.reconnect(view);
   renderedRows = 0;
   renderedEpisode = null;
-  holdUntilSettled();
 };
 source.onerror = () => {
-  clearTimeout(settleTimer);
   MomState.disconnect(view);
   schedule();
 };
+// The server marks the end of its replay, so the page shows and announces only where the replay settles.
+source.addEventListener("replayed", () => {
+  MomState.settle(view);
+  schedule();
+});
 source.onmessage = (message) => {
   try {
     MomState.receive(view, JSON.parse(message.data), now());
   } catch (error) {
     console.error("bad event", error);
   }
-  if (view.settling) holdUntilSettled();
-  else schedule();
+  schedule();
 };
 setInterval(schedule, 1000); // live and recorded change with time, and the fine-tune clock ticks
 schedule();
