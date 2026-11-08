@@ -630,15 +630,18 @@
   // The run a page opens: the one its URL names, else the first listed (live first, then newest), else none.
   const runToOpen = (runs, wanted) => wanted || (runs[0] ? runs[0].run_id : null);
 
-  // The Teach box (SPEC §3.5): at most 200 characters once trimmed, as the server takes it.
+  // The Teach box (SPEC §3.5): at most 200 characters once trimmed, counted in code points as the server counts them,
+  // so an emoji is one.
   const TEACH_MAX = 200;
+  const characters = (typed) => [...typed.trim()].length;
+  const tooLong = (typed) => characters(typed) > TEACH_MAX;
   function instructionProblem(typed) {
-    const length = typed.trim().length;
+    const length = characters(typed);
     return !length ? "Type what the robot should learn." : length > TEACH_MAX ? `At most ${TEACH_MAX} characters.` : null;
   }
   // The count shows as the text nears the limit.
   const teachCount = (typed) => {
-    const length = typed.trim().length;
+    const length = characters(typed);
     return length >= TEACH_MAX - 40 ? `${length}/${TEACH_MAX}` : null;
   };
   // The server's answer to a Teach: started (the page opens the new run), not started with the generator's reasons,
@@ -659,7 +662,7 @@
     return { state: "failed", message };
   }
 
-  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
+  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, tooLong, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

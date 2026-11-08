@@ -170,6 +170,7 @@ button.back::after{left:0;--tx:0%}
 .teach input::placeholder{color:var(--muted)}
 .teach input:read-only{color:var(--muted)}
 .teach .count{position:absolute;right:.6rem;top:50%;translate:0 -50%;font-size:var(--t-label);color:var(--muted);pointer-events:none}
+.teach input[aria-invalid="true"]~.count{color:var(--bad)}
 /* Teach is its enter icon alone, a 32 px circle in the box; it turns to a spinner while the instruction is judged. */
 .teach button{position:relative;flex:none;width:2.3rem;height:2.3rem;padding:0;border:0;border-radius:50%;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;transition:transform .12s var(--ease-out)}
 .teach .wait,.teach[aria-busy="true"] .go{display:none}
@@ -178,7 +179,8 @@ button.back::after{left:0;--tx:0%}
 @keyframes spin{to{rotate:1turn}}
 .teach button:active:not(:disabled){transform:scale(.96)}
 .teach:has(input:placeholder-shown) button,.teach button:disabled{background:var(--raised);color:var(--ink)}
-.teach button:disabled{cursor:progress}
+.teach button:disabled{cursor:default}
+.teach[aria-busy="true"] button{cursor:progress}
 .teach .i{width:1.1rem;height:1.1rem}
 /* What came back from a Teach, dropped from the box over the panels' top, never over the frame. */
 .answer{right:0;width:min(26rem,calc(100vw - 1.5rem));transform-origin:top right}

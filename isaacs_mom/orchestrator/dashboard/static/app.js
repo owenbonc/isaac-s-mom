@@ -760,10 +760,13 @@ const TEACH = $("teach");
 const FIELD = $("instruction");
 function renderTeach() {
   const checking = teaching.state === "checking";
+  // Past the limit the count says so and Teach stays off until the text is shortened, so nothing is cut unseen.
+  const over = MomState.tooLong(FIELD.value);
   $("teach-count").textContent = MomState.teachCount(FIELD.value) || "";
   FIELD.readOnly = checking;
-  $("teach-go").disabled = checking;
-  $("teach-go").dataset.tip = checking ? "Checking the instruction…" : "Teach · Enter";
+  FIELD.setAttribute("aria-invalid", String(over));
+  $("teach-go").disabled = checking || over;
+  $("teach-go").dataset.tip = checking ? "Checking the instruction…" : over ? "At most 200 characters" : "Teach · Enter";
   TEACH.setAttribute("aria-busy", String(checking));
   const said =
     teaching.state === "refused"
@@ -775,7 +778,9 @@ function renderTeach() {
           : "";
   $("teach-said").innerHTML = said;
   $("teach-said").hidden = !said;
-  $("teach-status").textContent = checking ? "Checking the instruction." : $("teach-said").innerText;
+  const status = checking ? "Checking the instruction." : over ? "At most 200 characters." : $("teach-said").innerText;
+  // Said once as the text goes past the limit, not again on every key typed past it.
+  if ($("teach-status").textContent !== status) $("teach-status").textContent = status;
 }
 
 TEACH.addEventListener("submit", async (e) => {

@@ -1625,12 +1625,19 @@ def test_the_page_opens_the_run_its_url_names_or_else_the_first_listed() -> None
 
 def test_an_instruction_is_1_to_200_characters_once_trimmed_and_the_count_shows_near_the_limit() -> None:
     texts = ["   ", "x", "y" * 200, "z" * 201, "  " + "w" * 200 + "\n", "a" * 159, "a" * 160]
-    script = "return events.map((t) => [S.instructionProblem(t), S.teachCount(t)]);"
+    script = "return events.map((t) => [S.instructionProblem(t), S.teachCount(t), S.tooLong(t)]);"
     out = run(script, texts)
     empty, fits = "Type what the robot should learn.", None
     too_long = "At most 200 characters."
-    assert [problem for problem, _ in out] == [empty, fits, fits, too_long, fits, fits, fits]
-    assert [shown for _, shown in out] == [None, None, "200/200", "201/200", "200/200", None, "160/200"]
+    assert [problem for problem, _, _ in out] == [empty, fits, fits, too_long, fits, fits, fits]
+    assert [shown for _, shown, _ in out] == [None, None, "200/200", "201/200", "200/200", None, "160/200"]
+    assert [over for _, _, over in out] == [False, False, False, True, False, False, False]
+
+
+@pytest.mark.parametrize(("n", "problem"), [(199, None), (200, None), (201, "At most 200 characters.")])
+def test_an_emoji_counts_as_one_character_as_the_server_counts_it(n: int, problem: str | None) -> None:
+    script = "return events.map((t) => [S.instructionProblem(t), S.teachCount(t), S.tooLong(t)]);"
+    assert run(script, ["\N{ROBOT FACE}" * n]) == [[problem, f"{n}/200", n > 200]]
 
 
 def test_a_teach_answer_is_started_not_started_with_its_reasons_or_a_failure_in_words() -> None:
@@ -1992,3 +1999,16 @@ def test_results_list_is_announced_with_the_seeds_it_shows_and_the_mark_it_is_fi
         "Results: 1 of 3 held-out seeds, marked improved.",
         "Results: 3 held-out seeds.",
     ]
+
+
+@pytest.mark.parametrize("n", [199, 200, 201])
+def test_past_200_characters_the_count_says_so_and_teach_stays_off_until_the_text_is_shortened(n: int) -> None:
+    script = f"""
+    const field = doc.getElementById("instruction");
+    field.value = "\N{ROBOT FACE}".repeat({n});
+    field.listeners.input[0]();
+    const [count, go, status] = ["teach-count", "teach-go", "teach-status"].map((id) => doc.getElementById(id));
+    return [count.textContent, go.disabled, status.textContent];
+    """
+    status = "At most 200 characters." if n > 200 else ""
+    assert app(REPLAY + script, stream(started("a"))) == [f"{n}/200", n > 200, status]
