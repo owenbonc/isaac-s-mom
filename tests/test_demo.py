@@ -1,4 +1,5 @@
 import io
+from collections.abc import Callable
 from pathlib import Path
 
 import imageio.v3 as iio
@@ -10,7 +11,7 @@ from isaacs_mom.orchestrator.demo import _captions, run_demo
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.orchestrator.loop import StudentFactory
 from isaacs_mom.orchestrator.video import record
-from isaacs_mom.seeds import SealedSeedError, heldout_seeds
+from isaacs_mom.seeds import DEV_SEED_START, SealedSeedError, heldout_seeds
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import StubStudent
 from isaacs_mom.teacher.argon import Argon, stub_generate
@@ -26,6 +27,14 @@ def frame_count(path: Path) -> int:
     return sum(1 for _ in iio.imiter(path))
 
 
+def stub_argon(events: EventLog) -> Argon:
+    return Argon(events, generate=stub_generate)  # no network in tests
+
+
+def unbuilt(events: EventLog) -> Argon:
+    pytest.fail("a refused take built its teacher")
+
+
 def take(
     run_dir: Path,
     *,
@@ -33,6 +42,7 @@ def take(
     perturb_at: int = 3,
     sim: FakeSim | None = None,
     make_student: StudentFactory = StubStudent,
+    make_argon: Callable[[EventLog], Argon] = stub_argon,
 ) -> EpisodeManifest:
     """The judged take on FakeSim with the stand-in student and teacher, its MP4 beside its run directory."""
     return run_demo(
@@ -43,7 +53,7 @@ def take(
         out=run_dir.with_suffix(".mp4"),
         run_dir=run_dir,
         run_id=run_dir.name,
-        argon=Argon(EventLog(run_dir, run_dir.name), generate=stub_generate),  # no network in tests
+        make_argon=make_argon,
         make_student=make_student,
     )
 
@@ -98,7 +108,26 @@ def test_demo_records_every_step_and_the_perturbation(tmp_path: Path) -> None:
 def test_demo_refuses_a_heldout_seed(tmp_path: Path) -> None:
     run_dir = tmp_path / "runs" / "demo"
     with pytest.raises(SealedSeedError):
-        take(run_dir, seed=next(iter(heldout_seeds())))
+        take(run_dir, seed=next(iter(heldout_seeds())), make_argon=unbuilt)
+    assert not run_dir.exists() and not run_dir.with_suffix(".mp4").exists()
+
+
+def test_demo_refuses_a_seed_below_the_unseen_range_before_writing_anything(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "demo"
+    for seed in (DEV_SEED_START, 899_999):
+        with pytest.raises(ValueError, match="900000"):
+            take(run_dir, seed=seed, make_argon=unbuilt)
+    assert not run_dir.exists() and not run_dir.with_suffix(".mp4").exists()
+    assert take(run_dir, seed=900_000).seed == 900_000
+
+
+def test_demo_refuses_a_run_directory_that_already_exists(tmp_path: Path) -> None:
+    run_dir = tmp_path / "runs" / "loop"
+    EventLog(run_dir, "loop").emit("episode_started", seed=DEV_SEED_START)  # a loop run's, whose demos train
+    written = (run_dir / "events.jsonl").read_text()
+    with pytest.raises(FileExistsError):
+        take(run_dir, make_argon=unbuilt)
+    assert list(run_dir.iterdir()) == [run_dir / "events.jsonl"] and (run_dir / "events.jsonl").read_text() == written
     assert not run_dir.with_suffix(".mp4").exists()
 
 

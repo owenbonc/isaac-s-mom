@@ -79,10 +79,14 @@ def main() -> None:
     make_student, train_student = (StubStudent, stub_finetune) if args.student == "stub" else (StudentPolicy, finetune)
     teacher = args.teacher or ("stub" if args.sim == "fake" else "argon")
     run_dir = Path("runs") / args.run_id
-    # One budget for the whole run (SPEC §2 rule 5); checked before the sim, so a bad key stops the run in seconds.
-    argon = Argon(EventLog(run_dir, args.run_id), generate=stub_generate if teacher == "stub" else None)
-    if teacher == "argon":
-        argon.check()  # the stub has no key or model to check, so it spends nothing
+
+    def checked_argon(events: EventLog) -> Argon:
+        # One budget for the whole run (SPEC §2 rule 5); checked before any episode, so a bad key stops it in seconds.
+        argon = Argon(events, generate=stub_generate if teacher == "stub" else None)
+        if teacher == "argon":
+            argon.check()  # the stub has no key or model to check, so it spends nothing
+        return argon
+
     if args.command == "demo":
         from isaacs_mom.orchestrator.demo import run_demo
 
@@ -94,12 +98,13 @@ def main() -> None:
             out=args.out,
             run_dir=run_dir,
             run_id=args.run_id,
-            argon=argon,
+            make_argon=checked_argon,  # after the take's refusals, so a refused take calls nothing
             make_student=make_student,
         )
         verdict = manifest.validation.reason if manifest.validation else "no verdict"
         print(f"{len(manifest.steps)} steps, validator: {verdict}\nvideo {args.out}, run saved to {run_dir}")
         return
+    argon = checked_argon(EventLog(run_dir, args.run_id))
     results = run_loop(
         make_sim(args.sim, args.task),
         run_dir,

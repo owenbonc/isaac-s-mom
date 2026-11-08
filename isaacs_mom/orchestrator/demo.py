@@ -4,6 +4,7 @@ Demo seeds come from a fresh range (>= 900000), so no training or evaluation epi
 The teacher may take over, so the seed still goes through `assert_not_heldout` (SPEC §2 rule 2).
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 from isaacs_mom.contracts import EpisodeManifest, ExecResult, GroundTruth, Observation, Perturbation, SkillCall
@@ -16,6 +17,8 @@ from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import StudentPolicy
 from isaacs_mom.teacher import ArgonPolicy
 from isaacs_mom.teacher.argon import Argon
+
+DEMO_SEED_START = 900_000
 
 
 class _ThirdPersonCapture:
@@ -83,10 +86,14 @@ def run_demo(
     run_dir: Path,
     run_id: str,
     fps: int = 2,
-    argon: Argon,
+    make_argon: Callable[[EventLog], Argon],
     make_student: StudentFactory = StudentPolicy,
 ) -> EpisodeManifest:
+    """Refuses a seen scene or an existing run directory before it writes anything or builds its teacher."""
     assert_not_heldout(seed)
+    if seed < DEMO_SEED_START:
+        raise ValueError(f"seed {seed} is below {DEMO_SEED_START}: the judged take needs a scene no episode has seen")
+    run_dir.mkdir(parents=True)  # a run directory of its own, so the take never enters a loop run's training set
     capture = _ThirdPersonCapture(sim)
     events = EventLog(run_dir, run_id)
     manifest = run_episode(
@@ -98,7 +105,7 @@ def run_demo(
         split="dev",
         round_=0,
         instruction=INSTRUCTION,
-        takeover=ArgonPolicy(None, argon),
+        takeover=ArgonPolicy(None, make_argon(events)),
         perturb_at=perturb_at,
         demo=True,
     )
