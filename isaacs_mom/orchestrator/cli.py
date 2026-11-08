@@ -29,7 +29,7 @@ from isaacs_mom.student import (
 )
 from isaacs_mom.tasks.rules import judge
 from isaacs_mom.tasks.spec import TaskSpec
-from isaacs_mom.teacher.argon import Argon, stub_generate
+from isaacs_mom.teacher.argon import Argon, hide_key, stub_generate
 from isaacs_mom.validator.recorder import write_atomically
 from isaacs_mom.validator.rules import validate
 
@@ -45,9 +45,12 @@ def run_id(text: str) -> str:
 
 def instruction(text: str) -> str:
     try:
-        return instruction_text(text)
+        text = instruction_text(text)
     except ValueError as error:
         raise argparse.ArgumentTypeError(str(error)) from None
+    if hide_key(text) != text:  # a run writes its instruction to events and manifests, and sends it to Argon
+        raise argparse.ArgumentTypeError("the instruction holds GEMINI_API_KEY, so it is refused: never stored or sent")
+    return text
 
 
 def share(text: str) -> float:
@@ -88,6 +91,7 @@ def task_spec(parser: argparse.ArgumentParser, args: argparse.Namespace) -> Task
         parser.error("give --task or --spec, not both")
     try:
         spec = TaskSpec.model_validate_json(args.spec.read_text())
+        spec.task_config()  # a scene the robot can't play is refused here too, not as a traceback
     except (OSError, ValueError) as error:
         parser.error(f"--spec: {args.spec} is not a task spec: {error}")
     if args.instruction not in (INSTRUCTION, spec.instruction):
@@ -223,7 +227,7 @@ def main() -> None:
         make_student=make_student,
         train_student=train_student,
         instruction=words,
-        move_bin_share=args.move_bin_share,
+        move_bin_share=args.move_bin_share if spec is None or "move_bin" in spec.perturbation_kinds() else 0.0,
         from_run=args.from_run,
         verdict=partial(judge, spec) if spec is not None else validate,
     )

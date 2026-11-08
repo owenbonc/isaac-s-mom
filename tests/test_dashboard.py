@@ -1,11 +1,14 @@
 import asyncio
 import json
 import logging
+import os
 import re
 import sys
 import threading
 import time
+from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import httpx
 import pytest
@@ -23,16 +26,17 @@ from isaacs_mom.contracts import (
     SkillCall,
     TrainingSetSummary,
 )
+from isaacs_mom.orchestrator import runs as runs_module
 from isaacs_mom.orchestrator.dashboard.server import REPLAYED, create_app, tail_events
 from isaacs_mom.orchestrator.episode import heartbeat, run_episode
 from isaacs_mom.orchestrator.events import EventLog, read_events
 from isaacs_mom.orchestrator.loop import run_loop
-from isaacs_mom.orchestrator.runs import NO_KEY, launch_run, list_runs
+from isaacs_mom.orchestrator.runs import HOLDS_KEY, NO_KEY, launch_run, list_runs
 from isaacs_mom.sim.fake import FakeSim
 from isaacs_mom.student import BASE_CHECKPOINT, StubStudent, stub_finetune
 from isaacs_mom.tasks.example import OFFLINE_PROPOSAL
 from isaacs_mom.teacher import argon as argon_module
-from isaacs_mom.teacher.argon import Argon, Part, Purpose, stub_generate
+from isaacs_mom.teacher.argon import Argon, Generate, Part, Purpose, stub_generate
 
 JPEG = b"\xff\xd8\xff\xd9"
 
@@ -776,6 +780,92 @@ def test_a_run_that_cannot_be_launched_is_not_started_with_why(tmp_path: Path) -
     assert client.get("/runs").json()[0]["status"] == "not_started"
 
 
+def finished_within[T](seconds: float, call: Callable[[], T]) -> T | Exception:
+    """What `call` returns or raises, failing the test if it runs past `seconds`, so a loop can't hang the suite."""
+    done: list[T | Exception] = []
+
+    def run() -> None:
+        try:
+            done.append(call())
+        except Exception as error:  # returned, so the test checks which
+            done.append(error)
+
+    worker = threading.Thread(target=run, daemon=True)
+    worker.start()
+    worker.join(seconds)
+    assert done, f"still running after {seconds} s"
+    return done[0]
+
+
+def no_launch(args: list[str], log: Path) -> None:
+    pytest.fail("mom run started")
+
+
+def teach_in(runs: Path, generate: Generate | None = None) -> Callable[[], tuple[str, list[str]]]:
+    return lambda: runs_module.teach(runs, "juggle", task="fixed_feet", generate=generate, launch=no_launch)
+
+
+@pytest.mark.parametrize("below", ["", "runs"])
+def test_a_runs_folder_behind_a_dangling_symlink_fails_the_teach_at_once_naming_the_link(
+    tmp_path: Path, below: str
+) -> None:
+    link = tmp_path / "link"
+    link.symlink_to(tmp_path / "gone")
+    error = finished_within(10, teach_in(link / below))
+    assert isinstance(error, FileExistsError) and error.filename == str(link)
+    assert not (tmp_path / "gone").exists()
+
+
+def drawing(monkeypatch: pytest.MonkeyPatch, *tokens: str) -> list[str]:
+    """Run ids drawn from here on use `tokens` in turn, then "aaaa"; the list of what was drawn."""
+    queue, drawn = list(tokens), list[str]()
+
+    def token_hex(_: int) -> str:
+        drawn.append(queue.pop(0) if queue else "aaaa")
+        return drawn[-1]
+
+    monkeypatch.setattr(runs_module, "secrets", SimpleNamespace(token_hex=token_hex))
+    return drawn
+
+
+def test_a_taken_run_id_is_drawn_again_but_only_8_times(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    runs = tmp_path / "runs"
+    (runs / "teach-20261108-120000-aaaa").mkdir(parents=True)
+    monkeypatch.setattr(runs_module, "time", SimpleNamespace(strftime=lambda _: "teach-20261108-120000"))
+    drawn = drawing(monkeypatch, "aaaa", "bbbb")
+    teach_now = teach_in(runs, lambda purpose, parts: json.dumps(REFUSES))
+    assert finished_within(10, teach_now) == ("teach-20261108-120000-bbbb", ["Argon declined: it can only move boxes"])
+    assert drawn == ["aaaa", "bbbb"]
+    error = finished_within(10, teach_now)  # every id it draws now is taken
+    assert isinstance(error, FileExistsError) and str(error) == f"no free run id in {runs} after 8 draws"
+    assert drawn[2:] == ["aaaa"] * 8 and runs_module.RUN_ID_TRIES == 8
+
+
+@pytest.mark.skipif(sys.platform == "win32" or os.geteuid() == 0, reason="only a POSIX non-root user is kept out")
+def test_a_runs_folder_it_may_not_write_fails_the_teach_on_its_first_draw(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    runs = tmp_path / "runs"
+    runs.mkdir()
+    runs.chmod(0o500)
+    drawn = drawing(monkeypatch)
+    try:
+        error = finished_within(10, teach_in(runs))
+    finally:
+        runs.chmod(0o700)  # so tmp_path can be cleaned up
+    assert isinstance(error, PermissionError) and drawn == ["aaaa"]
+
+
+def test_a_runs_folder_that_cannot_hold_a_run_fails_the_teach_with_why(tmp_path: Path) -> None:
+    (tmp_path / "runs").write_text("a file, not a folder")
+    app = create_app(tmp_path / "runs", port=8200, generate=None, launch=no_launch)
+    client = TestClient(app, base_url=LOCAL, client=("127.0.0.1", 50000), raise_server_exceptions=False)
+    response = teach(client, "put the box in the bin")
+    assert (response.status_code, response.headers["content-type"]) == (500, "application/json")
+    detail = f"A new run couldn't be written: [Errno 17] File exists: '{tmp_path / 'runs'}'"
+    assert response.json() == {"detail": detail}
+
+
 def test_a_launched_run_runs_in_its_own_session_with_its_output_in_the_log(tmp_path: Path) -> None:
     log = tmp_path / "run.log"
     script = "import os, sys; print(os.getsid(0) == os.getpid()); print('to stderr', file=sys.stderr)"
@@ -899,3 +989,22 @@ def test_a_task_generator_failure_hides_the_key_and_is_cut_to_300_characters(
     assert reason == ("task generator failed: RuntimeError: 400 key [key] not valid " + "x" * 1000)[:300]
     run_dir = tmp_path / "runs" / response.json()["run_id"]
     assert KEY not in (run_dir / "events.jsonl").read_text()
+
+
+def test_an_instruction_holding_the_key_is_refused_and_the_key_is_kept_nowhere(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.setenv("GEMINI_API_KEY", KEY)
+    client, launched = teach_client(tmp_path, BOX_IN_BIN)  # the loop's task, so only the key stops it
+    response = teach(client, f"put the box in the bin {KEY}")
+    run_id = response.json()["run_id"]
+    assert response.status_code == 200
+    assert response.json() == {"run_id": run_id, "started": False, "reasons": [HOLDS_KEY]}
+    assert launched == []  # no command line, where any process could read it
+    assert run_events(tmp_path, run_id) == [
+        ("instruction", {"text": "put the box in the bin [key]", "source": "teach"}),
+        ("error", {"error": f"not started: {HOLDS_KEY}"}),
+    ]  # and no Argon call, which would send it on
+    listed = client.get("/runs")
+    assert listed.json()[0]["reason"] == HOLDS_KEY and KEY not in listed.text
+    assert not any(KEY.encode() in path.read_bytes() for path in (tmp_path / "runs").rglob("*") if path.is_file())

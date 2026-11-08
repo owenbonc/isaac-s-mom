@@ -19,6 +19,7 @@ from isaacs_mom.contracts import EpisodeManifest, EvaluationResult, Event, Train
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.evaluation import adaptation_of
 from isaacs_mom.orchestrator.events import EventLog
+from isaacs_mom.orchestrator.loop import MOVE_BIN_SHARE as LOOP_MOVE_BIN_SHARE
 from isaacs_mom.orchestrator.loop import check_carry_over, moves_bin, run_loop
 from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
@@ -374,6 +375,7 @@ def then_loop(
         make_student=make_student,
         train_student=train,
         instruction=spec.instruction,
+        move_bin_share=LOOP_MOVE_BIN_SHARE if "move_bin" in spec.perturbation_kinds() else 0.0,
         from_run=run_dir,
         verdict=partial(judge, spec),
     )

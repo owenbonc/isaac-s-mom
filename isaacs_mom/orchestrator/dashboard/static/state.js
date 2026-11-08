@@ -25,13 +25,11 @@
   }
 
   // The page's view of the stream. `live` folds every event; `frozen` is what a paused view keeps showing and when
-  // it was paused; `selected` pins Teaching's episode (null follows the run: its latest teaching episode while live, its
-  // story once finished); `compare` is the box or bin move that Move shows, with the view to return to when pressed again;
+  // it was paused; `selected` pins the episode shown (null follows the run: its latest episode, or its story for a view
+  // that never saw it live); `compare` is the box or bin move that Move shows, with the view to return to when pressed again;
   // `followed` is set once an event arrives while the run is live; `lost` while the event stream is down; `settling`
   // while a connection's replay of the events already written streams in, which the page neither shows nor announces.
-  // `tab` is Results, where a run opens, Teaching or Now; in Results, `seed` is the seed open, `opened` its episode
-  // open, `focus` the seed focused in the list and `only` the mark it is filtered to.
-  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true, tab: "results", seed: null, opened: null, focus: null, only: null });
+  const view = () => ({ live: initial(), frozen: null, selected: null, compare: null, followed: false, lost: false, settling: true, seed: null, opened: null, side: "both", parked: null });
   // Every connection replays events.jsonl from the start, so a reconnect starts over.
   function reconnect(v) {
     v.live = initial();
@@ -164,7 +162,7 @@
       }
       case "evaluation_result":
         if ([d.round, d.successes, d.n, d.errored].every((v) => num(v) !== null))
-          s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: d.errored, after: s.episodes.length, from: d.round === 0 ? fromRun(d.from_run) : null });
+          s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: d.errored, after: s.episodes.length, from: d.round === 0 ? fromRun(d.from_run) : null, condition: text(d.condition) || null });
         break;
       case "finetune_started":
         s.finetune.pending = { round: num(d.round), t: event.t };
@@ -203,7 +201,8 @@
     return s;
   }
 
-  const isReal = (sim) => sim !== null && !sim.version.startsWith("fake");
+  const isFake = (sim) => sim !== null && sim.version.startsWith("fake");
+  const isReal = (sim) => sim !== null && !isFake(sim);
 
   // The run's simulator in words for the header, with its full version and task (`task=…`) for the legend; a run with
   // any FakeSim or unnamed episode is named by that, an unnamed one not at all. Null before any episode.
@@ -222,13 +221,10 @@
   const running = (s, now) =>
     !s.stopped && (now - s.lastT < FRESH_SECONDS || (s.finetune.pending !== null && now - s.finetune.pending.t < FINETUNE_SECONDS));
 
-  // Rule 6 for what the view shows: placeholder unless every shown episode ran on a real simulator; live while the
-  // run is and its stream is connected, paused instead of live while the presenter holds the view, recorded
-  // otherwise. Pass an episode for a panel that shows one: only the run's current, unjudged episode can be live.
+  // Rule 6: placeholder only once a shown episode names FakeSim, never for a run with no episode yet.
   function provenance(v, now, ep = null) {
     const s = shown(v);
-    const episodes = ep ? [ep] : s.episodes;
-    if (!episodes.length || !episodes.every((e) => isReal(e.sim))) return "placeholder";
+    if ((ep ? [ep] : s.episodes).some((e) => isFake(e.sim))) return "placeholder";
     if (v.lost || !running(v.live, now) || (ep && (ep !== current(s) || ep.verdict !== null))) return "recorded";
     return v.frozen ? "paused" : "live";
   }
@@ -330,16 +326,20 @@
   }
   // A fine-tuned checkpoint's id is `<run_id>/ckpt-rN` (student/checkpoints.py); the page names it by its last part.
   const shortCheckpoint = (c) => c.slice(c.lastIndexOf("/") + 1);
-  // No-break spaces keep each round's name on one line when a pair wraps.
+  // No-break spaces keep each round's name on one line when a pair wraps. A `mom eval` round is the checkpoint's
+  // position, not a fine-tuning round, so its checkpoint is named by its id (rule 6).
   function roundName(r) {
+    if (r.condition && r.checkpoint) return shortCheckpoint(r.checkpoint);
     if (r.from) return `from ${r.from.run}, ${shortCheckpoint(r.from.checkpoint)}`;
     return r.round === 0 ? "before\u00a0fine-tuning" : r.round === null ? "the\u00a0evaluation\u00a0under\u00a0way" : `after\u00a0round\u00a0${r.round}`;
   }
   // The base model's checkpoint (student/checkpoints.py): a round 0 tested on another came from an earlier run.
   const BASE_CHECKPOINT = "ckpt-r0";
+  // A `mom eval` block on another condition still closes a segment but is no evaluation of the training task (SPEC §6.10).
+  const counted = (r) => r.condition === null || r.condition === "training_distribution";
+  // An episode carries no condition, so in a `mom eval` run a block's condition is known only once its result closes it.
+  const conditioned = (s) => s.rounds.some((r) => r.condition !== null);
 
-  // The Results marks (SPEC §3.5) in their sort order: the changes, the unchanged, then errored and pending.
-  const MARKS = ["down", "up", "fail", "pass", "error", "pending"];
   function outcome(cell, done) {
     if (cell.crashed) return "errored";
     if (!cell.ep || !cell.ep.verdict) return done ? "errored" : "pending";
@@ -354,19 +354,21 @@
     if (first === "succeeded") return latest === "succeeded" ? "pass" : "down";
     return latest === "succeeded" ? "up" : "fail";
   }
-  // The checkpoint under way comes last, and the counts cover every seed whatever `only` keeps in the list.
-  function results(s, only = null) {
+  function results(s) {
     // An evaluation's held-out episodes follow the previous evaluation's result, as testing() reads them.
     const ends = s.rounds.map((r) => r.after);
     const tail = s.episodes.slice(ends.length ? ends[ends.length - 1] : 0).find((e) => e.split === "heldout");
-    const checkpoints = s.rounds.map((r) => ({ round: r.round, checkpoint: r.checkpoint, name: roundName(r), done: true }));
-    if (tail || s.crashes.some((c) => c.evaluation === ends.length)) {
+    const underway = !conditioned(s) && (tail || s.crashes.some((c) => c.evaluation === ends.length));
+    const kept = s.rounds.flatMap((r, k) => (counted(r) ? [k] : []));
+    const checkpoints = kept.map((k) => ({ round: s.rounds[k].round, checkpoint: s.rounds[k].checkpoint, name: roundName(s.rounds[k]), done: true }));
+    if (underway) {
       const test = testing(s);
       const checkpoint = test ? test.checkpoint : null;
       // Until its result says where it came from, a round 0 not yet seen on the base checkpoint is only under way.
       const round = tail && !(tail.round === 0 && checkpoint !== BASE_CHECKPOINT) ? tail.round : null;
       checkpoints.push({ round, checkpoint, name: roundName({ round, from: null }), done: false });
     }
+    const slot = (segment) => (segment === ends.length ? (underway ? kept.length : -1) : kept.indexOf(segment));
     const rows = new Map();
     const cell = (seed, k) => {
       if (!rows.has(seed)) rows.set(seed, checkpoints.map(() => ({ ep: null, crashed: false })));
@@ -374,25 +376,35 @@
     };
     s.episodes.forEach((ep, i) => {
       if (ep.split !== "heldout" || ep.seed === null) return;
-      const k = ends.findIndex((end) => i < end);
-      const at = cell(ep.seed, k < 0 ? ends.length : k);
+      const segment = ends.findIndex((end) => i < end);
+      const k = slot(segment < 0 ? ends.length : segment);
+      if (k < 0) return;
+      const at = cell(ep.seed, k);
       at.ep ??= ep; // a seed's first try in an evaluation is its episode there
     });
-    for (const c of s.crashes) cell(c.seed, c.evaluation).crashed = true;
+    for (const c of s.crashes) if (slot(c.evaluation) >= 0) cell(c.seed, slot(c.evaluation)).crashed = true;
     const seeds = [...rows]
       .map(([seed, cells]) => {
         const episodes = cells.map((c, k) => ({ id: c.ep ? c.ep.id : null, outcome: outcome(c, checkpoints[k].done) }));
         return { seed, mark: mark(episodes.map((e) => e.outcome)), episodes };
       })
-      .sort((a, b) => MARKS.indexOf(a.mark) - MARKS.indexOf(b.mark) || a.seed - b.seed);
-    const counts = Object.fromEntries(MARKS.map((m) => [m, seeds.filter((r) => r.mark === m).length]));
-    return { checkpoints, seeds: only === null ? seeds : seeds.filter((r) => r.mark === only), counts };
+      .sort((a, b) => a.seed - b.seed);
+    return { checkpoints, seeds };
+  }
+
+  const columns = (s) =>
+    results(s).seeds.map((r) => ({ seed: r.seed, mark: r.mark, before: r.episodes[0].outcome, after: r.episodes.length > 1 ? r.episodes[r.episodes.length - 1].outcome : "pending" }));
+  function neighbour(s, seed, step) {
+    const seeds = results(s).seeds.map((r) => r.seed);
+    const at = seeds.indexOf(seed);
+    return at < 0 ? null : (seeds[at + step] ?? null);
   }
 
   function claim(s) {
-    if (!s.rounds.length) return null;
-    const first = s.rounds[0];
-    const last = s.rounds[s.rounds.length - 1];
+    const rounds = s.rounds.filter(counted);
+    if (!rounds.length) return null;
+    const first = rounds[0];
+    const last = rounds[rounds.length - 1];
     const pair = first === last ? [first] : [first, last];
     const scored = (r) => r.n - r.errored;
     // Whole percentages of the scored episodes; the change is taken between the rates as shown, so the figures agree.
@@ -445,13 +457,15 @@
   // The held-out evaluation under way: its checkpoint, how many of its seeds have run (to a verdict or a crash), and out
   // of how many, which only an earlier evaluation of the same sealed seeds tells. Null while none runs.
   function testing(s) {
+    if (conditioned(s)) return null;
     const last = s.rounds[s.rounds.length - 1];
     const tests = s.episodes.slice(last ? last.after : 0).filter((e) => e.split === "heldout");
     const crashed = s.crashes.filter((c) => c.evaluation === s.rounds.length).map((c) => c.seed);
     if (!tests.length && !crashed.length) return null;
     const decided = tests.flatMap((e) => e.rows).findLast((r) => r.kind === "decision" && r.checkpoint);
     const run = new Set([...tests.filter((e) => e.verdict).map((e) => e.seed), ...crashed]).size;
-    return { checkpoint: decided ? decided.checkpoint : null, run, of: last ? last.n : null };
+    const of = s.rounds.findLast(counted);
+    return { checkpoint: decided ? decided.checkpoint : null, run, of: of ? of.n : null };
   }
 
   // What a fine-tune learns from (SPEC §3.5); a demonstration with no frame is counted, not shown.
@@ -469,23 +483,21 @@
   }
 
   const teaches = (e) => e.split !== "heldout";
-  // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
-  const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || s.episodes.findLast(teaches) || null;
+  const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || s.episodes.findLast(teaches) || current(s);
 
-  const where = (v) => (v.tab !== "results" ? v.tab : v.opened !== null ? "episode" : v.seed !== null ? "seed" : "list");
+  const where = (v) => (v.opened !== null ? "episode" : v.seed !== null ? "seed" : "run");
 
-  // A view that saw the run live keeps its latest teaching episode once it stops; one opened later gets the story.
+  // A view that saw the run live keeps its episode in progress once it stops; one opened later gets the story.
   function episode(v, now) {
     const s = shown(v);
-    if (v.tab === "now") return current(s);
     const find = (id) => (id !== null && s.episodes.find((e) => e.id === id)) || null;
-    if (v.tab === "results") return find(v.opened);
-    return find(v.selected) || (following(v, now) || v.followed ? s.episodes.findLast(teaches) || null : story(s));
+    if (v.opened !== null) return find(v.opened);
+    return find(v.selected) || (following(v, now) || v.followed ? current(s) : story(s));
   }
 
   function finetuning(v, now) {
     const pending = shown(v).finetune.pending;
-    const follows = v.tab === "now" || (v.tab === "teaching" && v.selected === null);
+    const follows = where(v) === "run" && v.selected === null;
     if (!pending || !follows || !following(v, now)) return null;
     return (v.frozen ? v.frozen.at : now) - pending.t;
   }
@@ -493,18 +505,22 @@
   const teacherDrove = (ep) => ep.rows.some((r) => r.kind === "takeover" || r.controller === "teacher");
   const BEATS = { d: (e) => e.diagnosis !== null && teaches(e), t: (e) => teacherDrove(e) && teaches(e), m: (e) => e.perturbedStep !== null };
 
-  const home = (ep) => (ep.split === "heldout" ? { tab: "results", seed: ep.seed, focus: ep.seed, opened: ep.id } : { tab: "teaching", selected: ep.id });
-  // Landing on a live run's latest teaching episode follows the run again.
+  const home = (ep) => ({ selected: ep.id, seed: null, opened: null });
+  function showSeed(v, seed) {
+    const row = results(shown(v)).seeds.find((r) => r.seed === seed);
+    const ids = row ? row.episodes.map((e) => e.id) : [];
+    const id = v.side === "before" ? ids[0] : v.side === "after" ? ids[ids.length - 1] : null;
+    return { seed, opened: id ?? null };
+  }
+  function choose(v, side) {
+    v.side = side;
+    if (v.seed !== null) visit(v, showSeed(v, v.seed));
+  }
+  // Landing on a live run's episode in progress follows the run again.
   function land(v, now, ep) {
     const to = home(ep);
-    if (to.tab === "teaching" && ep === shown(v).episodes.findLast(teaches) && following(v, now)) to.selected = null;
+    if (ep === current(shown(v)) && following(v, now)) to.selected = null;
     return to;
-  }
-  function seedFrom(v, step) {
-    const seeds = results(shown(v), v.only).seeds.map((r) => r.seed);
-    const at = seeds.indexOf(v.seed ?? v.focus);
-    const to = at < 0 ? 0 : at + step;
-    return to >= 0 && to < seeds.length ? seeds[to] : null;
   }
 
   // The view fields a key would set, or null where it leads nowhere new (SPEC §3.5).
@@ -512,27 +528,25 @@
     const s = shown(v);
     const place = where(v);
     const shownEp = episode(v, now);
-    const step = key === "ArrowLeft" || key === "ArrowUp" ? -1 : 1;
-    if (key === "Escape") return place === "episode" ? { opened: null } : place === "seed" ? { seed: null, focus: v.seed } : null;
-    if (key === "End") return following(v, now) && place !== "now" ? { tab: "now" } : null;
-    if (key === "ArrowUp" || key === "ArrowDown" || key === "ArrowLeft" || key === "ArrowRight") {
-      const across = key === "ArrowLeft" || key === "ArrowRight";
-      if (place === "list" || (place === "seed" && across)) {
-        const seed = seedFrom(v, step);
-        return seed === null ? null : place === "list" ? { focus: seed } : { seed, focus: seed };
+    const step = key === "ArrowLeft" ? -1 : 1;
+    // An episode opened from the seed's side-by-side cards goes back to them; one the switch shows, to the run.
+    if (key === "Escape") return place === "episode" && v.side === "both" ? { opened: null } : place !== "run" ? { seed: null, opened: null } : null;
+    if (key === "End") return following(v, now) && (place !== "run" || v.selected !== null) ? { selected: null, seed: null, opened: null } : null;
+    if (key === "ArrowLeft" || key === "ArrowRight") {
+      if (place === "seed" || (place === "episode" && v.side !== "both")) {
+        const seed = neighbour(s, v.seed, step);
+        return seed === null ? null : showSeed(v, seed);
       }
-      if (!across) return null;
       if (place === "episode") {
         const row = results(s).seeds.find((r) => r.seed === v.seed);
         const ids = row ? row.episodes.map((e) => e.id) : [];
         for (let i = ids.indexOf(v.opened) + step; i >= 0 && i < ids.length; i += step) if (ids[i] !== null) return { opened: ids[i] };
         return null;
       }
-      if (place !== "teaching" || !shownEp) return null;
-      for (let i = s.episodes.indexOf(shownEp) + step; i >= 0 && i < s.episodes.length; i += step) if (teaches(s.episodes[i])) return land(v, now, s.episodes[i]);
-      return null;
+      const next = shownEp && s.episodes[s.episodes.indexOf(shownEp) + step];
+      return next ? land(v, now, next) : null;
     }
-    if (key === "m" && shownEp && BEATS.m(shownEp)) return home(shownEp);
+    if (key === "m" && shownEp && BEATS.m(shownEp)) return place === "episode" ? {} : home(shownEp);
     // With no episode shown, the nearest is the latest.
     const at = shownEp ? s.episodes.indexOf(shownEp) : s.episodes.length;
     for (let d = 1; d <= s.episodes.length; d++)
@@ -540,9 +554,14 @@
     return null;
   }
 
+  // A seed opened over Move parks it, and coming back from the seed to the same episode shows Move again (SPEC §3.5).
   function visit(v, fields) {
+    const from = where(v);
+    const parked = from === "run" ? v.compare && { compare: v.compare, selected: v.selected } : v.parked;
     Object.assign(v, fields);
-    v.compare = null;
+    const to = where(v);
+    v.compare = from !== "run" && to === "run" && parked && parked.selected === v.selected ? parked.compare : null;
+    v.parked = to === "run" ? null : parked;
   }
   function go(v, now, key) {
     const to = target(v, now, key);
@@ -556,7 +575,7 @@
     }
     const to = target(v, now, "m");
     if (!to) return;
-    const back = { tab: v.tab, selected: v.selected, seed: v.seed, opened: v.opened, focus: v.focus };
+    const back = { selected: v.selected, seed: v.seed, opened: v.opened };
     visit(v, to);
     v.compare = { step: episode(v, now).perturbedStep, back };
   }
@@ -575,9 +594,9 @@
   const finished = (v, now, ep) => ep.verdict !== null || ep !== current(shown(v)) || !following(v, now);
 
   const KEYS = { " ": togglePause, m: showMove };
-  for (const key of ["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown", "Escape", "End", "d", "t"]) KEYS[key] = (v, now) => go(v, now, key);
-  // ↑ and ↓ are Results' only in its list and Escape only inside a seed; elsewhere they keep their usual jobs.
-  const OWNED = { ArrowUp: (v) => where(v) === "list", ArrowDown: (v) => where(v) === "list", Escape: (v) => where(v) === "seed" || where(v) === "episode" };
+  for (const key of ["ArrowLeft", "ArrowRight", "Escape", "End", "d", "t"]) KEYS[key] = (v, now) => go(v, now, key);
+  // Escape is the view's only inside a seed; elsewhere it keeps its usual job.
+  const OWNED = { Escape: (v) => where(v) !== "run" };
   // Typing in a field is text, never a presenter key (SPEC §3.5).
   const typing = (t) => Boolean(t && (t.tagName === "INPUT" || t.tagName === "TEXTAREA" || t.isContentEditable));
   // Presenter keys (SPEC §3.5), whatever else has focus. True when the key is the dashboard's, so the page claims it
@@ -623,11 +642,13 @@
           ? "The dashboard takes instructions only from its own page on this computer."
           : status === 400
             ? `An instruction is 1 to ${TEACH_MAX} characters.`
-            : `The dashboard server could not take it (HTTP ${status}).`;
+            : status === 500 && body && typeof body.detail === "string"
+              ? body.detail
+              : `The dashboard server could not take it (HTTP ${status}).`;
     return { state: "failed", message };
   }
 
-  const api = { esc, shortCheckpoint, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, shown, buffered, pauseLabel, following, accepted, errored, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, tooLong, teachCount, teachAnswer, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
+  const api = { esc, shortCheckpoint, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, shown, buffered, pauseLabel, following, accepted, errored, kind, verdictWords, simulator, claim, testing, results, columns, neighbour, showSeed, choose, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, tooLong, teachCount, teachAnswer, episode, where, finetuning, target, visit, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

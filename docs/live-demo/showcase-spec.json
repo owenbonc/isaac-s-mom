@@ -1,0 +1,51 @@
+{
+  "name": "box_to_bin_fixed",
+  "instruction": "Stay where you are and put the box in the bin beside you, even if someone moves the bin.",
+  "scene": {
+    "box": {
+      "kind": "box",
+      "id": "box",
+      "half_m": [
+        0.12,
+        0.14,
+        0.12
+      ],
+      "mass_kg": 0.8,
+      "offset_m": 0.04
+    },
+    "destination": {
+      "kind": "bin",
+      "id": "bin",
+      "distance_m": [
+        0.4,
+        0.5
+      ],
+      "bearing_deg": [
+        85.0,
+        112.0
+      ]
+    }
+  },
+  "success": {
+    "all_of": [
+      {
+        "fact": "inside",
+        "object": "box",
+        "container": "bin"
+      },
+      {
+        "fact": "at_rest",
+        "object": "box"
+      },
+      {
+        "fact": "robot_standing"
+      }
+    ]
+  },
+  "perturbations": [
+    {
+      "object": "bin"
+    }
+  ],
+  "stance": "fixed_feet"
+}

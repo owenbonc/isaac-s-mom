@@ -1255,9 +1255,10 @@ def test_the_loops_replay_judges_by_the_same_rule(tmp_path: Path) -> None:
     assert results[0].successes == len(heldout_seeds()) == report.replayed == report.reproduced
 
 
-def _spec_file(tmp_path: Path) -> tuple[Path, TaskSpec]:
+def _spec_file(tmp_path: Path, perturbations: list[dict[str, str]] | None = None) -> tuple[Path, TaskSpec]:
     words = "put the box on the shelf, even if it moves"
-    spec = TaskSpec.model_validate_json(json.dumps({**OFFLINE_PROPOSAL, "instruction": words}))
+    moves = OFFLINE_PROPOSAL["perturbations"] if perturbations is None else perturbations
+    spec = TaskSpec.model_validate_json(json.dumps({**OFFLINE_PROPOSAL, "perturbations": moves, "instruction": words}))
     path = tmp_path / "spec.json"
     path.write_text(spec.model_dump_json())
     return path, spec
@@ -1331,3 +1332,35 @@ def test_a_spec_the_run_cant_use_is_a_usage_error_that_writes_nothing(
         cli.main()
     assert isinstance(stopped.value, SystemExit) and stopped.value.code == 2
     assert not (tmp_path / "runs" / "next").exists()
+
+
+@pytest.mark.parametrize(("perturbations", "moved"), [([], 0), (None, 1)])
+def test_mom_run_moves_the_destination_only_in_a_spec_that_lets_it_move(
+    perturbations: list[dict[str, str]] | None, moved: int, tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    path, _ = _spec_file(tmp_path, perturbations)
+    monkeypatch.setattr(cli, "spec_sim", lambda _spec: FakeSim())
+    argv = [
+        "mom",
+        "run",
+        "--student",
+        "stub",
+        "--teacher",
+        "stub",
+        "--spec",
+        str(path),
+        "--run-id",
+        "next",
+        "--rounds",
+        "1",
+        "--demos",
+        "4",
+        "--dev-trials",
+        "1",
+    ]
+    monkeypatch.setattr(sys, "argv", argv)
+    cli.main()
+    starts = _logged(tmp_path / "runs" / "next", "episode_started")
+    assert len([d for d in starts if d.get("acting_on") is not None or d["split"] == "dev"]) >= 4
+    assert sum(bool(d.get("move_bin_after_lift")) for d in starts) == moved  # 1 of 4 at the loop's 25% share

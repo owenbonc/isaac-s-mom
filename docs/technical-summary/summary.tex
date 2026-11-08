@@ -1,0 +1,121 @@
+% Scaffld: one-page technical summary (AgentVerse 2026, Robotics track). Build with ./build.sh.
+\documentclass[9pt]{extarticle}
+\usepackage[a4paper, left=12mm, right=12mm, top=10mm, bottom=8mm]{geometry}
+\usepackage[T1]{fontenc}
+\usepackage{newtxtext}
+\usepackage{newtxmath}
+\usepackage[final]{microtype}
+\usepackage{graphicx}
+\usepackage{multicol}
+\usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{xcolor}
+\usepackage{titlesec}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\hypersetup{pdftitle={Scaffld: A Robot Teacher That Builds Its Own Lessons}, pdfauthor={Team Scaffld}, pdfsubject={AgentVerse 2026 Robotics Track: technical summary}}
+
+\definecolor{gpu}{HTML}{2A78D6}
+\definecolor{cloud}{HTML}{EB6834}
+\definecolor{cpu}{HTML}{1BAF7A}
+\newcommand{\loc}[1]{\textcolor{#1}{\raisebox{0.05ex}{$\bullet$}}}
+
+\captionsetup{size=footnotesize, labelfont=bf, labelsep=period, skip=2pt, justification=justified, singlelinecheck=false}
+\setlength{\columnsep}{5.5mm}
+\titleformat{\section}{\normalfont\fontsize{9.3}{11}\selectfont\bfseries}{\thesection}{0.5em}{}
+\titlespacing*{\section}{0pt}{4pt plus 1pt}{1.5pt}
+\setlength{\parindent}{0.9em}
+\setlength{\parskip}{0pt}
+\newcommand{\head}[1]{\textbf{#1}\hspace{0.3em}}
+\setlist[itemize]{leftmargin=0.85em, labelsep=0.35em, itemsep=1.9pt, topsep=1.2pt, parsep=0pt, partopsep=0pt, label={\scriptsize\textbullet}}
+\pagestyle{empty}
+\hyphenpenalty=600
+
+\begin{document}
+\fontsize{8.4}{9.95}\selectfont
+
+\begin{center}
+{\fontsize{16}{19}\selectfont\bfseries Scaffld: A Robot Teacher That Builds Its Own Lessons\par}
+\vspace{2pt}
+{\fontsize{10.5}{12.5}\selectfont\itshape One typed sentence $\rightarrow$ a new robot skill in 39.7 minutes\par}
+\vspace{2pt}
+{\fontsize{8.8}{10.5}\selectfont Team Scaffld \enspace·\enspace AgentVerse 2026 (UCL), Robotics Track \enspace·\enspace Technical summary, 8 November 2026 \enspace·\enspace \href{https://github.com/owenbonc/scaffld}{github.com/owenbonc/scaffld}\par}
+\end{center}
+\vspace{-2pt}
+
+\noindent\textbf{\textit{Abstract}}\,---\,Robots learn skills from human teleoperated demonstrations, which are slow and costly. \textbf{Scaffld removes the person:} a cloud teacher agent (Argon) turns one typed sentence into a checked task, demonstrates it by driving the robot, keeps only demos an independent physics validator accepts, and fine-tunes a small on-device student. On a Unitree G1 humanoid in MuJoCo, \textbf{one sentence taught the robot a new skill in 39.7 minutes} (wall-clock stage time): 56 accepted demos, a 21-minute fine-tune, and a 500M-parameter student that went from \textbf{0/20 to 18/20} on sealed, unseen scenes (\textbf{17/20} with the bin moved). Given a grey image instead of its camera, it scores \textbf{0/20} (on a Mac). It runs alone on a laptop GPU at \textbf{0.31\,s per decision, with no cloud calls}.
+
+\vspace{4pt}
+\noindent\includegraphics[width=\textwidth]{build/fig_system.pdf}
+\captionof{figure}{System architecture. \textbf{Act:} the deployed loop on one laptop; the head camera is the only scene sensor, and every skill call passes a safety gate. \textbf{Teach:} only the validator sees ground truth; Argon writes the task, diagnoses failures from saved frames and demonstrates through the same camera and skills; only accepted steps train the student. Frames: Argon's view after the bin moved, with its logged decisions. \loc{gpu}\,laptop GPU \enspace\loc{cloud}\,cloud \enspace\loc{cpu}\,CPU.}
+
+\vspace{2pt}
+\raggedcolumns
+\begin{multicols}{2}
+
+\section{User and problem}
+\head{Users:} robotics teams that must teach a robot a new task, or fix one it fails. \head{Problem:} that takes costly human demonstrations. DROID needed 50 collectors for 12 months (76k trajectories)~[1]; RT-1 needed 13 robots for 17 months (130k episodes)~[2]. \head{Our answer:} a teacher agent (Argon) that finds the gaps in a robot's skills, creates and validates its own lessons, and leaves a student that runs on the robot alone.
+
+\section{System architecture and key features}
+\begin{itemize}
+\item \head{Robot and task.} A Unitree G1 (29 DoF) hugs a 0.8\,kg box off a table into a bin, twisting at the waist (\textit{fixed feet}) or walking 1.0--1.4\,m on Unitree's RL policy (\textit{walking}).
+\item \head{Camera in, skills out.} Agents see only a 320$\times$240 head camera, the instruction and the last skill's feedback; ground truth reaches only the validator. They act through 10 whitelisted skills, run by IK and joint PD control.
+\item \head{Teaching (Fig.~1).} One typed sentence $\rightarrow$ Argon (gemini-4-argon) writes a task spec and success rule, checked in simulation $\rightarrow$ parallel Argon teachers demonstrate $\rightarrow$ the validator keeps what passes and names failures in words $\rightarrow$ accepted steps fine-tune the student $\rightarrow$ exam alone on 20 sealed seeds.
+\item \head{Key features:} mid-run box or bin moves that reach agents only as new frames; 13 worded verdicts; exact replay of accepted demos (56/56); a live dashboard where every number carries its $n$.
+\end{itemize}
+
+\section{Where each model runs}
+\noindent\begin{minipage}{\linewidth}
+\captionof{table}{Measured on our hardware (laptop GPU: RTX 5070 Ti). Edge budget: $\le$\,2\,s per decision, $\le$\,3\,GB.}
+\vspace{-1pt}
+\fontsize{7.1}{8.4}\selectfont
+\setlength{\tabcolsep}{2.4pt}
+\begin{tabularx}{\linewidth}{@{}>{\raggedright\arraybackslash}X>{\raggedright\arraybackslash}p{19.5mm}>{\raggedright\arraybackslash}p{29.5mm}@{}}
+\toprule
+Model (role) & Runs on & Latency ($n$); memory\\
+\midrule
+SmolVLM2-500M~[3] + LoRA~[4] (\textbf{student}) & \loc{gpu}\,laptop GPU, bf16 & 0.31\,s median, 0.56\,s p95 (326); 2.01\,GiB (v1/v2 exam)\\
+LoRA r16 fine-tune (\textbf{training}) & \loc{gpu}\,laptop GPU & 21\,min for 605 examples; 2.0\,GiB\\
+Argon, gemini-4-argon (\textbf{teacher}) & \loc{cloud}\,cloud, teaching only & 8.1\,s median, 19.5\,s p95 (3,551)\\
+Unitree RL walking policy (\textbf{legs}) & \loc{cpu}\,CPU, NumPy & 0.03\,ms per 50\,Hz tick (2,000)\\
+MuJoCo 4.0 + validator (\textbf{world}) & \loc{cpu}\,CPU (Apple M5) & 13\,ms per camera frame (50)\\
+\bottomrule
+\end{tabularx}
+\end{minipage}
+
+\section{Results}
+\begin{itemize}
+\item \head{One sentence $\rightarrow$ new skill.} From ``Stay where you are and put the box in the bin beside you, even if someone moves the bin'', 8 parallel teachers made 60 demos in 16\,min; the validator kept 56. After a 21-min fine-tune, the student went \textbf{0/20 $\rightarrow$ 18/20} on sealed scenes and \textbf{0/20 $\rightarrow$ 17/20} with the bin moved after the lift (Fig.~2a; McNemar $p<0.001$, paired by seed). \textbf{39.7\,min from sentence to tested skill} (wall clock, GPU queue excluded); a re-run reproduced every seed.
+\item \head{It acts on what it sees.} Given a grey image instead of its camera: \textbf{0/20 vs.\ 19/20} (same seeds, on a Mac). Blind, it twists once and places, so its decision to stop comes from the image.
+\item \head{Demos teach that decision.} Trained on only 14 or 28 of the same demos, it twists to its 150\textdegree\ limit and never places (0/20 each; Fig.~2b).
+\item \head{Lessons aimed at failures work.} Recovery and box-moved demos (52 $\rightarrow$ 117) raised success with the box moved from \textbf{7/20 to 15/20}, and on unseen bin placements from \textbf{14/40 to 21/40} (overall $p=0.19$; bin further ahead 4/20 $\rightarrow$ 14/20, $p=0.006$). In round 1, Argon named the cause of all 10 failed trials.
+\item \head{Inside the edge budget.} \textbf{0.31\,s median}, 0.56\,s p95 ($n=326$); 1.08\,s over a 35-min exam ($n=237$); 2 of its 2,145 decisions passed 2\,s (the first after loading). Peak memory \textbf{2.01\,GiB of 3\,GB} (Fig.~2c).
+\end{itemize}
+
+\section{Limits}
+\head{Simulation only;} sim-to-real is next. \head{One task family,} learned at the skill level. \head{Walking:} the memoryless student has not yet learned when to stop turning. \head{Bin moves} in our tests stay within reach of its learned routine; larger moves are next. \head{Teaching needs the cloud;} the deployed student does not.
+
+\section{Critical failure mode and safety}
+\begin{itemize}
+\item \head{Failure mode: acting on a stale picture of the world.} If the box or bin moves mid-task, a robot replaying its plan grasps air or drops the box; near people, it swings a load into space that is no longer clear. \textbf{Our agents keep no plan:} every skill is chosen from the newest frame, and recovery lessons more than doubled success with the box moved (Fig.~2a).
+\item \head{When unsure, look again.} An unparseable answer becomes \texttt{reobserve}; two in a row end the episode.
+\item \head{Safe motion.} Only whitelisted, clamped skills run. A move past a limit, an unreachable target or a walk into the table is refused before anything moves. The validator rejects falls, joint-limit violations and penetration, so unsafe demos never train.
+\item \head{Data and secrets.} Sealed held-out seeds, an 800-call Argon cap per run, keys never logged; 600+ tests pin these rules.
+\end{itemize}
+
+{\fontsize{6.5}{7.4}\selectfont
+\noindent\mbox{[1]}~A.~Khazatsky et al. DROID: a large-scale in-the-wild robot manipulation dataset. \textit{arXiv:2403.12945}, 2024.
+\mbox{[2]}~A.~Brohan et al. RT-1: Robotics Transformer for real-world control at scale. \textit{RSS}, 2023.
+\mbox{[3]}~A.~Marafioti et al. SmolVLM: redefining small and efficient multimodal models. \textit{arXiv}, 2025.
+\mbox{[4]}~E.\,J.~Hu et al. LoRA: low-rank adaptation of large language models. \textit{ICLR}, 2022.\par}
+
+\end{multicols}
+
+\vfill
+\noindent\begin{minipage}{\textwidth}
+\includegraphics[width=\textwidth]{build/fig_results.pdf}
+\captionof{figure}{(a) Student alone on sealed scenes, each row against its control (hollow); diamond: scene changed mid-run. (b) First 14, 28 or 56 accepted demos; Wilson 95\% CIs. (c) Dot median, tick p95.}
+\end{minipage}
+
+\end{document}

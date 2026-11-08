@@ -629,3 +629,19 @@ def test_then_loop_from_a_run_with_nothing_trained_is_refused_and_writes_nothing
     with pytest.raises(ValueError, match="no finished checkpoint"):
         then_loop(run_dir, 1, argon=argon, train=FakeFinetune(), make_student=Stops, make_sim=lambda _spec: FakeSim())
     assert not (tmp_path / "runs" / "learn-x-loop").exists()
+
+
+@pytest.mark.parametrize(("perturbations", "moved"), [([], 0), ([{"object": "shelf"}], 5)])
+def test_then_loop_moves_the_destination_only_in_a_spec_that_lets_it_move(
+    perturbations: list[dict[str, str]], moved: int, tmp_path: Path
+) -> None:
+    spec = TaskSpec.model_validate_json(
+        json.dumps({**OFFLINE_PROPOSAL, "perturbations": perturbations, "instruction": INSTRUCTION})
+    )
+    run_dir = _learned(tmp_path / "runs", spec)
+    loop_dir = tmp_path / "runs" / "learn-x-loop"
+    argon = Argon(EventLog(loop_dir, loop_dir.name), generate=stub_generate)
+    then_loop(run_dir, 1, argon=argon, train=FakeFinetune(), make_student=Stops, make_sim=lambda _spec: FakeSim())
+    logged = [json.loads(line) for line in (loop_dir / "events.jsonl").read_text().splitlines()]
+    starts = [e["data"] for e in logged if e["type"] == "episode_started"]
+    assert sum(bool(d.get("move_bin_after_lift")) for d in starts) == moved  # 5 of the round's 20 at 25%
