@@ -173,8 +173,9 @@ function renderControl() {
   const row = place === "episode" && MomState.results(MomState.shown(view)).seeds.find((x) => x.seed === view.seed);
   const k = row ? row.episodes.findIndex((x) => x.id === ep.id) : -1;
   const at = k < 0 ? "" : `, ${esc(MomState.results(MomState.shown(view)).checkpoints[k].name)}`;
+  const among = position(ep);
   const back = place === "episode" ? `<button type="button" class="back" data-back aria-label="Back to seed ${esc(view.seed)}" data-tip="Back to seed ${esc(view.seed)} · Esc"><svg class="i" aria-hidden="true"><use href="#i-prev"/></svg></button>` : "";
-  const head = `${back}<span class="kind"><span class="what">${kind}</span><span class="note">${where}${at}</span></span>`;
+  const head = `${back}<span class="kind"><span class="what">${kind}</span><span class="note">${where}${at}${among ? ` · ${among.toLowerCase()}` : ""}</span></span>`;
   if (!ep.controller) {
     el.className = "control";
     el.innerHTML = `${head}<span class="note">Waiting for the first decision.</span>`;
@@ -355,11 +356,6 @@ const STEPS = { list: "seed", seed: "seed", episode: "checkpoint", teaching: "ep
 const PAUSE = $("b-pause");
 
 function renderEpisode() {
-  const s = MomState.shown(view);
-  const ep = MomState.episode(view, now());
-  // The connection note sits beside the rail, which gives way, so the keys above never wrap.
-  const lost = view.lost ? ' <span class="lost">· connection lost, retrying</span>' : "";
-  $("episode-line").innerHTML = position(ep) + lost;
   for (const [id, key] of Object.entries(NAVIGATION)) $(id).disabled = MomState.target(view, now(), key) === null;
   const steps = STEPS[MomState.where(view)];
   $("b-prev").dataset.tip = `Previous ${steps} · ←`;
@@ -370,11 +366,6 @@ function renderEpisode() {
   PAUSE.setAttribute("aria-label", MomState.pauseLabel(view));
   PAUSE.dataset.tip = `${MomState.pauseLabel(view)} · Space`;
   PAUSE.lastElementChild.textContent = view.frozen ? MomState.buffered(view) : "";
-  // Where the view is among the run's episodes: tall for a teacher, short for the student; hollow when it failed or was rejected.
-  $("rail").style.setProperty("--n", s.episodes.length);
-  $("rail").innerHTML = s.episodes
-    .map((e) => `<li class="${MomState.teacherDrove(e) ? "teacher" : "student"} ${e.verdict ? (MomState.accepted(e) ? "accepted" : "rejected") : "open"}${e === ep ? " here" : ""}"></li>`)
-    .join("");
 }
 
 function renderLog() {
