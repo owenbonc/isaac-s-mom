@@ -1708,9 +1708,9 @@ Object.defineProperty(FakeElement.prototype, "innerHTML", {
   configurable: true,
 });
 const IDS = ["status", "run-meta", "announce", "control", "stage", "strip", "log", "chip-log", "p-rounds",
-  "p-diagnosis",
-  "p-training", "models", "side", "results", "main", "tabs", "runs", "run-name", "run-list", "teach", "instruction",
-  "teach-count", "teach-go", "teach-said", "teach-status", "b-prev", "b-next", "b-d", "b-t", "b-m", "b-pause"];
+  "p-diagnosis", "p-training", "models", "side", "results", "main", "tabs", "now-dot", "runs", "run-name", "run-list",
+  "teach", "instruction", "teach-count", "teach-go", "teach-said", "teach-status", "b-prev", "b-next", "b-d", "b-t",
+  "b-m", "b-pause"];
 for (const id of IDS) elements.set(id, new FakeElement(id, id === "instruction" ? "INPUT" : "DIV"));
 const body = new FakeElement("", "BODY");
 const doc = {
@@ -1896,3 +1896,25 @@ def test_after_a_move_the_stage_marks_it_on_every_later_frame_and_only_icons_car
     out = app(REPLAY + script, stream(*TAKE))
     assert "Box moved at step 1" in out["stage"]
     assert out["notIcons"] == []
+
+
+def test_the_now_tabs_dot_shows_only_while_the_run_is_live_never_recorded_paused_or_disconnected() -> None:
+    script = """
+    const dot = () => doc.getElementById("now-dot").hidden;
+    const seen = { live: dot() };
+    vm.runInContext(`MomState.visit(view, { tab: "now" }); render();`, context);
+    seen.now = dot();
+    vm.runInContext(`MomState.keydown(view, { key: " " }, Date.now() / 1000); render();`, context);
+    seen.paused = dot();
+    vm.runInContext(`MomState.keydown(view, { key: " " }, Date.now() / 1000); render();`, context);
+    seen.resumed = dot();
+    sources[0].onerror();
+    flush();
+    seen.lost = dot();
+    return seen;
+    """
+    fresh = "for (const e of events) e.t = Date.now() / 1000;"
+    live = app(fresh + REPLAY + script, stream(started("a"), decision(0)))
+    assert live == {"live": False, "now": False, "paused": True, "resumed": False, "lost": True}
+    recorded = app(REPLAY + script, stream(started("a"), decision(0)))
+    assert set(recorded.values()) == {True}

@@ -129,7 +129,7 @@ button.back::after{left:0;--tx:0%}
 .chip.lost::before{content:"";width:.6rem;height:1.5px;background:currentColor;transform:rotate(-45deg)}
 .chip.placeholder{color:var(--muted)}
 .chip.placeholder::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px dashed currentColor}
-.dot{display:inline-block;flex:none;width:.5rem;height:.5rem;border-radius:50%}
+.dot{flex:none;width:.5rem;height:.5rem;border-radius:50%}
 .dot.live{background:currentColor}
 /* The live dot breathes slowly wherever it shows (one pulse every 1.8 s, opacity only); recorded and placeholder hold still. */
 @media (prefers-reduced-motion:no-preference){.chip.live::before,.dot.live{animation:pulse 1.8s ease-in-out infinite}}
