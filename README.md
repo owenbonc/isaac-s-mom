@@ -2,7 +2,7 @@
 
 # Scaffld
 
-### A robot teacher that disagnoses gaps in a robot's skills and builds its own lessons.
+### An Argon-powered robot teacher that diagnoses failures in a robot’s skills and builds its own lessons.
 
 ## One sentence description of a task → a new, tested robot skill in 39.7 minutes.
 
