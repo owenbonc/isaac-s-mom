@@ -35,7 +35,7 @@ Pitch: "A robot teacher that finds the gaps in a robot's skills and creates its 
 
 ### 3.2 Student (workstream 4)
 - SmolVLM2-500M-Video-Instruct, local: Mac MPS, or CUDA on the Windows RTX 5070 and 5060 machines. `predict_skill(obs, instruction, feedback) -> SkillCall`, output parsed as JSON and checked against the whitelist; an unparseable answer becomes `reobserve` and is logged.
-- Done rule: `StudentPolicy.act` returns `None` after its second `reobserve` in a row, which ends the episode; two unparseable answers in a row therefore end it too. The student learns to stop from the teacher's demonstrations, which end with one `reobserve` (§3.3).
+- Done rule: `StudentPolicy.act` returns `None` after its second `reobserve` in a row, which ends the episode; two unparseable answers in a row therefore end it too. The student learns to stop from the teacher's demonstrations, which end with one `reobserve` (§3.3): each accepted demonstration also gives one closing training example of that second `reobserve` (§4.3).
 - Fine-tuning: LoRA locally on the Windows RTX 5070 (CUDA), on training examples (§4.3). Each round produces a checkpoint id `<run_id>/ckpt-r<round>`, stored in `runs/<run_id>/checkpoints/ckpt-r<round>/` (gitignored); `ckpt-r0` is the base model.
 
 ### 3.3 Teacher (workstream 2)
@@ -102,7 +102,7 @@ class TruthSim(RobotSim, Protocol):  # validator and orchestrator only
 `{episode_id, run_id, seed, split: dev|heldout, round, instruction, sim_version, robot_config, steps: [{step, sim_time, frame: "frames/0003.jpg", joint_state, skill_call, controller: student|teacher, checkpoint, actions: "actions/0003.npy", timestamps}], perturbations: [{before_step, perturbation: Perturbation}], takeover_step: int|null, diagnosis: Diagnosis|null, validation: Validation, replay_valid: bool|null}`
 
 ### 4.3 Training example (one JSON line)
-`{image: "<path to frame>", instruction, feedback, target: SkillTarget}` (skill and params only, never the reason) from teacher steps of accepted dev episodes only.
+`{image: "<path to frame>", instruction, feedback, target: SkillTarget}` (skill and params only, never the reason) from teacher steps of accepted dev episodes only. When an accepted demonstration's last step is the teacher's `reobserve`, one more example follows it: the same frame, feedback `reobserve: ok`, target `reobserve`, which is the second `reobserve` that ends the student's episode (§3.2).
 
 ### 4.4 Events (`events.jsonl`)
 `{t, run_id, type, data}` with `type` in `episode_started, observation, decision, action_executed, perturbation, validation, diagnosis, finetune_started, finetune_completed, evaluation_result, argon_call, error`.
