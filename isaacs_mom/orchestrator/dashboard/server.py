@@ -1,5 +1,4 @@
-"""Dashboard server (SPEC §3.5) over a runs directory: one HTML page, and for each run its `events.jsonl` as
-server-sent events, its frame JPEGs and its training and replay summaries; the Teach box starts a new run."""
+"""The dashboard server over a runs directory (SPEC §3.5)."""
 
 import asyncio
 import logging
@@ -50,8 +49,7 @@ class FreshStatic(StaticFiles):
 
 
 def frame_url(frame: object, run_dir: Path) -> str | None:
-    """The `/frames/<run_id>/...` URL for an event's frame path, which is relative to the run directory; None outside
-    it."""
+    """The `/frames/<run_id>/...` URL for an event's frame path, relative to the run directory; None outside it."""
     if not isinstance(frame, str):
         return None
     try:
@@ -106,15 +104,13 @@ def create_app(
     generate: Generate | None = None,
     launch: Launch = launch_run,
 ) -> FastAPI:
-    """`task` is what a Teach-started run trains on; `generate` answers for Argon (None: Gemini) and `launch` starts
-    `mom run`."""
+    """`task` is what a Teach-started run trains on; `generate` answers for Argon (None: Gemini)."""
     app = FastAPI(title="Isaac's Mom dashboard")
     # A DNS-rebinding page reaches 127.0.0.1 under its own host name, so only a local name is served.
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=["127.0.0.1", "localhost"])
     own_origins = {f"http://127.0.0.1:{port}", f"http://localhost:{port}"}
 
     def served(run_id: str) -> Path:
-        """The run directory an id from a URL names, or 404."""
         if (run_dir := find_run(runs_dir, run_id)) is None:
             raise HTTPException(status_code=404)
         return run_dir

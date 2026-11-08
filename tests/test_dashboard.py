@@ -570,7 +570,6 @@ def test_a_slow_diagnosis_sends_heartbeats_for_the_episode_it_diagnoses(
     assert len(beats) >= 2 and set(beats) == {events[at]["data"]["episode_id"]}
 
 
-# The Teach box (SPEC §3.5): a POST from the dashboard's own page starts a run judged by the task generator.
 ORIGIN = "http://127.0.0.1:8200"
 REFUSES = {"refuse": "it can only move boxes"}
 BOX_IN_BIN = {
@@ -589,8 +588,7 @@ Launched = list[tuple[list[str], Path]]
 def teach_client(
     tmp_path: Path, answer: dict | Exception | None = None, host: str = "127.0.0.1", launch_error: bool = False
 ) -> tuple[TestClient, Launched]:
-    """A dashboard on port 8200 whose Argon answers `answer` (None: the test fails if it's asked) and whose launcher
-    records what it would start instead of starting it."""
+    """Port 8200, Argon answering `answer` (None fails the test if asked), and a launcher that only records."""
     launched: Launched = []
 
     def generate(purpose: Purpose, parts: list[Part]) -> str:

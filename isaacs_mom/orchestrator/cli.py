@@ -131,8 +131,7 @@ def main() -> None:
     run_dir = args.runs / args.run_id
 
     def checked_argon(events: EventLog) -> Argon:
-        # One budget for the whole run (SPEC §2 rule 5), the task generator's calls on a Teach-started run included;
-        # checked before any episode, so a bad key stops it in seconds.
+        # One budget per run (SPEC §2 rule 5), a Teach's generator calls too; checked first so a bad key fails fast.
         argon = Argon(events, generate=stub_generate if teacher == "stub" else None)
         argon.calls = sum(e.type == "argon_call" for e in read_events(run_dir))
         if teacher == "argon":

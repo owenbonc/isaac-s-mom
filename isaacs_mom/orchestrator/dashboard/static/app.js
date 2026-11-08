@@ -13,14 +13,12 @@ let flashedFrame = null;
 let lastHeard = { text: "", episode: null, only: null, paused: false, lost: false };
 // A one-off line for the announcer: the box or bin move, heard once when it arrives live.
 let news = "";
-// Saved run files the events don't carry (SPEC §3.5): each trained round's training-set summary and the replay
-// report, by name; null once asked for and absent. A file once written never changes, so each is read until found.
+// Run files by name, null once asked for and absent; a written file never changes, so each is read until found.
 const runFiles = {};
 // Configuration (SPEC §3.2, §3.3), not data: the page shows these labelled as configured.
 const CONFIGURED = { student: "SmolVLM2-500M, local", teacher: "Argon (Gemini API)", finetune: "RTX 5070, local" };
 
 const $ = (id) => document.getElementById(id);
-// The run this page shows (SPEC §3.5): the URL names it; without one, the first in GET /runs' order.
 let runId = new URLSearchParams(location.search).get("run");
 let runs = [];
 let teaching = { state: "idle" };
@@ -47,9 +45,6 @@ const MOVE = '<svg class="i" aria-hidden="true"><use href="#i-move"/></svg>';
 const now = () => Date.now() / 1000;
 const label = (kind) => kind[0].toUpperCase() + kind.slice(1);
 const chip = (kind, text = label(kind)) => `<span class="chip ${kind}">${text}</span>`;
-// A panel's label, quiet beside the header's (SPEC §3.5): its dot, the word in its tooltip and accessible name, spelled
-// out only where it differs from the run's. A panel with nothing to show says so in words, so placeholder means only a
-// run that is not on a real simulator.
 const panelChip = (ep = null) => {
   const { kind, spelled } = MomState.panelLabel(view, now(), ep);
   const word = label(kind);
@@ -109,16 +104,14 @@ function renderHeader() {
     : "";
 }
 
-// Where the shown episode sits: among Teaching's episodes in Teaching, among the run's in Now. A seed's episode is
-// placed by its seed and checkpoint instead, so it has none.
+// A seed's episode is placed by its seed and checkpoint instead, so in Results it has no position.
 function position(ep) {
   const s = MomState.shown(view);
   const among = view.tab === "teaching" ? s.episodes.filter(MomState.teaches) : s.episodes;
   return view.tab === "results" || !ep ? "" : `Episode ${among.indexOf(ep) + 1} of ${among.length}`;
 }
 
-// Screen readers hear the episode when the view moves to another, who is in control and the verdict when either
-// changes, a move between Results' list and its seeds or to another filter, and a pause or resume; not every step.
+// Screen readers hear what changed (episode, control, verdict, Results place, pause, connection), never every step.
 function announce(text) {
   const s = MomState.shown(view);
   const ep = MomState.episode(view, now());
@@ -178,7 +171,6 @@ function renderControl() {
     return "";
   }
   const [kind, where] = kindOf(ep);
-  // A seed's episode names its checkpoint and leads with the key back to the seed.
   const r = place === "episode" && MomState.results(MomState.shown(view));
   const row = r && r.seeds.find((x) => x.seed === view.seed);
   const k = row ? row.episodes.findIndex((x) => x.id === ep.id) : -1;
@@ -215,7 +207,6 @@ function renderControl() {
   return `${said}${words ? ` Verdict: ${words}.` : ""}`;
 }
 
-// Teaching's first episode follows the first held-out test.
 const TEACHING_STARTS = "The student's trials start once the first held-out test ends.";
 const noEpisode = () => (MomState.shown(view).episodes.length ? slate("No teaching episode yet", TEACHING_STARTS) : slate("No episode yet", "The head camera's frames appear here once the run starts."));
 
@@ -287,8 +278,7 @@ function renderCamera() {
     const next = first ? ` First decision after the move: <span class="mono">${skillText(first)}</span>.${first.reason ? ` ${esc(first.reason)}` : ""}` : "";
     caption = `<p class="caption moved clamped"${first && first.reason ? ` title="${esc(first.reason)}"` : ""}>${what} between these frames, before step ${esc(move.step)}.${next}</p>`;
   } else {
-    // The move stays marked on the caption line, with Move's icon, for the rest of its episode, so it can be shown after
-    // the moment passed; the first frame after it says so in its own caption.
+    // After its first frame the move stays marked on the caption line, so it can be shown once the moment has passed.
     movedAt = last.after && !last.moved ? `<span class="moved-at">${MOVE}${what} at step ${esc(move.step)}</span>` : "";
     frame = cell(last, skillRow(ep, last), last.moved);
     caption = last.moved
@@ -318,8 +308,6 @@ const foot = (caption, provenance) => `<div class="foot">${caption}${provenance}
 // The decision that chose a skill from frame `f`, or null.
 const skillRow = (ep, f) => (f && ep.rows.find((r) => r.kind === "decision" && r.step === f.step && r.skill)) || null;
 
-// One frame on the stage: the skill `row` chose from it, led by `label`, in a notch at its top left, and its controller
-// in a pill at its bottom right; nothing else covers it. A missing frame stays, hatched.
 function cell(f, row, moved, label = "") {
   const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : ` at step ${esc(f.step)}`}">` : "";
   const skill = row ? `<span class="said ${row.controller || "unknown"}"><svg class="i" aria-hidden="true"><use href="#s-${esc(row.skill)}"/></svg>${skillText(row)}</span>` : "";
@@ -361,7 +349,6 @@ function verdictRow(ep) {
 }
 
 const NAVIGATION = { "b-prev": "ArrowLeft", "b-next": "ArrowRight", "b-d": "d", "b-t": "t", "b-m": "m" };
-// What ← and → step through where the view is.
 const STEPS = { list: "seed", seed: "seed", episode: "checkpoint", teaching: "episode", now: "episode" };
 const PAUSE = $("b-pause");
 
@@ -371,7 +358,6 @@ function renderEpisode() {
   $("b-prev").dataset.tip = `Previous ${steps} · ←`;
   $("b-next").dataset.tip = `Next ${steps} · →`;
   $("b-m").setAttribute("aria-pressed", String(view.compare !== null));
-  // The key's label is its name; while paused it shows its play icon and the count of events waiting beside it.
   PAUSE.classList.toggle("on", view.frozen !== null);
   PAUSE.setAttribute("aria-label", MomState.pauseLabel(view));
   PAUSE.dataset.tip = `${MomState.pauseLabel(view)} · Space`;
@@ -397,7 +383,7 @@ function renderLog() {
   const stage = MomState.filmstrip(ep, step).find((f) => f.now);
   const full = (r) => !stage || stage.step === null || (r.step !== null && r.step >= stage.step);
   const html = ep.rows.map((r) => (r.kind === "decision" ? decisionRow(r, move && r === move.decision, done, full(r)) : r.kind === "verdict" ? verdictRow(ep) : logRow(r)));
-  // Move hides the log in the two-column layout; letting go of it drops the scroll it set, so the log follows new rows again.
+  // Letting go of Move drops the scroll it parked, so the log follows new rows again.
   const focus = step === null ? null : `${ep.id}@${step}`;
   const fromStart = renderedEpisode !== ep.id || html.length < renderedRows || (renderedFocus !== null && focus === null);
   if (fromStart) logFollowing = true;
@@ -420,7 +406,6 @@ function renderLog() {
   renderedEpisode = ep.id;
 }
 
-// The held-out result (SPEC §3.5), in the episode view's panel and atop Results.
 function heldOut() {
   const s = MomState.shown(view);
   const c = MomState.claim(s);
@@ -428,13 +413,10 @@ function heldOut() {
   // A run that stopped arriving mid-evaluation can't say the test still runs.
   const live = MomState.following(view, now()) && !view.lost;
   const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? " run so far" : ` of ${test.of} run`}${live ? "" : " when its events stopped"}.`;
-  // First and latest only: the change is the claim, the page's one large number, with the two counts beside it at
-  // body size and the errored counts under them when any errored; with nothing scored to compare, it says so in words.
   const errored = c && c.errored ? `<span class="note">${esc(c.errored)}</span>` : "";
   const lead = c && (c.figure
     ? `<span class="fig" role="img" aria-label="Held-out success: ${esc(c.spoken)}">${esc(c.figure)}</span><span class="rates"><span>${esc(c.counts)}</span>${errored}</span>`
     : `<span>${esc(cap(c.spoken))}.</span>${errored}`);
-  // The checkpoint ids are the names' tooltip.
   const gain = c && `<div class="gain">${lead}</div><div class="names" title="${esc(c.ids)}">${esc(c.names)}</div>`;
   // A run that did not start says why where its results would be, so it needs no line here.
   const none = progress || (s.refused === null ? "No held-out evaluation in the events yet." : "");
@@ -449,18 +431,14 @@ function renderRounds() {
   $("p-rounds").innerHTML = heldOut();
 }
 
-// Results marks (SPEC §3.5): each its own icon, coloured by how the seed ends.
 const MARK = { down: "Regressed", up: "Improved", fail: "Still fails", pass: "Always passed", error: "Errored", pending: "Pending" };
 const markIcon = (m) => `<svg class="i mark ${m}" aria-hidden="true"><use href="#m-${m}"/></svg>`;
 const OUTCOME = { succeeded: "Succeeded", failed: "Failed", errored: "Errored", pending: "not run yet" };
-// The first and the latest checkpoint's verdicts, as the mark compares them.
 const outcomes = (row) => {
   const [first, latest] = [row.episodes[0], row.episodes[row.episodes.length - 1]];
   return row.episodes.length < 2 ? OUTCOME[first.outcome] : `${OUTCOME[first.outcome]} → ${OUTCOME[latest.outcome]}`;
 };
 
-// Results' list (SPEC §3.5): the held-out figure, one count per mark, each a filter, and a row per seed; a run that
-// did not start says why, and one with no evaluation yet says so.
 function resultsList() {
   const s = MomState.shown(view);
   const r = MomState.results(s, view.only);
@@ -485,13 +463,10 @@ function resultsList() {
   return `${head}<div class="filters" role="group" aria-label="Show only the seeds marked">${filters.join("")}</div>${rows.length ? `<ol class="seeds" aria-label="Held-out seeds">${rows.join("")}</ol>` : none}`;
 }
 
-// A seed's switch (SPEC §3.5): the first checkpoint, every one side by side, or the latest. Both is the default
-// where each frame keeps at least FRAME_MIN px; a choice holds from seed to seed.
 const SIDES = { before: ["Before", "The first checkpoint's episode"], both: ["Both", "Every checkpoint's episode, side by side"], after: ["After", "The latest checkpoint's episode"] };
 const FRAME_MIN = 360;
 let side = null;
 const sideFor = (count) => side || (innerWidth / count >= FRAME_MIN ? "both" : "after");
-// Why a checkpoint shows no episode for the seed, or how its verdict reads.
 function cardVerdict(e, ep) {
   if (e.outcome === "pending") return `<span class="note">${ep ? "Running" : "Not run yet"}</span>`;
   if (e.outcome === "errored") {
@@ -500,7 +475,6 @@ function cardVerdict(e, ep) {
   }
   return `${verdictChip(ep)}<span class="note clamped two" title="${esc(cap(ep.verdict.reason))}">${esc(cap(ep.verdict.reason))}</span>`;
 }
-// One checkpoint's episode for the seed: its last frame, with its controller, and its verdict; it opens the episode.
 function seedCard(c, e, ep) {
   const id = c.checkpoint && !c.name.endsWith(c.checkpoint) ? `<span class="mono note">${esc(c.checkpoint)}</span>` : "";
   const head = `<span class="card-head"><span class="what">${esc(cap(c.name))}</span>${id}</span>`;
@@ -511,7 +485,6 @@ function seedCard(c, e, ep) {
   const body = `${head}<span class="cell">${shot}</span><span class="card-verdict">${cardVerdict(e, ep)}</span>`;
   return ep ? `<button type="button" class="card" data-open="${esc(ep.id)}" data-f="card:${esc(ep.id)}">${body}</button>` : `<div class="card">${body}</div>`;
 }
-// One seed (SPEC §3.5): its mark beside its number, the switch opposite, and its held-out episodes, one per checkpoint.
 function seedDetail() {
   const s = MomState.shown(view);
   const r = MomState.results(s);
@@ -539,7 +512,6 @@ function renderResults() {
   if (place === "seed") $("results").innerHTML = seedDetail();
 }
 
-// The tabs: Results, Teaching, and Now while the run is live or Now is shown.
 function renderTabs() {
   for (const b of $("tabs").querySelectorAll("button")) {
     if (b.dataset.tab === view.tab) b.setAttribute("aria-current", "page");
@@ -552,8 +524,6 @@ function renderTabs() {
 
 const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
-// One line: each model, where it runs (configured), and its measured median latency or fine-tune duration; then the
-// Argon strip, the run's calls against its budget (rule 5).
 function renderModels() {
   const shown = MomState.shown(view);
   const s = MomState.summary(shown);
@@ -572,8 +542,6 @@ function renderModels() {
     panelChip();
 }
 
-// Each round's training set and the replay of the run's accepted episodes, from the run's saved files (SPEC §3.5).
-// A file not written yet says so in words.
 function renderTraining() {
   const s = MomState.shown(view);
   const missing = (name) => `<span class="ph-text">${name in runFiles || !runId ? "Not in the run's files." : "Reading the run's files."}</span>`;
@@ -589,7 +557,6 @@ function renderTraining() {
     return `<dt>Round ${esc(r)}</dt><dd>${plural(t.examples, "example")} from ${t.accepted} accepted of ${plural(t.demonstrations, "demonstration")} so far <span class="note">· ${detail.join(" · ")}</span></dd>`;
   };
   const r = runFiles["replay_report.json"];
-  // The first two that failed, by episode and why; the rest counted.
   const named = r ? r.failures.slice(0, 2).map((f) => `<span class="mono">${esc(f.episode_id)}</span> (${esc(f.reason)})`) : [];
   const more = r && r.failures.length > 2 ? ` and ${r.failures.length - 2} more` : "";
   const failed = named.length ? ` <span class="note">· not reproduced: ${named.join(", ")}${more}</span>` : "";
@@ -598,7 +565,7 @@ function renderTraining() {
   $("p-training").innerHTML = `<header><h2>Training and replay</h2>${panelChip()}</header><dl class="body files">${rounds}<dt>Replay</dt><dd>${replay}</dd></dl>`;
 }
 
-// Reads the run's saved files not found yet, while the run may still write them: its last event under 30 minutes ago.
+// A run quiet for 30 minutes writes no more files, so its files are read once.
 async function readRunFiles() {
   const s = MomState.shown(view);
   if (!runId || (Object.keys(runFiles).length && now() - s.lastT > 30 * 60)) return;
@@ -675,8 +642,6 @@ function render() {
   for (const a of document.getAnimations()) if (a.animationName === "pulse") a.startTime = 0;
 }
 
-// A key that moved Results' focus, or a move to another place, takes the keyboard there: the focused seed in the list,
-// in a seed the card of the episode just left, else its latest, and in a seed's episode the key back to the seed.
 let renderedPlace = null;
 let seedMoved = false;
 let leftEpisode = null;
@@ -699,11 +664,9 @@ function placeFocus() {
   if (to) to.focus();
 }
 
-// A key that disabled itself, or Move hiding a focused panel, would drop focus to <body>: the nearest enabled
-// presenter key takes it instead, or Move's own key.
+// Focus on a control the render disabled, hid or rewrote would fall to <body>, so a nearby control takes it.
 function keepFocus(was) {
   if (!was || was === document.body || (was.isConnected && !was.disabled && was.checkVisibility())) return;
-  // A control the render rewrote takes the focus back in its new copy.
   const again = was.dataset.f && document.querySelector(`[data-f="${CSS.escape(was.dataset.f)}"]`);
   if (again && !again.disabled && again.checkVisibility()) return again.focus();
   const keys = [...document.querySelectorAll(".presenter button")];
@@ -726,7 +689,6 @@ function schedule() {
 }
 
 const RUN_STATUS = { live: ["live", "Live"], recorded: ["recorded", "Recorded"], not_started: ["refused", "Not started"] };
-// The run picker: every run in the server's order, live first; a run that did not start says why.
 function renderRuns() {
   $("runs").hidden = false;
   $("run-name").textContent = runId || "No runs yet";
@@ -735,7 +697,6 @@ function renderRuns() {
     ? runs
         .map((r) => {
           const [kind, word] = RUN_STATUS[r.status];
-          // Typed and generated text is clamped to two lines here, whole in its title, in its own direction.
           const what = r.instruction ? `<span class="run-what clamped two" dir="auto" title="${esc(r.instruction)}">${esc(r.instruction)}</span>` : '<span class="run-what ph-text">No instruction recorded</span>';
           const why = r.status === "not_started" && r.reason ? `<span class="run-why clamped two" title="${esc(r.reason)}">${esc(r.reason)}</span>` : "";
           const here = r.run_id === runId ? ' aria-current="page"' : "";
@@ -745,8 +706,6 @@ function renderRuns() {
     : '<li class="ph-text">No runs yet. Tell the robot what to learn in the Teach box to start one.</li>';
 }
 
-// The runs list, refreshed every few seconds; null while the server doesn't answer. A page with no run opens the
-// first one to appear.
 async function loadRuns() {
   const response = await fetch("/runs").catch(() => null);
   if (!response || !response.ok) return null;
@@ -756,7 +715,6 @@ async function loadRuns() {
   return runs;
 }
 
-// The Teach box's count, its state while the generator judges the text, and what came back.
 const TEACH = $("teach");
 const FIELD = $("instruction");
 function renderTeach() {
@@ -802,15 +760,12 @@ FIELD.addEventListener("input", () => {
   renderTeach();
 });
 
-// The legend and the run picker close on Escape, a click outside them or the focus moving on past them, as popovers do;
-// the Teach answer closes on Escape or a click outside it.
 const POPOVERS = [...document.querySelectorAll("details.legend, details.runs")];
 const dismissTeach = () => {
   if (teaching.state === "checking" || teaching.state === "idle") return;
   teaching = { state: "idle" };
   renderTeach();
 };
-// Escape closes an open popover before it goes back a step (MomState.keydown).
 const closePopover = () => {
   const open = POPOVERS.find((d) => d.open);
   if (!open) return false;
@@ -843,8 +798,6 @@ document.addEventListener(
   true,
 );
 
-// Presenter controls (SPEC §3.5): the same actions from the keyboard, whatever has focus, and from the buttons that label
-// them; in Results an arrow takes the focus to the seed it moved to. True when the key is the dashboard's.
 function press(e) {
   const place = MomState.where(view);
   if (!MomState.keydown(view, e, now())) return false;
@@ -879,7 +832,6 @@ $("results").addEventListener("click", (e) => {
   else return;
   schedule();
 });
-// The control bar's back key leaves an episode for its seed.
 $("control").addEventListener("click", (e) => {
   if (!e.target.closest("button[data-back]")) return;
   MomState.keydown(view, { key: "Escape" }, now());
@@ -892,7 +844,6 @@ document.querySelector(".presenter").addEventListener("click", (e) => {
   if (button) press({ key: button.dataset.key });
 });
 
-// The shown run's events (SPEC §3.5).
 function follow() {
   const source = new EventSource(`/events?run=${encodeURIComponent(runId)}`);
   // The server replays the whole run on every connection, so the view starts over instead of adding to what is shown.
@@ -924,7 +875,6 @@ function follow() {
   };
 }
 
-// A page without a run in its URL opens the first listed and names it in the URL; with none listed, it says so.
 let opened = false;
 (async () => {
   const listed = await loadRuns();

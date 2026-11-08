@@ -1151,8 +1151,7 @@ def test_a_run_started_from_an_earlier_run_names_round_0_by_that_run_and_counts_
     assert out["spoken"].endswith("20%, 4 of 20, from fixed-v2, ckpt-r1, then 100%, 1 of 1, after\u00a0round\u00a01")
     assert out["checkpoints"] == ["from fixed-v2, ckpt-r1", "after\u00a0round\u00a01"]
     assert out["carried"] == {"count": 8, "run": "fixed-v2"}
-    # before its result says where round 0 came from, a round 0 tested on another checkpoint than the base isn't
-    # called before fine-tuning
+    # until its result names round 0's source, a round 0 on a checkpoint other than the base is only under way
     started_from = [
         ("episode_started", held_out(0, 1, None)[0][1]),
         ("decision", {**decision(0)[1], "checkpoint": "x"}),
@@ -1678,10 +1677,7 @@ def test_a_runs_instruction_and_why_it_did_not_start_are_read_from_its_events() 
 
 
 APP_JS = STATE_JS.parent / "app.js"
-# app.js under a minimal DOM: every element is a stub that records the HTML written to it, EventSource is a stub the
-# test drives, and frames run only when the test flushes them. `script` runs once app.js has loaded and asked for
-# its runs; it sees `sources`, `writes`, `frames`, `flush`, `doc`, the URLs fetched, the intervals set (by function
-# name), and app.js's own globals.
+# app.js under a DOM stub that records every write; the test drives the event stream and the animation frames.
 APP_DRIVER = r"""
 const vm = require("vm");
 const fs = require("fs");
@@ -1746,7 +1742,7 @@ class EventSource {
 const frames = [];
 const fetched = [];
 const intervals = [];
-// The server's answers: the runs list, a Teach the generator refused, and a run file not written yet (204, no body).
+// A body-less answer's json() throws, as a 204's does.
 const answer = (status, body) => ({ ok: status < 300, status, json: async () => body ?? JSON.parse("") });
 const refused = { run_id: "t", started: false, reasons: ["Not yet"] };
 const context = vm.createContext({
@@ -1835,7 +1831,6 @@ def hostile_run() -> list[dict]:
     return [{**e, "run_id": f"r{x}"} for e in stream(*events)]
 
 
-# Replays `events` through the stub stream and lets the replay settle, as a page opening a run does.
 REPLAY = """
 const [source] = sources;
 source.onopen();
@@ -1845,8 +1840,7 @@ flush();
 """
 
 
-# What the page wrote: the tags outside quoted values that an event could have injected, and the elements that show
-# HOSTILE as escaped text. A tag's quoted values are escaped text, so only what lies outside them could be markup.
+# A tag's quoted values are escaped text, so only what lies outside them could be injected markup.
 MARKUP = """
 const tags = writes.flatMap(([, html]) => html.replace(/"[^"]*"/g, '""').match(/<[^>]+>/g) || []);
 return {
@@ -1973,7 +1967,6 @@ def test_results_says_once_why_a_run_did_not_start() -> None:
     assert "Not yet: the loop teaches one task" in out["results"]
 
 
-# Every announcement the page makes, in order, from the moment app.js loaded.
 HEARD = """
 const heard = [];
 const said = { get: () => heard.at(-1) || "", set: (t) => heard.push(t) };

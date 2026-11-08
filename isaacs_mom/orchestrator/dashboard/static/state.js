@@ -8,7 +8,6 @@
   function initial() {
     return {
       runId: null,
-      // The run's instruction (its first `instruction` event), and why a Teach did not start it, if it did not.
       instruction: null,
       refused: null,
       lastT: 0,
@@ -17,13 +16,10 @@
       rounds: [],
       latency: { student: [], teacher: [] },
       finetune: { pending: null, durations: [] },
-      // Rounds whose training set was built (`finetune_started`), each with a summary file to read.
       trained: [],
       argon: { used: 0, budget: null, answers: [], failed: 0 },
       errorCount: 0,
-      // Held-out episodes that crashed before a verdict, by seed and the evaluation they belong to (its index).
       crashes: [],
-      // Set by the error event the dashboard leaves when the `mom run` it launched exits non-zero (SPEC §3.5).
       stopped: false,
     };
   }
@@ -72,8 +68,7 @@
     return null;
   }
 
-  // Where a run started with `mom run --from-run` began (SPEC §3.6): the earlier run, its checkpoint and the accepted
-  // demonstrations carried over; null for anything else, so a malformed one reads as a run from the base model.
+  // A malformed `--from-run` origin (SPEC §3.6) is null, so it reads as a run from the base model.
   function fromRun(f) {
     if (!f || typeof f !== "object" || !text(f.run) || !text(f.checkpoint) || !Number.isInteger(f.carried) || f.carried < 0) return null;
     return { run: f.run, checkpoint: f.checkpoint, carried: f.carried };
@@ -168,7 +163,6 @@
         break;
       }
       case "evaluation_result":
-        // `after` is where the next evaluation's held-out episodes start; `from` is where a run's round 0 came from.
         if ([d.round, d.successes, d.n, d.errored].every((v) => num(v) !== null))
           s.rounds.push({ round: d.round, checkpoint: text(d.checkpoint), successes: d.successes, n: d.n, errored: d.errored, after: s.episodes.length, from: d.round === 0 ? fromRun(d.from_run) : null });
         break;
@@ -223,8 +217,7 @@
     return { name, version: sim.version, task: task ? task[1] : null };
   }
 
-  // SPEC §3.5: live while events arrive, or while a fine-tune started under 30 minutes ago has not completed, and never
-  // once the run has stopped, as the runs list (orchestrator/runs.py) reads it.
+  // Live as the runs list (orchestrator/runs.py) reads it, so the run picker and the page agree (SPEC §3.5).
   const running = (s, now) =>
     !s.stopped && (now - s.lastT < FRESH_SECONDS || (s.finetune.pending !== null && now - s.finetune.pending.t < FINETUNE_SECONDS));
 
@@ -239,7 +232,6 @@
     return v.frozen ? "paused" : "live";
   }
 
-  // A panel's provenance (SPEC §3.5): its dot, with the word spelled out only where it differs from the run's label.
   function panelLabel(v, now, ep = null) {
     const kind = provenance(v, now, ep);
     return { kind, spelled: kind !== provenance(v, now) };
@@ -332,8 +324,7 @@
     if (!took) return good ? `${outcome}, by the student alone` : outcome;
     return `${outcome} after the teacher took over${took.step === null ? "" : ` at step ${took.step}`}`;
   }
-  // A checkpoint by the evaluation that tested it, in words: round 0 from an earlier run names that run and checkpoint;
-  // no-break spaces keep each other name on one line when a pair wraps.
+  // No-break spaces keep each round's name on one line when a pair wraps.
   function roundName(r) {
     if (r.from) return `from ${r.from.run}, ${r.from.checkpoint}`;
     return r.round === 0 ? "before\u00a0fine-tuning" : r.round === null ? "the\u00a0evaluation\u00a0under\u00a0way" : `after\u00a0round\u00a0${r.round}`;
@@ -344,14 +335,12 @@
   // The Results marks (SPEC §3.5) in their sort order: the changes, the unchanged, then errored and pending.
   const MARKS = ["down", "up", "fail", "pass", "error", "pending"];
   const RECORDING_ERROR = "recording error";
-  // A held-out episode's outcome: errored on a recording error, a crash, or no verdict once its evaluation finished.
   function outcome(cell, done) {
     if (cell.crashed) return "errored";
     if (!cell.ep || !cell.ep.verdict) return done ? "errored" : "pending";
     if (cell.ep.verdict.reason.startsWith(RECORDING_ERROR)) return "errored";
     return accepted(cell.ep) ? "succeeded" : "failed";
   }
-  // The first evaluation against the latest; one that errored in either is counted apart.
   function mark(outcomes) {
     const first = outcomes[0];
     const latest = outcomes[outcomes.length - 1];
@@ -360,8 +349,7 @@
     if (first === "succeeded") return latest === "succeeded" ? "pass" : "down";
     return latest === "succeeded" ? "up" : "fail";
   }
-  // Results (SPEC §3.5): each evaluation as a checkpoint, the one under way last; each held-out seed's episode and
-  // outcome per checkpoint and its mark, sorted by mark then seed, kept to the marks `only` names; and the count per mark.
+  // The checkpoint under way comes last, and the counts cover every seed whatever `only` keeps in the list.
   function results(s, only = null) {
     // An evaluation's held-out episodes follow the previous evaluation's result, as testing() reads them.
     const ends = s.rounds.map((r) => r.after);
@@ -396,9 +384,6 @@
     return { checkpoints, seeds: only === null ? seeds : seeds.filter((r) => r.mark === only), counts };
   }
 
-  // The held-out claim (SPEC §3.5): the change in percentage points between the first and the latest evaluation, the
-  // two counts of successes out of the episodes that didn't error, the errored counts when any errored, and the
-  // evaluations named in words with their checkpoint ids. Null before the first evaluation.
   function claim(s) {
     if (!s.rounds.length) return null;
     const first = s.rounds[0];
@@ -416,14 +401,13 @@
           ? `all ${r.n} held-out episodes errored ${roundName(r)}`
           : `${rate(r)}%, ${r.successes} of ${scored(r)}, ${roundName(r)}${r.errored ? `, ${r.errored} errored` : ""}`;
     const change = points === null ? "" : points === 0 ? "No change: " : `${points > 0 ? "Up" : "Down"} ${Math.abs(points)} percentage points: `;
-    // One denominator is said once ("4 → 15 of 20"); two that differ go with their counts ("9/18 → 15/20").
     const of = scored(first);
     const counts =
       of > 0 && pair.every((r) => scored(r) === of)
         ? `${pair.map((r) => r.successes).join(" → ")} of ${of}`
         : pair.map((r) => (scored(r) > 0 ? `${r.successes}/${scored(r)}` : "none")).join(" → ");
     return {
-      // The change in points, never a relative percentage; with one evaluation, its rate; with nothing scored, none.
+      // The change in percentage points, never a relative percentage.
       figure: rates.includes(null) ? null : points === null ? `${rates[0]}%` : `${points < 0 ? "\u2212" : "+"}${Math.abs(points)} pts`,
       counts,
       spoken: change + pair.map(said).join(", then "),
@@ -433,8 +417,6 @@
     };
   }
 
-  // The Argon strip (SPEC §3.5, rule 5): calls used of the run's budget, the median answer with its n, and the calls
-  // that failed. Null before the first call.
   function argon(s) {
     const a = s.argon;
     return a.used ? { used: a.used, budget: a.budget, answer: stat(a.answers), failed: a.failed } : null;
@@ -465,9 +447,7 @@
     return { checkpoint: decided ? decided.checkpoint : null, run: tests.filter((e) => e.verdict).length, of: last ? last.n : null };
   }
 
-  // What a fine-tune learns from (SPEC §3.5): the last frame of each accepted teacher demonstration so far, with its
-  // number in the run, how many demonstrations were judged and how, and those carried from an earlier run (null for a
-  // run from the base model). One with no frame is counted, not shown.
+  // What a fine-tune learns from (SPEC §3.5); a demonstration with no frame is counted, not shown.
   function lessons(s) {
     const judged = s.episodes.filter((e) => kind(e) === "demonstration" && e.verdict);
     const kept = judged.filter(accepted);
@@ -481,17 +461,13 @@
     };
   }
 
-  // Teaching holds every episode but the held-out tests (SPEC §3.5).
   const teaches = (e) => e.split !== "heldout";
   // A finished run's story (SPEC §3.5): its latest accepted teacher demonstration whose diagnosis the run holds.
   const story = (s) => s.episodes.findLast((e) => accepted(e) && actedOn(s, e)?.diagnosis) || s.episodes.findLast(teaches) || null;
 
-  // Where the view is (SPEC §3.5): in Results, the seed list, a seed's checkpoints or one of its episodes; Teaching;
-  // or Now, the episode in progress.
   const where = (v) => (v.tab !== "results" ? v.tab : v.opened !== null ? "episode" : v.seed !== null ? "seed" : "list");
 
-  // The episode the view shows, or null. Teaching follows its latest episode while the view follows the run, and stays
-  // there once the run stops; a page opened on a finished run lands on the story.
+  // A view that saw the run live keeps its latest teaching episode once it stops; one opened later gets the story.
   function episode(v, now) {
     const s = shown(v);
     if (v.tab === "now") return current(s);
@@ -500,7 +476,6 @@
     return find(v.selected) || (following(v, now) || v.followed ? s.episodes.findLast(teaches) || null : story(s));
   }
 
-  // The fine-tune a view following the run shows on the stage (SPEC §3.5): the seconds since it started, or null.
   function finetuning(v, now) {
     const pending = shown(v).finetune.pending;
     const follows = v.tab === "now" || (v.tab === "teaching" && v.selected === null);
@@ -509,10 +484,8 @@
   }
 
   const teacherDrove = (ep) => ep.rows.some((r) => r.kind === "takeover" || r.controller === "teacher");
-  // The story beats D, T and Move jump to (SPEC §3.5): D and T within Teaching, Move to any episode.
   const BEATS = { d: (e) => e.diagnosis !== null && teaches(e), t: (e) => teacherDrove(e) && teaches(e), m: (e) => e.perturbedStep !== null };
 
-  // Where an episode lives: a held-out test in its seed under Results, any other in Teaching.
   const home = (ep) => (ep.split === "heldout" ? { tab: "results", seed: ep.seed, focus: ep.seed, opened: ep.id } : { tab: "teaching", selected: ep.id });
   // Landing on a live run's latest teaching episode follows the run again.
   function land(v, now, ep) {
@@ -520,8 +493,6 @@
     if (to.tab === "teaching" && ep === shown(v).episodes.findLast(teaches) && following(v, now)) to.selected = null;
     return to;
   }
-  // The seed `step` places along Results' list under its filter from the open or focused seed (the first from
-  // none), or null past either end.
   function seedFrom(v, step) {
     const seeds = results(shown(v), v.only).seeds.map((r) => r.seed);
     const at = seeds.indexOf(v.seed ?? v.focus);
@@ -529,10 +500,7 @@
     return to >= 0 && to < seeds.length ? seeds[to] : null;
   }
 
-  // Where a key leads from the view, as the view fields it sets, or null for nowhere new (SPEC §3.5): ← and → step
-  // through the seeds in Results (↑ and ↓ too in the list), through a seed's episodes, and through Teaching; Escape
-  // goes back up from a seed; End opens Now while the run is live; a story beat goes to the nearest other episode
-  // with it, forward on a tie, and Move stays on a shown episode that has one.
+  // The view fields a key would set, or null where it leads nowhere new (SPEC §3.5).
   function target(v, now, key) {
     const s = shown(v);
     const place = where(v);
@@ -565,7 +533,6 @@
     return null;
   }
 
-  // Sets the view's fields: a key's target, a tab, a seed or an episode chosen, a filter. A Move shown is let go.
   function visit(v, fields) {
     Object.assign(v, fields);
     v.compare = null;
@@ -575,8 +542,6 @@
     if (to) visit(v, to);
   }
 
-  // Move (SPEC §3.5): the before and after of the shown episode's move, or of the nearest episode with one, in that
-  // episode's tab; pressing it again returns to where the view was.
   function showMove(v, now) {
     if (v.compare) {
       visit(v, v.compare.back);
@@ -589,10 +554,8 @@
     v.compare = { step: episode(v, now).perturbedStep, back };
   }
 
-  // The step the stage holds the shown episode at: its move while Move shows it, null for its latest frame.
   const stageStep = (v) => (v.compare ? v.compare.step : null);
 
-  // Who the control bar names: the controller of the frame the stage holds under Move, else the episode's latest.
   function inControl(v, now) {
     const ep = episode(v, now);
     if (!ep) return null;
@@ -627,11 +590,9 @@
     if (!Array.isArray(list)) return [];
     return list.filter((r) => r && typeof r.run_id === "string" && r.run_id && orNull(r.instruction) && STATUSES.includes(r.status) && orNull(r.reason) && num(r.started_t) !== null);
   }
-  // The run a page opens: the one its URL names, else the first listed (live first, then newest), else none.
   const runToOpen = (runs, wanted) => wanted || (runs[0] ? runs[0].run_id : null);
 
-  // The Teach box (SPEC §3.5): at most 200 characters once trimmed, counted in code points as the server counts them,
-  // so an emoji is one.
+  // Counted in code points as the server counts them, so an emoji is one character.
   const TEACH_MAX = 200;
   const characters = (typed) => [...typed.trim()].length;
   const tooLong = (typed) => characters(typed) > TEACH_MAX;
@@ -639,13 +600,10 @@
     const length = characters(typed);
     return !length ? "Type what the robot should learn." : length > TEACH_MAX ? `At most ${TEACH_MAX} characters.` : null;
   }
-  // The count shows as the text nears the limit.
   const teachCount = (typed) => {
     const length = characters(typed);
     return length >= TEACH_MAX - 40 ? `${length}/${TEACH_MAX}` : null;
   };
-  // The server's answer to a Teach: started (the page opens the new run), not started with the generator's reasons,
-  // or a failure in words.
   function teachAnswer(status, body) {
     const id = body && typeof body.run_id === "string" ? body.run_id : null;
     if (status === 201 && id && body.started === true) return { state: "started", runId: id };

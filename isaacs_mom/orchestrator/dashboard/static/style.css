@@ -1,19 +1,17 @@
-/* Devin's contrast (SPEC §3.5): a charcoal surround, panels a step lighter on hairline edges, white as the one accent.
-   Hue is a small marker on grey and means one thing: student blue, teacher teal, success green, failure red. */
+/* Devin's contrast (SPEC §3.5): hue only marks on grey, and each hue means one thing: student, teacher, success, failure. */
 :root{--ground:#1e1e20;--panel:#28282b;--row:#2c2c2f;--raised:#333336;--well:#161618;
 --edge:#37373b;--edge-strong:#4a4a4f;
-/* Measured: ink 10.3:1 on a panel, muted 5.9:1 (5.0:1 on a raised row), dim 5.1:1 on the surround, its only ground. */
+/* Measured: ink 10.3:1 on a panel, muted 5.9:1 (5.0:1 raised), dim 5.1:1 on the surround and 4.5:1 on a panel. */
 --ink:#d8d8da;--muted:#a3a3a8;--dim:#8e8e93;
 --student:#8eb2eb;--teacher:#66ccbe;--ok:#84d98a;--bad:#df9099;
-/* Results marks: a change at full strength, the unchanged a step quieter (5.6:1 and 4.8:1 on a panel), errored yellow. */
+/* The unchanged marks are a step quieter than a change: 5.6:1 and 4.8:1 on a panel. */
 --ok-quiet:#71ad76;--bad-quiet:#bd848b;--warn:#e6c46e;
 --accent:#fff;--on-accent:#1e1e20;--focus:#fff;--selection:rgb(92 139 214 / .5);
 --shadow-pop:0 20px 48px -16px rgb(0 0 0 / .7);
 --ease-out:cubic-bezier(.23,1,.32,1);
 --sans:system-ui,-apple-system,"Segoe UI",sans-serif;--mono:ui-monospace,"SF Mono",Menlo,Consolas,monospace;
 --r:10px;--r-sm:6px;
-/* Two sizes at the Claude desktop app's density, labels 12 px and body 14 px at 1280x720, and one large number, the
-   held-out change; emphasis is weight (450 or 600) and colour, never another size. */
+/* Two sizes and one large number, the held-out change; emphasis is weight and colour, never another size. */
 --t-label:calc(12rem / 14);--t-fig:2.8rem}
 *{box-sizing:border-box}
 html{scrollbar-color:rgb(255 255 255 / .22) transparent;color-scheme:dark}
@@ -37,8 +35,6 @@ h2{font-size:var(--t-label);color:var(--muted);letter-spacing:.01em}
 header.bar{flex:none;position:relative;z-index:3}
 .bar .top{display:flex;align-items:center;gap:.4rem .6rem;padding:.4rem .75rem .2rem;flex-wrap:wrap}
 header.bar h1{font-size:1rem;flex:none}
-/* Popovers are solid, so their text holds its contrast over any frame; an edge and a shadow lift them off the panels. */
-/* The legend opens from a bare "i" at the header's end, a key like the presenter's. */
 .legend{position:relative;flex:none}
 .legend summary{position:relative;list-style:none;cursor:pointer;display:grid;place-items:center;width:2.3rem;height:2.3rem;border-radius:7px;color:var(--ink)}
 .legend summary::-webkit-details-marker{display:none}
@@ -47,25 +43,23 @@ header.bar h1{font-size:1rem;flex:none}
 .legend summary::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);right:0;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out)}
 @media (hover:hover){.legend:not([open]) summary:hover::after{opacity:1;transition-delay:.3s}}
 .legend:not([open]) summary:focus-visible::after{opacity:1}
+/* Solid, so a popover's text holds its contrast over any frame. */
 .pop{position:absolute;top:calc(100% + .4rem);z-index:5;background:var(--panel);border:1px solid var(--edge-strong);border-radius:var(--r);box-shadow:var(--shadow-pop);padding:.75rem .9rem}
 .legend .pop{right:0;width:min(78rem,calc(100vw - 1.5rem));max-height:calc(100vh - 4rem);overflow-y:auto;display:grid;grid-template-columns:minmax(0,1.25fr) minmax(0,1fr) minmax(0,1.15fr);gap:.2rem 1.4rem;transform-origin:top right}
 .legend section>h2{margin:0 0 .4rem}
 .legend section>.note{margin:.45rem 0 0;font-size:var(--t-label)}
 .legend dl{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.4rem .7rem;margin:0;align-items:baseline}
 .legend dt{display:flex;flex-wrap:wrap;gap:.3rem;font-size:var(--t-label);font-weight:600}
-/* No line of a key's meaning ends on one word alone. */
 .legend dd{margin:0;text-wrap:pretty}
 .legend .keys dt{align-items:center;color:var(--muted)}
 .legend .note.run{grid-column:1 / -1;margin:.45rem 0 0;font-size:var(--t-label)}
 .legend dt .mark{width:1.1rem;height:1.1rem}
 kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;min-width:1.5em;text-align:center;border:1px solid var(--edge-strong);border-radius:4px;background:var(--raised)}
-/* The popover materialises from its trigger. */
 @media (prefers-reduced-motion:no-preference){
   .pop{transition:opacity .16s var(--ease-out),transform .16s var(--ease-out)}
   @starting-style{details[open] .pop,.answer{opacity:0;transform:scale(.97) translateY(-4px)}}
 }
 
-/* The run picker: the shown run's id and a chevron; its popover lists every run. */
 .runs{position:relative;min-width:0;flex:0 1 auto}
 /* As tall as the keys beside it, so the presenter's run switch is as easy a target. */
 .runs summary{max-width:17rem;min-height:2.3rem;list-style:none;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:0 .5rem;border-radius:var(--r-sm);font:450 var(--t-label)/1.35 var(--mono)}
@@ -86,7 +80,6 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .run-id{grid-area:id;font-size:var(--t-label);color:var(--muted);overflow-wrap:anywhere}
 .run-why{grid-area:why;font-size:var(--t-label);overflow-wrap:anywhere}
 
-/* The views: Results, Teaching and, while the run is live, Now. The one shown is marked as a held key is. */
 .tabs{display:flex;gap:.1rem;flex:none}
 .tabs button{position:relative;display:inline-flex;align-items:center;gap:.4rem;height:2.3rem;padding:0 .7rem;border:0;border-radius:7px;background:none;color:var(--muted);font:600 1rem/1 var(--sans);cursor:pointer;transition:background-color .15s,color .15s}
 .tabs button[hidden]{display:none}
@@ -95,24 +88,18 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 @media (hover:hover){.tabs button:hover{background:var(--raised);color:var(--ink)}}
 .tabs button:focus-visible{background:var(--raised);color:var(--ink)}
 
-/* Presenter keys, grouped as the presenter tells the story: where in the run, the story's beats, the view. Each key is
-   a bare icon at least 32 px square, filled only under the pointer or the focus; its name, what it does and its
-   shortcut are in its tooltip and in Labels. */
 .presenter{display:flex;align-items:center;gap:.9rem;margin-left:auto;flex:none}
 .presenter .group{display:inline-flex;gap:.15rem}
 .presenter button{position:relative;font:600 1rem/1 var(--sans);color:var(--ink);background:none;border:0;border-radius:7px;min-width:2.3rem;height:2.3rem;padding:0;display:inline-flex;align-items:center;justify-content:center;gap:.3rem;cursor:pointer;transition:background-color .15s,transform .12s var(--ease-out)}
 @media (hover:hover){.presenter button:hover:not(:disabled){background:var(--raised)}}
 .presenter button:focus-visible{background:var(--raised)}
 .presenter button:active:not(:disabled){transform:scale(.96)}
-/* Disabled reads as absent: faded ink, no pointer; its tooltip still says what it would do. */
 .presenter button:disabled{color:var(--dim);cursor:default}
 /* A held key is marked as Devin marks its open tab: a short bar in the accent, never a fill. */
 .presenter button[aria-pressed="true"]::before,#b-pause.on::before{content:"";position:absolute;left:.45rem;right:.45rem;bottom:0;height:2px;border-radius:1px;background:var(--accent)}
 #b-pause .on,#b-pause.on .off{display:none}
 #b-pause.on .on{display:block}
-/* While paused, the events waiting: a plain number beside the play icon. */
 #b-pause.on{padding:0 .55rem 0 .45rem}
-/* A tooltip names the key, what it does and its shortcut: after a beat on hover, at once on keyboard focus. */
 :is(.presenter,.teach,.filters,.switch) button::after,.tabs button[data-tip]::after,button.back::after{content:attr(data-tip);position:absolute;top:calc(100% + .45rem);left:50%;--tx:-50%;translate:var(--tx) -3px;z-index:6;padding:.2rem .5rem;border-radius:var(--r-sm);background:var(--panel);color:var(--ink);font:450 var(--t-label)/1.35 var(--sans);white-space:nowrap;box-shadow:0 0 0 1px var(--edge-strong),var(--shadow-pop);opacity:0;pointer-events:none;transition:opacity .12s var(--ease-out),translate .12s var(--ease-out)}
 /* Keys near the window's right edge open their tooltips leftwards, a back key rightwards, so they stay on screen. */
 :is(.presenter .group:not(:first-child),.teach,.switch) button::after{left:auto;right:0;--tx:0%}
@@ -120,24 +107,20 @@ button.back::after{left:0;--tx:0%}
 @media (hover:hover){:is(.presenter,.teach,.filters,.tabs,.switch) button:hover::after,button.back:hover::after{opacity:1;translate:var(--tx) 0;transition-delay:.3s}}
 :is(.presenter,.teach,.filters,.tabs,.switch) button:focus-visible::after,button.back:focus-visible::after{opacity:1;translate:var(--tx) 0}
 
-/* A label is a mark and a word, never a capsule: a filled dot while live, a ring once recorded, a dashed ring for a
-   placeholder, the word alone for a configured value. A panel's label is its mark alone unless it differs from the run's. */
+/* A label is a mark and a word, never a capsule. */
 .chip{display:inline-flex;align-items:center;gap:.35rem;font-size:var(--t-label);font-weight:600;line-height:1.35;color:var(--ink);white-space:nowrap}
 .chip.recorded::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px solid currentColor}
 .chip.live::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor}
 .chip.config{color:var(--muted)}
-/* A broken line: the stream is down, so nothing shown is live. */
 .chip.lost{color:var(--bad)}
 .chip.lost::before{content:"";width:.6rem;height:1.5px;background:currentColor;transform:rotate(-45deg)}
 .chip.placeholder{color:var(--muted)}
 .chip.placeholder::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px dashed currentColor}
 .dot{flex:none;width:.5rem;height:.5rem;border-radius:50%}
 .dot.live{background:currentColor}
-/* The live dot breathes slowly wherever it shows (one pulse every 1.8 s, opacity only); recorded and placeholder hold still. */
 @media (prefers-reduced-motion:no-preference){.chip.live::before,.dot.live{animation:pulse 1.8s ease-in-out infinite}}
 @keyframes pulse{50%{opacity:.3}}
 .chip.paused::before{content:"";width:.4rem;height:.55rem;border-inline:2px solid currentColor}
-/* Nothing ran: an empty ring crossed out. */
 .chip.refused{color:var(--muted)}
 .chip.refused::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px solid currentColor;background:linear-gradient(135deg,transparent 42%,currentColor 42% 58%,transparent 58%)}
 /* Panel labels are grey and lighter than the header's status, which stays the one to read first. */
@@ -147,13 +130,11 @@ button.back::after{left:0;--tx:0%}
 .tag.teacher{color:var(--teacher)}
 .tag.student::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor;flex:none}
 .tag.teacher::before{content:"";width:.45rem;height:.45rem;background:currentColor;transform:rotate(45deg);flex:none}
-/* A verdict is a short word in its colour on grey, led by its mark. */
 .verdict{display:inline-flex;align-items:center;gap:.4rem;font-weight:600}
 .verdict.bad{color:var(--bad)}
 .verdict.good{color:var(--ok)}
 .verdict svg{width:.9em;height:.9em}
 
-/* The control bar: what the episode is, who is in control, and its verdict. */
 .controlbar{flex:none;display:flex;align-items:center;gap:.4rem .9rem;margin:.1rem .75rem 0;padding:.3rem .4rem .3rem .85rem;min-height:2.65rem;border-radius:var(--r);background:var(--panel);border:1px solid var(--edge)}
 .control{flex:1;min-width:0;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .7rem}
 .control .kind{display:flex;align-items:baseline;gap:.5rem;flex:none}
@@ -162,8 +143,7 @@ button.back::after{left:0;--tx:0%}
 /* The sentence gives way first, to two lines, so the kind, the controller and the verdict stay on one row. */
 .control>.note{flex:1 1 0;min-width:5rem;text-wrap:pretty;line-height:1.3;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .control .verdict{margin-left:auto;flex:none}
-/* The Teach box at the bar's end, the page's one capsule, with its button inside as in a chat composer; the button
-   stays quiet until there is something to teach, so the stage keeps the brightest pixels. */
+/* The page's one capsule; its button stays quiet until there is text, so the stage keeps the brightest pixels. */
 .teach{position:relative;flex:none;display:flex;align-items:center;gap:.2rem;padding:2px;border-radius:999px;border:1px solid var(--edge-strong);background:var(--well)}
 .teach:has(input:focus-visible){outline:2px solid var(--focus);outline-offset:2px}
 .teach .field{position:relative;display:flex}
@@ -173,7 +153,6 @@ button.back::after{left:0;--tx:0%}
 .teach input:read-only{color:var(--muted)}
 .teach .count{position:absolute;right:.6rem;top:50%;translate:0 -50%;font-size:var(--t-label);color:var(--muted);pointer-events:none}
 .teach input[aria-invalid="true"]~.count{color:var(--bad)}
-/* Teach is its enter icon alone, a 32 px circle in the box; it turns to a spinner while the instruction is judged. */
 .teach button{position:relative;flex:none;width:2.3rem;height:2.3rem;padding:0;border:0;border-radius:50%;background:var(--accent);color:var(--on-accent);display:grid;place-items:center;cursor:pointer;transition:transform .12s var(--ease-out)}
 .teach .wait,.teach[aria-busy="true"] .go{display:none}
 .teach[aria-busy="true"] .wait{display:block}
@@ -184,7 +163,6 @@ button.back::after{left:0;--tx:0%}
 .teach button:disabled{cursor:default}
 .teach[aria-busy="true"] button{cursor:progress}
 .teach .i{width:1.1rem;height:1.1rem}
-/* What came back from a Teach, dropped from the box over the panels' top, never over the frame. */
 .answer{right:0;width:min(26rem,calc(100vw - 1.5rem));transform-origin:top right}
 .answer p{margin:0}
 .answer .what{font-weight:600;margin-bottom:.2rem}
@@ -192,7 +170,7 @@ button.back::after{left:0;--tx:0%}
 .taught{margin:0;color:var(--muted)}
 .taught q{color:var(--ink)}
 
-/* Results is the run's home (SPEC §3.5): in its list and a seed's checkpoints it is the page; an episode takes the stage. */
+/* Results' list and a seed take the whole page; every other view hides Results. */
 main:is([data-view="list"],[data-view="seed"])>:not(#results),main:not([data-view="list"],[data-view="seed"])>#results{display:none}
 main:is([data-view="list"],[data-view="seed"]){display:flex;flex-direction:column}
 .results{flex:1;min-height:0;overflow-y:auto}
@@ -202,7 +180,6 @@ main:is([data-view="list"],[data-view="seed"]){display:flex;flex-direction:colum
 .results .empty{margin:0;padding:.6rem .75rem 1rem}
 .results .empty p{margin:0}
 .results .empty .what{font-weight:600}
-/* One count per mark, each a filter: its icon and its number, bare until pointed at; the one filtered by is marked. */
 .filters{display:flex;flex-wrap:wrap;gap:.15rem;padding:0 .45rem .4rem;border-bottom:1px solid var(--edge)}
 .filters button{position:relative;display:inline-flex;align-items:center;gap:.35rem;min-width:2.3rem;height:2.3rem;padding:0 .55rem;border:0;border-radius:7px;background:none;color:var(--ink);font:600 1rem/1 var(--sans);cursor:pointer;transition:background-color .15s}
 .filters button:first-child::after{left:0;--tx:0%}
@@ -211,7 +188,6 @@ main:is([data-view="list"],[data-view="seed"]){display:flex;flex-direction:colum
 .filters button[aria-pressed="true"]::before{content:"";position:absolute;left:.45rem;right:.45rem;bottom:0;height:2px;border-radius:1px;background:var(--accent)}
 .filters button:disabled{color:var(--dim);cursor:default}
 .filters button:disabled .mark{opacity:.55}
-/* The seeds, sorted changes first, read down each column. */
 .seeds{list-style:none;margin:0;padding:.45rem .45rem .6rem;columns:3 16rem;column-gap:.5rem}
 .seeds li{break-inside:avoid}
 .seed{display:flex;align-items:center;gap:.6rem;width:100%;min-height:2.3rem;padding:.3rem .55rem;border:0;border-radius:7px;background:none;color:var(--ink);font:inherit;text-align:left;cursor:pointer;transition:background-color .15s}
@@ -220,7 +196,6 @@ main:is([data-view="list"],[data-view="seed"]){display:flex;flex-direction:colum
 .seed:focus{background:var(--raised);outline:2px solid var(--focus);outline-offset:-2px}
 .seed .n{flex:none;font-weight:600;min-width:4.6em}
 .seed .was{min-width:0;color:var(--muted);overflow-wrap:anywhere}
-/* One seed: back, its number and mark, its verdicts; the switch opposite; then a card per checkpoint shown. */
 main[data-view="seed"] .results{display:flex;flex-direction:column;overflow:hidden}
 .seed-head{flex:none;display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .6rem;padding:.3rem .45rem;border-bottom:1px solid var(--edge)}
 .seed-head h2{display:flex;align-items:center;gap:.45rem;font-size:1rem;color:var(--ink)}
@@ -251,8 +226,7 @@ button.card:focus-visible{background:var(--row)}
 
 main{flex:1;min-height:0;display:grid;grid-template-columns:minmax(0,1.6fr) minmax(0,1fr) minmax(0,.95fr);gap:.6rem;padding:.45rem .75rem .4rem}
 .col{display:flex;flex-direction:column;min-height:0;overflow:hidden}
-/* Held-out success, the diagnosis and the training sets are one panel: its sections part on hairlines, each keeps
-   its own heading and provenance label, since they can differ. */
+/* One panel whose sections keep their own heading and label, since their provenance can differ. */
 .side{display:flex;flex-direction:column;min-height:0;overflow-y:auto;background:var(--panel);border:1px solid var(--edge);border-radius:var(--r)}
 .side[data-more]{mask-image:linear-gradient(to bottom,#000 calc(100% - 3rem),transparent)}
 .side .panel{flex:none}
@@ -278,13 +252,11 @@ footer.models .v{color:var(--muted)}
 .camera{background:var(--well)}
 /* The stage asks for a frame as wide as the panel, shrinking only to fit its height; the filmstrip gets what is left. */
 .stage{flex:0 1 auto;min-height:0;display:flex;flex-direction:column;gap:.45rem;padding:.55rem .6rem}
-/* One frame fills the stage; Move's before and after split it in two. */
 .frame{flex:0 1 auto;aspect-ratio:4/3;min-height:0;display:grid;grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:.7rem}
 .cell{min-height:0;display:grid;place-items:center;container-type:size}
 .shot{position:relative;width:min(100cqw,133.33cqh);aspect-ratio:4/3;background:var(--well);border-radius:var(--r-sm);box-shadow:0 0 0 1px var(--edge);overflow:hidden}
 .shot img{display:block;width:100%;height:100%;object-fit:contain}
-/* The skill the frame led to sits in a notch cut into the frame's top-left corner, in the colour around the frame:
-   its two inner corners curve into the image, so it reads as part of the frame, not a capsule over it. */
+/* The notch's ::before and ::after are inverted corners, so it reads as cut into the frame, not a capsule over it. */
 .notch{--nr:.5rem;position:absolute;top:0;left:0;z-index:1;display:flex;align-items:center;gap:.6rem;max-width:calc(100% - 2rem);margin:0;padding:.3rem .7rem .4rem .55rem;border-bottom-right-radius:var(--nr);background:var(--well);font-weight:600}
 .notch::before,.notch::after{content:"";position:absolute;width:var(--nr);height:var(--nr);background:radial-gradient(circle at 100% 100%,transparent calc(var(--nr) - .5px),var(--well) var(--nr))}
 .notch::before{top:0;left:100%}
@@ -293,7 +265,6 @@ footer.models .v{color:var(--muted)}
 .said .i{width:1rem;height:1rem}
 .said.student{color:var(--student)}
 .said.teacher{color:var(--teacher)}
-/* The controller is a small pill in the frame's bottom-right corner (SPEC §3.5). */
 .shot>.tag{position:absolute;right:.5rem;bottom:.5rem;z-index:1;padding:.1rem .55rem;border-radius:999px;background:var(--well);box-shadow:0 0 0 1px var(--edge-strong)}
 /* Frame-sized, so the stage keeps its shape between episodes and while nothing is on camera yet. */
 .slate{display:grid;place-content:center;gap:.4rem;padding:1.5rem;text-align:center;text-wrap:balance}
@@ -304,9 +275,7 @@ footer.models .v{color:var(--muted)}
 .sheet li{position:relative;overflow:hidden;background:var(--well)}
 .sheet img{display:block;width:100%;height:100%;object-fit:cover}
 
-/* The filmstrip fills the height the frame leaves, so the panel has no empty band: as many 4:3 thumbnails as fit that
-   height, 6 at most and 3 at least, the earliest dropped first (the stage's frame is never among the first three of 6).
-   Where three 4:3 thumbnails can't fill it, they crop towards square from the sides. It shows once they can be read. */
+/* As many 4:3 thumbnails as fill the strip's height, 6 down to 3, earliest dropped first: n need an aspect ratio of n × 4/3. */
 .strip{--g:.4rem;list-style:none;margin:0;padding:.1rem .6rem .6rem;display:flex;align-items:flex-end;gap:var(--g);flex:1 1 0;min-height:0;container-type:size}
 /* Move's pair is the peak, so no thumbnail competes with it at any size. */
 .strip:empty,#stage:has(.cell + .cell) + .strip{display:none}
@@ -322,11 +291,10 @@ footer.models .v{color:var(--muted)}
 /* Each thumbnail's step sits in a corner notch, so the thumbnails take the strip's whole height. */
 .strip .st{position:absolute;top:0;left:0;z-index:1;padding:0 .35rem .1rem .3rem;border-bottom-right-radius:4px;background:var(--well);font-size:var(--t-label);color:var(--muted)}
 .strip li.moved .st{background:var(--accent);color:var(--on-accent)}
-/* No data is a sparse dot grid, a sensor with nothing on it; after the frame rules so a missing frame keeps it. */
+/* After the frame rules, so a missing frame keeps its dot grid. */
 [data-missing]{background:radial-gradient(circle at 1px 1px,rgb(255 255 255 / .16) 1px,transparent 1.6px) 0 0 / 11px 11px,var(--well)}
 [data-missing] img{visibility:hidden}
 [data-missing]::after{content:"Frame missing";position:absolute;inset:0;display:grid;place-items:center;color:var(--muted)}
-/* The caption line also carries the move's mark and the camera panel's provenance label. */
 .foot{flex:none;display:flex;align-items:center;gap:.5rem}
 .foot .moved-at{flex:none;display:inline-flex;align-items:center;gap:.35rem;padding-left:.55rem;font-weight:600}
 .foot>.chip:last-child{margin-left:auto}
@@ -342,8 +310,6 @@ footer.models .v{color:var(--muted)}
   main{grid-template-columns:minmax(0,1fr) minmax(0,1fr);grid-template-rows:fit-content(60%) minmax(0,1fr);grid-template-areas:"cam side" "cam log"}
   .camera{grid-area:cam}
   .decisions{grid-area:log}
-  /* The held-out column is as wide as its figure with the rates beside it, up to 20rem; the diagnosis takes the rest,
-     and the training sets and replay run the band's full width under both. */
   .side{grid-area:side;display:grid;grid-template-columns:fit-content(20rem) minmax(0,1fr);grid-template-areas:"rounds diag" "train train"}
   .side>#p-diagnosis{border-top:0;border-left:1px solid var(--edge)}
   #p-rounds{grid-area:rounds}
@@ -364,8 +330,7 @@ footer.models .v{color:var(--muted)}
   /* The pair is as wide as the window allows; the height it leaves sits above and below it, not in one band. */
   .stage:has(.cell + .cell){margin-block:auto}
 }
-/* Narrower than 1280 px, held-out and the diagnosis stay side by side (SPEC §3.5): the held-out column narrows, so
-   its rates fold under the figure, and the diagnosis's frame shrinks. */
+/* Below 1280 px, held-out and the diagnosis still sit side by side (SPEC §3.5), each narrower. */
 @media (min-width:1001px) and (max-width:1279px){
   .side{grid-template-columns:fit-content(15rem) minmax(0,1fr)}
   .side>#p-rounds>header{flex-wrap:wrap}
@@ -375,10 +340,8 @@ footer.models .v{color:var(--muted)}
   .teach input{width:12.5rem}
   .teach input::placeholder{font-size:var(--t-label)}
 }
-/* The box or bin move is the take's peak: the frame that first shows it stays ringed in white, and the ring flashes once on arrival. */
 .shot.moved{outline:2px solid var(--accent);outline-offset:3px}
-/* Rare (a few times a take) and aimed at the back of the room, so it runs longer than UI feedback would. A ring only:
-   it draws the eye to the frame without covering the evidence in it. */
+/* Rare and aimed at the back of the room, so longer than UI feedback; a ring only, so it covers none of the frame. */
 @media (prefers-reduced-motion:no-preference){
   .shot.flash::before{content:"";position:absolute;inset:0;z-index:1;box-shadow:inset 0 0 0 .45rem var(--accent);pointer-events:none;animation:flash .45s var(--ease-out) forwards}
 }
@@ -404,7 +367,6 @@ ol.log .ok svg{width:1em;height:1em}
 #chip-log{display:flex;flex-wrap:wrap;align-items:center;gap:.25rem .5rem;font-size:var(--t-label)}
 ol.log .no{color:var(--bad);font-weight:600}
 ol.log .lat{color:var(--muted)}
-/* Event rows sit on a lighter grey; their mark and their first words carry the colour. */
 ol.log li.event{background:var(--row);font-weight:600}
 ol.log li.event .d{font-weight:450;color:var(--muted);overflow-wrap:anywhere}
 ol.log li.event.take{color:var(--teacher)}
@@ -423,7 +385,6 @@ ol.log li.fresh{animation:in .16s var(--ease-out)}
 ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 
 .stack>*+*{margin-top:.35rem}
-/* Each saved file one line: its name as a label, its counts after. */
 .files{display:grid;grid-template-columns:max-content minmax(0,1fr);gap:.2rem .7rem;margin:0;align-items:baseline}
 .files dt{font-size:var(--t-label);font-weight:600;color:var(--muted)}
 .files dd{margin:0;text-wrap:pretty}
@@ -438,7 +399,6 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
   *,*::before,*::after{transition:none!important}
 }
 @keyframes fade{from{opacity:0}}
-/* Edges and secondary text firm up when the viewer asks for more contrast. */
 @media (prefers-contrast:more){:root{--edge:#5c5c62;--edge-strong:#707077;--muted:#c4c4c9;--dim:#a3a3a8}}
 @media (max-width:1000px){
   body{height:auto;overflow:auto}
