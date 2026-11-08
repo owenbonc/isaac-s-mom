@@ -57,16 +57,18 @@ def _verdict(manifest: EpisodeManifest) -> str:
     return f"succeeded{took or ', by the student alone'}" if verdict.accepted else f"failed{took}: {verdict.reason}"
 
 
-def _captions(manifest: EpisodeManifest, perturb_at: int) -> list[str]:
+def _captions(manifest: EpisodeManifest) -> list[str]:
     final = _verdict(manifest)
-    moved = manifest.perturbations[0].perturbation.kind.removeprefix("move_") if manifest.perturbations else "scene"
+    # Only an applied move is recorded, so a refused one, or none, is never captioned (SPEC §2 rule 6).
+    first = manifest.perturbations[0] if manifest.perturbations else None
+    moved = first.perturbation.kind.removeprefix("move_") if first else ""
     captions = []
     for i, step in enumerate(manifest.steps):
         who = f"{step.controller} {step.checkpoint}" if step.checkpoint else step.controller
         amounts = [f"{v:g} cm" if k == "distance_cm" else f"{v:g}°" for k, v in step.skill_call.params.items()]
         skill = " ".join([step.skill_call.skill, *amounts])
         state = "validator: " + (final if i == len(manifest.steps) - 1 else "pending")
-        perturbed = f"{moved} moved   " if i >= perturb_at else ""
+        perturbed = f"{moved} moved   " if first and i >= first.before_step else ""
         captions.append(f"{who}   {skill}   {perturbed}{state}")
     return captions
 
@@ -104,7 +106,7 @@ def run_demo(
     record(
         (
             ((episode_dir / step.frame).read_bytes(), capture.third_person[step.step], caption)
-            for step, caption in zip(manifest.steps, _captions(manifest, perturb_at), strict=True)
+            for step, caption in zip(manifest.steps, _captions(manifest), strict=True)
         ),
         out,
         fps,
