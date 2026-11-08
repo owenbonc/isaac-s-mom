@@ -192,7 +192,8 @@
         const refusal = /^not started:\s*/.exec(said);
         if (refusal || said.startsWith("mom run stopped")) s.stopped = true;
         if (refusal && !ep) s.refused = said.slice(refusal[0].length);
-        else if (ep) ep.rows.push({ kind: "error", text: said });
+        // A crash before its episode started carries the next seed, which is no other episode's content.
+        else if (ep && (num(d.seed) === null || d.seed === ep.seed)) ep.rows.push({ kind: "error", text: said });
         if (d.split === "heldout" && num(d.seed) !== null) s.crashes.push({ seed: d.seed, evaluation: s.rounds.length });
         break;
       }

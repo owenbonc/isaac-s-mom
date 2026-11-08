@@ -2128,3 +2128,17 @@ def test_a_run_reads_live_on_the_servers_clock_when_the_viewers_runs_30_s_ahead(
     """
     script += REPLAY + 'return doc.getElementById("status").innerHTML;'
     assert 'class="chip live"' in app(script, stream(started("a"), decision(0)))
+
+
+def test_a_crash_carrying_another_seed_never_lands_in_the_current_episodes_log() -> None:
+    crash = ("error", {"seed": 105, "split": "heldout", "round": 0, "error": "RuntimeError: reset failed"})
+    own = ("error", {"seed": 104, "split": "heldout", "round": 0, "error": "recorder refused step 1"})
+    stopped = ("error", {"error": "mom run stopped (exit 1)"})
+    out = fold(*held_out(0, 104, "failed"), crash, own, stopped)
+    assert [r.get("text") or r["kind"] for r in out["ep"]["rows"]] == [
+        "decision",
+        "verdict",
+        "recorder refused step 1",
+        "mom run stopped (exit 1)",
+    ]
+    assert [c["seed"] for c in out["state"]["crashes"]] == [105, 104]
