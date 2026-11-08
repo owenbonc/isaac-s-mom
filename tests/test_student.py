@@ -3,9 +3,11 @@ import logging
 import sys
 from collections.abc import Callable
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 import torch
+from transformers import BatchFeature
 
 from isaacs_mom.contracts import (
     MAX_ANGLE_DEG,
@@ -22,7 +24,7 @@ from isaacs_mom.student import stub_finetune, tuning
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, BASE_CHECKPOINT, adapter_dir, resolve_adapter, valid_run_id
 from isaacs_mom.student.policy import StudentPolicy
 from isaacs_mom.student.prompt import UnparseableReply, format_target, parse_reply, prompt_text
-from isaacs_mom.student.tuning import finetune
+from isaacs_mom.student.tuning import Progress, Trainer, finetune
 
 REACH_5 = SkillCall(skill="reach_left", params={"distance_cm": 5})
 
@@ -267,7 +269,9 @@ def example(tmp_path: Path, target: SkillTarget, feedback: str = "start") -> Tra
 
 
 def test_empty_training_set_keeps_the_previous_checkpoint(tmp_path: Path) -> None:
-    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    def trainer(
+        examples: list[dict[str, str]], images: dict[str, bytes], progress: Progress | None
+    ) -> dict[str, bytes]:
         raise AssertionError("nothing to train on")
 
     assert finetune(training_set(tmp_path, []), "run-a/ckpt-r1", 2, trainer=trainer) == "run-a/ckpt-r1"
@@ -277,7 +281,9 @@ def test_empty_training_set_keeps_the_previous_checkpoint(tmp_path: Path) -> Non
 def test_a_run_id_no_checkpoint_id_can_carry_fails_before_training(tmp_path: Path) -> None:
     rows = [example(tmp_path, SkillTarget(skill="hug"))]
 
-    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    def trainer(
+        examples: list[dict[str, str]], images: dict[str, bytes], progress: Progress | None
+    ) -> dict[str, bytes]:
         raise AssertionError("trained before checking the run id")
 
     with pytest.raises(ValueError, match="demo 1"):
@@ -292,7 +298,9 @@ def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: P
     shipped_examples: list[dict[str, str]] = []
     shipped_images: dict[str, bytes] = {}
 
-    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    def trainer(
+        examples: list[dict[str, str]], images: dict[str, bytes], progress: Progress | None
+    ) -> dict[str, bytes]:
         shipped_examples.extend(examples)
         shipped_images.update(images)
         return ADAPTER
@@ -313,8 +321,8 @@ def test_finetune_ships_prompt_ready_examples_and_stores_the_adapter(tmp_path: P
 def test_two_runs_keep_their_own_round_one_checkpoints(tmp_path: Path) -> None:
     rows = [example(tmp_path, SkillTarget(skill="hug"))]
 
-    def trainer_for(run_id: str) -> Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]:
-        return lambda examples, images: {**ADAPTER, "adapter_model.safetensors": run_id.encode()}
+    def trainer_for(run_id: str) -> Trainer:
+        return lambda examples, images, progress: {**ADAPTER, "adapter_model.safetensors": run_id.encode()}
 
     first = finetune(training_set(tmp_path, rows, "run-a"), "ckpt-r0", 1, trainer=trainer_for("run-a"))
     second = finetune(training_set(tmp_path, rows, "run-b"), "ckpt-r0", 1, trainer=trainer_for("run-b"))
@@ -328,7 +336,9 @@ def test_two_runs_keep_their_own_round_one_checkpoints(tmp_path: Path) -> None:
 def test_trainer_without_adapter_weights_leaves_no_checkpoint(tmp_path: Path) -> None:
     rows = [example(tmp_path, SkillTarget(skill="hug"))]
 
-    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    def trainer(
+        examples: list[dict[str, str]], images: dict[str, bytes], progress: Progress | None
+    ) -> dict[str, bytes]:
         return {"adapter_config.json": b"{}"}
 
     with pytest.raises(RuntimeError, match="adapter_model.safetensors"):
@@ -340,10 +350,10 @@ def test_rerunning_a_round_replaces_the_old_checkpoint(tmp_path: Path) -> None:
     rows = [example(tmp_path, SkillTarget(skill="hug"))]
     checkpoints = tmp_path / "run-a" / "checkpoints"
 
-    def first(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    def first(examples: list[dict[str, str]], images: dict[str, bytes], progress: Progress | None) -> dict[str, bytes]:
         return {**ADAPTER, "stale.bin": b"old"}
 
-    def second(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    def second(examples: list[dict[str, str]], images: dict[str, bytes], progress: Progress | None) -> dict[str, bytes]:
         return {"adapter_config.json": b"{}", "adapter_model.safetensors": b"new"}
 
     finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=first)
@@ -357,12 +367,53 @@ def test_rerunning_a_round_replaces_the_old_checkpoint(tmp_path: Path) -> None:
 def test_nested_trainer_file_name_is_rejected_before_anything_is_written(tmp_path: Path) -> None:
     rows = [example(tmp_path, SkillTarget(skill="hug"))]
 
-    def trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+    def trainer(
+        examples: list[dict[str, str]], images: dict[str, bytes], progress: Progress | None
+    ) -> dict[str, bytes]:
         return {**ADAPTER, "sub/x.bin": b"x"}
 
     with pytest.raises(RuntimeError, match="not plain"):
         finetune(training_set(tmp_path, rows), "ckpt-r0", 1, trainer=trainer)
     assert not (tmp_path / "run-a" / "checkpoints").exists()
+
+
+class TinyProcessor:
+    """Each word of the chat text is one token, so the reply's labels follow the prompt's."""
+
+    def apply_chat_template(self, messages: list[dict], add_generation_prompt: bool = False) -> str:
+        return "prompt" if add_generation_prompt else "prompt reply"
+
+    def __call__(self, text: list[str], images: object, return_tensors: str) -> BatchFeature:
+        return BatchFeature({"input_ids": torch.ones(1, len(text[0].split()), dtype=torch.long)})
+
+
+class TinyVLM(torch.nn.Module):
+    """One LoRA target, `text_model.q_proj`, so the real loop trains on the CPU in milliseconds."""
+
+    dtype = torch.float32
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.text_model = torch.nn.ModuleDict({"q_proj": torch.nn.Linear(1, 1)})
+
+    def forward(self, input_ids: torch.Tensor, labels: torch.Tensor) -> SimpleNamespace:
+        return SimpleNamespace(loss=self.text_model["q_proj"](input_ids.float().unsqueeze(-1)).pow(2).mean())
+
+
+def test_lora_training_reports_each_optimizer_step_out_of_every_epochs_steps(monkeypatch: pytest.MonkeyPatch) -> None:
+    from isaacs_mom.student import lora, vlm
+
+    monkeypatch.setattr(lora, "EPOCHS", 3)
+    monkeypatch.setattr(lora, "GRAD_ACCUM", 4)
+    monkeypatch.setattr(vlm, "load_processor", TinyProcessor)
+    monkeypatch.setattr(vlm, "load_model", lambda adapter, device: TinyVLM())
+    monkeypatch.setattr(vlm, "image_from_jpeg", lambda jpeg: jpeg)
+    monkeypatch.setattr(vlm, "reply", lambda *args: "")
+    examples = [{"image": "0.jpg", "instruction": "hug", "feedback": "start", "target": "{}"}] * 5
+    reported: list[tuple[int, int]] = []
+    files = lora.lora_train(examples, {"0.jpg": b"jpeg"}, "cpu", lambda step, total: reported.append((step, total)))
+    assert reported == [(step, 6) for step in range(1, 7)]  # 5 examples in groups of 4: 2 optimizer steps an epoch
+    assert set(ADAPTER_FILES) <= set(files)
 
 
 def mom_run(monkeypatch: pytest.MonkeyPatch, tmp_path: Path, *flags: str, cuda: bool) -> dict:

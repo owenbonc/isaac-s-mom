@@ -1,6 +1,7 @@
 """The teach -> fine-tune loop (SPEC §3.6)."""
 
 import json
+import math
 import shutil
 import time
 from collections.abc import Callable
@@ -17,6 +18,7 @@ from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, adapter_dir, finetune
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, CHECKPOINT_ID
+from isaacs_mom.student.tuning import Progress
 from isaacs_mom.teacher import ArgonPolicy, FailureMode, choose_scenes, diagnose, diagnose_round
 from isaacs_mom.teacher.argon import Argon
 from isaacs_mom.validator.recorder import write_atomically, write_manifest
@@ -31,9 +33,24 @@ MAX_ROUNDS = 3
 DEMOS_PER_ROUND = 20
 DEV_TRIALS = 10
 MOVE_BIN_SHARE = 0.25  # of each round's teacher demonstrations, the bin moves right after the lift (§3.5)
+PROGRESS_SECONDS = 1.0  # finetune_progress at most once a second (SPEC §4)
 
 StudentFactory = Callable[[str], Policy]
-StudentTrainer = Callable[[Path, str, int], str]
+StudentTrainer = Callable[[Path, str, int, Progress], str]
+
+
+def finetune_progress(events: EventLog, round_: int, clock: Callable[[], float] = time.monotonic) -> Progress:
+    """Emits the trainer's steps at most once a second, and always its last, so a finished fine-tune reads 100%."""
+    last = -math.inf
+
+    def report(step: int, total: int) -> None:
+        nonlocal last
+        now = clock()
+        if step == total or now - last >= PROGRESS_SECONDS:
+            last = now
+            events.emit("finetune_progress", round=round_, step=step, total=total)
+
+    return report
 
 
 def instruction_text(text: str) -> str:
@@ -301,7 +318,8 @@ def run_loop(
         training_set = build_training_set(run_dir, round_ + 1)
         events.emit("finetune_started", round=round_ + 1, training_set=str(training_set))
         started = time.monotonic()
-        previous, checkpoint = checkpoint, train_student(training_set, checkpoint, round_ + 1)
+        progress = finetune_progress(events, round_ + 1)
+        previous, checkpoint = checkpoint, train_student(training_set, checkpoint, round_ + 1, progress)
         duration_s = round(time.monotonic() - started, 1)
         skipped = checkpoint == previous
         path = None if skipped else adapter_dir(checkpoint, run_dir.parent)

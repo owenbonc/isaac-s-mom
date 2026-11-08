@@ -11,7 +11,8 @@ from isaacs_mom.contracts import TrainingExample
 from isaacs_mom.student.checkpoints import ADAPTER_FILES, MODEL_ID, checkpoint_id, valid_run_id
 from isaacs_mom.student.prompt import format_target
 
-Trainer = Callable[[list[dict[str, str]], dict[str, bytes]], dict[str, bytes]]
+Progress = Callable[[int, int], None]  # (optimizer steps done, optimizer steps in all)
+Trainer = Callable[[list[dict[str, str]], dict[str, bytes], Progress | None], dict[str, bytes]]
 log = logging.getLogger(__name__)
 NO_CUDA = "fine-tuning needs a CUDA GPU (the Windows RTX 5070 or 5060); --student stub or --rounds 0 runs without one"
 
@@ -23,10 +24,12 @@ def has_cuda() -> bool:
     return torch.cuda.is_available()
 
 
-def local_trainer(examples: list[dict[str, str]], images: dict[str, bytes]) -> dict[str, bytes]:
+def local_trainer(
+    examples: list[dict[str, str]], images: dict[str, bytes], progress: Progress | None
+) -> dict[str, bytes]:
     from isaacs_mom.student.lora import lora_train
 
-    return lora_train(examples, images, "cuda")
+    return lora_train(examples, images, "cuda", progress)
 
 
 def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]:
@@ -50,7 +53,14 @@ def package(training_set: Path) -> tuple[list[dict[str, str]], dict[str, bytes]]
     return examples, images
 
 
-def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, trainer: Trainer = local_trainer) -> str:
+def finetune(
+    training_set: Path,
+    previous_checkpoint: str,
+    round_: int,
+    progress: Progress | None = None,
+    *,
+    trainer: Trainer = local_trainer,
+) -> str:
     """Retrains from the base model on the cumulative set, so a checkpoint depends only on its training set."""
     run_dir = training_set.parent
     if not valid_run_id(run_dir.name):
@@ -60,7 +70,7 @@ def finetune(training_set: Path, previous_checkpoint: str, round_: int, *, train
         log.warning("%s has no accepted teacher steps; keeping %s", training_set, previous_checkpoint)
         return previous_checkpoint
     started = time.monotonic()
-    files = trainer(examples, images)
+    files = trainer(examples, images, progress)
     missing = [name for name in ADAPTER_FILES if name not in files]
     if missing:
         raise RuntimeError(f"trainer returned no {', '.join(missing)}")

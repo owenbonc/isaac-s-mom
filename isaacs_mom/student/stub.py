@@ -4,6 +4,7 @@ import random
 from pathlib import Path
 
 from isaacs_mom.contracts import SKILLS, Controller, Observation, SkillCall
+from isaacs_mom.student.tuning import Progress
 
 
 class StubStudent:
@@ -19,6 +20,6 @@ class StubStudent:
         return SkillCall(skill=self._rng.choice(SKILLS))
 
 
-def stub_finetune(training_set: Path, previous_checkpoint: str, round_: int) -> str:
-    """No training, so the student keeps its checkpoint."""
+def stub_finetune(training_set: Path, previous_checkpoint: str, round_: int, progress: Progress) -> str:
+    """No training, so the student keeps its checkpoint and reports no progress."""
     return previous_checkpoint

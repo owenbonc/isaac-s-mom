@@ -33,6 +33,7 @@ EventType = Literal[
     "validation",
     "diagnosis",
     "finetune_started",
+    "finetune_progress",
     "finetune_completed",
     "evaluation_result",
     "argon_call",
