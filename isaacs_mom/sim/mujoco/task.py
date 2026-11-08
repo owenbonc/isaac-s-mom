@@ -18,8 +18,8 @@ MAX_BIN_DISTANCE_M = 2.2  # the longest walk measured, far_bin's
 TWIST_BIN_DISTANCE_M = (0.40, 0.50)  # a fixed-feet bin must sit where the twisted, outstretched arms put the box
 # Where `place` lands the box on a wall-less top every time: higher, it lands still between the open hands.
 PLATFORM_TOP_RANGE_M = (0.40, 0.45)
-# The boxes measured to settle there every time. A bigger or heavier one stays against the hands or the stepping robot,
-# or tips, with no wall to hold it off.
+# Boxes measured to settle on the top every time: the default and the small box up to 1 kg (20/20 seeds). With no wall
+# to hold it off, a 2 kg box stays against the hands (14/20) and a taller one can tip (19/20).
 MAX_PLATFORM_BOX_HALF = (0.125, 0.15, 0.125)
 MAX_PLATFORM_BOX_MASS_KG = 1.0
 

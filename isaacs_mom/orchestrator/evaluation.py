@@ -28,7 +28,7 @@ from isaacs_mom.student import BASE_CHECKPOINT, StubStudent, StudentPolicy
 from isaacs_mom.validator.recorder import write_atomically
 from isaacs_mom.validator.rules import RECORDING_ERROR
 
-# SPEC §6.10's edge-device budget (Owen's pick, #22): 2 s per decision and 3 GB of memory on a laptop.
+# SPEC §6.10's edge-device budget: 2 s per decision and 3 GB of memory on a laptop.
 DEFAULT_BUDGET_MS = 2000.0
 MEMORY_BUDGET_GB = 3.0
 
