@@ -272,7 +272,7 @@ const skillRow = (ep, f) => (f && ep.rows.find((r) => r.kind === "decision" && r
 // in a pill at its bottom left; nothing else covers it. A missing frame stays, hatched.
 function cell(f, row, moved, label = "") {
   const shot = f && f.url ? `<img src="${esc(f.url)}" alt="Head camera frame${f.step === null ? "" : ` at step ${esc(f.step)}`}">` : "";
-  const skill = row ? `<span class="said ${row.controller || "unknown"}"><svg class="i" aria-hidden="true"><use href="#s-${row.skill ? esc(row.skill) : "stop"}"/></svg>${skillText(row)}</span>` : "";
+  const skill = row ? `<span class="said ${row.controller || "unknown"}"><svg class="i" aria-hidden="true"><use href="#s-${esc(row.skill)}"/></svg>${skillText(row)}</span>` : "";
   const notch = label || skill ? `<p class="notch">${label ? `<span>${label}</span>` : ""}${skill}</p>` : "";
   const who = f ? tag(f.controller, f.checkpoint) : "";
   return `<div class="cell"><div class="shot${moved ? " moved" : ""}"${shot ? "" : " data-missing"}>${shot}${notch}${who}</div></div>`;
