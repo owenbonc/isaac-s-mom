@@ -1,11 +1,11 @@
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from pathlib import Path
 from typing import Literal
 
-from isaacs_mom.contracts import EpisodeManifest, Perturbation, Split
+from isaacs_mom.contracts import EpisodeManifest, GroundTruth, Perturbation, Split, Validation
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
 from isaacs_mom.sim.base import TruthSim
@@ -56,12 +56,14 @@ def run_episode(
     acting_on: str | None = None,
     demo: bool = False,
     heartbeat_seconds: float = HEARTBEAT_SECONDS,
+    verdict: Callable[[GroundTruth], Validation] = validate,
 ) -> EpisodeManifest:
     """One recorded episode. If `policy` stops without success, `takeover` (when given) continues from there.
 
     `perturb_at` moves the box before that step; `move_bin_after_lift` moves the bin before the first step after the
     box is lifted (SPEC §3.5, §6.10). `acting_on` names the failed episode whose diagnosis a teacher demonstration acts
-    on, and `demo` marks the judged take (SPEC §3.5).
+    on, and `demo` marks the judged take (SPEC §3.5). `verdict` judges the end state for the manifest and the
+    `validation` event: a generated task passes its own rule (§3.7).
     """
     episode_id = sim.reset(seed)
     resting_z = sim.ground_truth().box_xyz[2]
@@ -173,6 +175,6 @@ def run_episode(
             )
             feedback = f"{call.skill}: {'ok' if result.ok else result.error}"
             total_steps += 1
-    validation = validate(sim.ground_truth())
+    validation = verdict(sim.ground_truth())
     events.emit("validation", episode_id=episode_id, **validation.model_dump())
     return recorder.finish(validation)

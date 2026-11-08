@@ -95,6 +95,7 @@ class TaskSpec(Strict):
     scene: Scene
     success: Success
     perturbations: list[PermittedMove] = Field(default=[], max_length=2)
+    stance: Literal["walking", "fixed_feet"] = "walking"  # fixed feet: the robot twists its waist to a bin beside it
 
     def fingerprint(self) -> str:
         """Equal for equal specs, whatever the key order of the JSON they came from."""
@@ -106,6 +107,7 @@ class TaskSpec(Strict):
         box, dest = self.scene.box, self.scene.destination
         return TaskConfig(
             f"gen-{self.name}-{self.fingerprint()}",
+            walking=self.stance == "walking",
             box_half=box.half_m,
             box_mass_kg=box.mass_kg,
             box_offset_m=box.offset_m,
