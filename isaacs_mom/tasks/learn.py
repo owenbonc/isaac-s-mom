@@ -335,6 +335,34 @@ def learn(
     return finish(run_dir, exam_seeds=exam_seeds, train=train, make_student=make_student, base=base)
 
 
+def summary(report: LearnReport) -> str:
+    """The report in a few lines, each count with its n (rule 6)."""
+    spec, metrics = report.spec, report.finetune_metrics
+    moves = "the bin may move" if report.exam_bin_moved else "nothing moves"
+    seeds = report.exam_seeds
+    lines = [
+        f'"{spec.instruction}" -> {spec.name} ({report.fingerprint}), {spec.stance.replace("_", " ")}, {moves}',
+        f"demonstrations: {report.accepted}/{report.demos} accepted ({report.demos_errored} errored), "
+        f"{report.accepted_bin_moved} of them with the bin moved; {report.examples} training examples; "
+        f"{report.replayed}/{report.accepted} accepted replay by the spec's rule",
+        f"Argon: {report.argon_calls} teacher calls and {report.generator_calls} for the spec",
+        f"fine-tune: {metrics.get('seconds', '-')} s, peak {metrics.get('peak_gpu_memory_gb', '-')} GiB"
+        if metrics
+        else "fine-tune: nothing to train on, so no new checkpoint",
+        f"held-out seeds {seeds[0]}-{seeds[-1]}, student alone, successes / (n - errored):",
+    ]
+    for checkpoint, result in report.exam.items():
+        line = f"  {checkpoint}: {result.successes}/{result.n - result.errored}"
+        if (moved := report.exam_bin_moved.get(checkpoint)) is not None:
+            line += (
+                f"; bin moved after the lift {moved.successes}/{moved.n - moved.errored}, adapted "
+                f"{moved.adapted}/{moved.adaptation_tests} (not applied {moved.not_applied}, "
+                f"no lift {moved.trigger_not_reached})"
+            )
+        lines.append(line)
+    return "\n".join(lines)
+
+
 def _positive(text: str) -> int:
     value = int(text)
     if value < 1:
@@ -390,7 +418,8 @@ def main() -> None:
     else:
         run_dir = args.resume
     report = finish(run_dir, exam_seeds=args.exam_seeds, train=finetune, make_student=StudentPolicy, base=base)
-    print(json.dumps(report.model_dump(), indent=2))
+    print(summary(report))
+    print(f"full report: {run_dir / 'report.json'}")
 
 
 if __name__ == "__main__":

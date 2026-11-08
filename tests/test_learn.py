@@ -42,6 +42,7 @@ from isaacs_mom.tasks.learn import (
     learn,
     main,
     start,
+    summary,
 )
 from isaacs_mom.teacher.argon import Argon, ArgonUnavailable, Part, Purpose
 from isaacs_mom.validator import validate
@@ -392,3 +393,8 @@ def test_a_batch_collected_alone_is_finished_later_from_its_run_dir(
     assert (moved.n, moved.adaptation_tests, moved.not_applied, moved.trigger_not_reached) == (2, 2, 0, 0)
     assert moved.adapted == moved.successes == 0  # it stops once lifted, so the move is applied but never met
     assert report.exam[report.checkpoint] == ExamResult(successes=0, errored=0, n=2)
+    lines = summary(report).splitlines()
+    assert lines[1].startswith("demonstrations: 1/1 accepted (0 errored)") and "1/1 accepted replay" in lines[1]
+    assert lines[-1] == (
+        f"  {report.checkpoint}: 0/2; bin moved after the lift 0/2, adapted 0/2 (not applied 0, no lift 0)"
+    )
