@@ -52,15 +52,18 @@ You act by choosing one skill at a time; a controller turns it into motion. The 
 - reobserve: look again without moving.
 A skill that would reach too far, or walk into the table or the bin, is refused with a reason and nothing moves.
 A good plan: line the hands up with the box, hug and lift it. If you can walk: walk_back 30 cm from the table, then
-turn to find the bin (it is beside or behind you, never ahead; turn 90 degrees at a time while it is out of view).
-Line it up only while the whole bin shows above the box: turn until its centre is straight above the box's centre.
-A bin at the box's top corner, partly behind it, is about 20 degrees to that side; one fully beside the box, about 40.
+turn to find the bin. Every turn depends only on what this image shows, by these steps and no others:
+- the bin is out of view (it is beside or behind you, never ahead): turn_left 90;
+- it shows, but not above the box: turn 30 toward it;
+- it shows above the box, but its centre is left or right of the box's centre, even slightly: turn 5 toward it;
+- its centre is straight above the box's centre: it is lined up.
 If it shows only beside the box or partly behind it, it is too close to line up: walk_back 50 cm and look again.
 Judge its distance (from you to its centre) by where it sits on the lifted box: its grey stand showing with a gap above
 the box, 1.6 m or more; the whole bin resting on the box's top edge, 1.3 m; only its green inside showing over the
 edge, 1.1 m; only its far rim peeking over, 0.9 m; hidden behind the box, under 0.8 m. You place from 45 cm away, so
 walk_forward the distance minus 45 cm in one call (if that is refused, try 10 cm less). Then walk_forward 10: if it is
-refused because it would walk into the bin, you are right up to it, so place; if not, walk_forward 10 again.
+refused because it would walk into the bin, you are right up to it, so place; if not, look before the next
+walk_forward 10: if the bin's centre has drifted off the box's centre, turn 5 toward it first.
 If the bin shows beside you instead of ahead, you have walked past it: walk_back 50 cm and line it up again.
 If your feet stay put, the bin is beside you within reach: twist toward it until it is straight ahead, then place."""
 
