@@ -174,13 +174,18 @@ def test_latency_comes_from_each_decision_and_is_counted_against_the_budget(
 
 def test_the_summary_states_the_sample_size_device_and_budget(tmp_path: Path) -> None:
     reports, _ = _run(tmp_path, CrashesOnSeed3)
-    table = markdown(reports, 1000.0, "test-device", SEEDS)
-    assert "held-out seeds 1, 2, 3, 4 (n=4 per task), on test-device; budget 1000 ms per decision" in table
+    table = markdown(reports, 2000.0, "test-device", SEEDS)
+    assert (
+        "held-out seeds 1, 2, 3, 4 (n=4 per task), on test-device; budget 2000 ms per decision and 3 GB, "
+        "GPU memory not measured." in table
+    )
+    assert "peak GPU memory 1.81 GB." in markdown(reports, 2000.0, "cuda", SEEDS, 1.81)
     assert "| ckpt-r0 | training_distribution | 2/3 | 1 |" in table
     assert f"| ckpt-r0 | move_bin_after_lift | {NOT_RUN['move_bin_after_lift']} | - |" in table
     assert "held-out seeds 1, 3, 20 (n=3 per task)" in markdown(reports, 1000.0, "d", [1, 3, 20])
     saved = json.loads((tmp_path / "evaluation_report.json").read_text())
     assert saved["budget_ms"] == 1000.0 and saved["device"] == "test-device" and saved["seeds"] == SEEDS
+    assert saved["memory_budget_gb"] == 3.0 and saved["peak_memory_gb"] is None
     assert len(saved["conditions"]) == 2 * len(CONDITIONS)
 
 
