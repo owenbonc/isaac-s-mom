@@ -23,6 +23,7 @@ from isaacs_mom.orchestrator.evaluation import (
 from isaacs_mom.policy import Policy
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.fake import BIN_Z, FakeSim
+from isaacs_mom.sim.mujoco.task import TASKS
 from isaacs_mom.student import StubStudent
 from isaacs_mom.validator.recorder import RecordingError
 from isaacs_mom.validator.rules import recording_error_verdict
@@ -233,9 +234,20 @@ def test_only_scored_applied_moves_count_and_adapted_means_accepted() -> None:
     assert (report.adaptation_tests, report.adapted, report.not_applied, report.trigger_not_reached) == (2, 1, 1, 1)
 
 
-def test_a_fixed_feet_task_has_no_new_layout_and_every_condition_runs_its_own_task() -> None:
-    names = [(c.name, c.tasks, c.move_bin_after_lift) for c in conditions_for("fixed_feet", walking=False)]
-    assert names == [("training_distribution", ("fixed_feet",), False), ("move_bin_after_lift", ("fixed_feet",), True)]
+def test_a_fixed_feet_task_gets_fixed_feet_layouts_it_never_trained_on() -> None:
+    conditions = [(c.name, c.tasks, c.move_bin_after_lift) for c in conditions_for("fixed_feet", walking=False)]
+    assert conditions == [
+        ("training_distribution", ("fixed_feet",), False),
+        ("new_layout", ("fixed_feet_ahead", "fixed_feet_far"), False),
+        ("move_bin_after_lift", ("fixed_feet",), True),
+    ]
+    trained = TASKS["fixed_feet"]
+    for name in ("fixed_feet_ahead", "fixed_feet_far"):
+        new = TASKS[name]
+        assert not new.walking and (new.bin_bearing_deg, new.bin_distance_m) != (
+            trained.bin_bearing_deg,
+            trained.bin_distance_m,
+        )
 
 
 def test_episodes_are_student_only_and_held_out(tmp_path: Path) -> None:
