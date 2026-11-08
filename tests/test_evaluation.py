@@ -5,15 +5,26 @@ that wasn't run (rule 6)."""
 import json
 import time
 from pathlib import Path
+from typing import Any
 
 import pytest
 
-from isaacs_mom.contracts import GroundTruth, Observation, SkillCall
-from isaacs_mom.orchestrator.evaluation import CONDITIONS, NOT_RUN, evaluate, markdown
+from isaacs_mom.contracts import EpisodeManifest, GroundTruth, Observation, SkillCall
+from isaacs_mom.orchestrator import evaluation
+from isaacs_mom.orchestrator.evaluation import (
+    CONDITIONS,
+    NOT_RUN,
+    EpisodeRecord,
+    evaluation_report,
+    markdown,
+    summarise,
+)
 from isaacs_mom.policy import Policy
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.sim.fake import BIN_Z, FakeSim
 from isaacs_mom.student import StubStudent
+from isaacs_mom.validator.recorder import RecordingError
+from isaacs_mom.validator.rules import recording_error_verdict
 
 SEEDS = [1, 2, 3, 4]
 
@@ -56,7 +67,7 @@ def _run(tmp_path: Path, make_student: type[Policy] | type[StubStudent] = StubSt
         asked.append(task)
         return RiggedSim(task)
 
-    reports = evaluate(
+    reports = evaluation_report(
         ["ckpt-r0", "run/ckpt-r1"],
         make_sim=make_sim,
         make_student=make_student,  # type: ignore[arg-type]
@@ -72,6 +83,9 @@ def test_each_condition_scores_successes_out_of_n_minus_errored(tmp_path: Path) 
     reports, _ = _run(tmp_path, CrashesOnSeed3)
     first = next(r for r in reports if r.checkpoint == "ckpt-r0" and r.condition == "training_distribution")
     assert (first.n, first.errored, first.successes, first.scored) == (4, 1, 2, 3)
+    crashed = json.loads((tmp_path / "evaluation.jsonl").read_text().splitlines()[2])
+    assert crashed["seed"] == 3 and crashed["outcome"] == "errored" and crashed["episode_id"].startswith("ep-3-")
+    assert (tmp_path / "episodes" / crashed["episode_id"] / "manifest.json").exists()  # its partial recording
     assert first.score() == "2/3"
     layout = next(r for r in reports if r.checkpoint == "ckpt-r0" and r.condition == "new_layout")
     assert (layout.n, layout.errored, layout.successes) == (8, 2, 4)  # near_bin and far_bin, 4 seeds each
@@ -85,7 +99,7 @@ class BrokenOnSeed1(RiggedSim):
 
 
 def test_a_scene_that_fails_to_reset_is_errored_and_the_report_goes_on(tmp_path: Path) -> None:
-    reports = evaluate(
+    reports = evaluation_report(
         ["ckpt-r0"],
         make_sim=BrokenOnSeed1,
         make_student=StubStudent,
@@ -130,7 +144,7 @@ def test_episodes_are_student_only_and_held_out(tmp_path: Path) -> None:
 
 def test_seeds_outside_the_sealed_held_out_set_are_refused(tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="sealed held-out seeds"):
-        evaluate(
+        evaluation_report(
             ["ckpt-r0"],
             make_sim=RiggedSim,
             make_student=StubStudent,
@@ -158,9 +172,60 @@ def test_latency_comes_from_each_decision_and_is_counted_against_the_budget(
 def test_the_summary_states_the_sample_size_device_and_budget(tmp_path: Path) -> None:
     reports, _ = _run(tmp_path, CrashesOnSeed3)
     table = markdown(reports, 1000.0, "test-device", SEEDS)
-    assert "held-out seeds 1-4 (n=4 per task), on test-device; budget 1000 ms per decision" in table
+    assert "held-out seeds 1, 2, 3, 4 (n=4 per task), on test-device; budget 1000 ms per decision" in table
     assert "| ckpt-r0 | training_distribution | 2/3 | 1 |" in table
-    assert NOT_RUN["move_bin_after_lift"] in table
+    assert f"| ckpt-r0 | move_bin_after_lift | {NOT_RUN['move_bin_after_lift']} | - |" in table
+    assert "held-out seeds 1, 3, 20 (n=3 per task)" in markdown(reports, 1000.0, "d", [1, 3, 20])
     saved = json.loads((tmp_path / "evaluation_report.json").read_text())
     assert saved["budget_ms"] == 1000.0 and saved["device"] == "test-device" and saved["seeds"] == SEEDS
     assert len(saved["conditions"]) == 2 * len(CONDITIONS)
+
+
+def test_a_recording_error_verdict_is_errored_not_a_failure(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    real = evaluation.run_episode
+
+    def refused_on_seed_2(sim: TruthSim, policy: Policy, **kwargs: Any) -> EpisodeManifest:
+        manifest = real(sim, policy, **kwargs)
+        if kwargs["seed"] == 2:
+            manifest.validation = recording_error_verdict(RecordingError("2 executed actions but 1 timestamps"))
+        return manifest
+
+    monkeypatch.setattr(evaluation, "run_episode", refused_on_seed_2)
+    reports = evaluation_report(
+        ["ckpt-r0"],
+        make_sim=RiggedSim,
+        make_student=StubStudent,
+        run_dir=tmp_path,
+        seeds=SEEDS,
+        device="test-device",
+        conditions=CONDITIONS[:1],
+    )
+    assert (reports[0].n, reports[0].errored, reports[0].successes) == (4, 1, 1)  # seed 2 would have succeeded
+    record = json.loads((tmp_path / "evaluation.jsonl").read_text().splitlines()[1])
+    assert record["outcome"] == "errored" and record["reason"] == "recording error: 2 executed actions but 1 timestamps"
+
+
+def test_p95_is_the_nearest_rank_not_the_maximum() -> None:
+    record = EpisodeRecord(
+        checkpoint="ckpt-r0",
+        condition="training_distribution",
+        task="across_room",
+        seed=1,
+        episode_id="ep",
+        sim_version="v",
+        outcome="rejected",
+        reason="",
+        latencies_ms=[float(ms) for ms in range(1, 21)],
+        device="d",
+    )
+    report = summarise("ckpt-r0", "training_distribution", [record], 1000.0)
+    assert report.latency_p95_ms == 19.0 and report.latency_median_ms == 10.5
+
+
+def test_no_seeds_and_a_used_run_dir_are_refused(tmp_path: Path) -> None:
+    common: dict[str, Any] = {"make_sim": RiggedSim, "make_student": StubStudent, "device": "d"}
+    with pytest.raises(ValueError, match="no seeds"):
+        evaluation_report(["ckpt-r0"], run_dir=tmp_path / "a", seeds=[], **common)
+    evaluation_report(["ckpt-r0"], run_dir=tmp_path / "b", seeds=[1], conditions=CONDITIONS[:1], **common)
+    with pytest.raises(FileExistsError, match="already holds an evaluation"):
+        evaluation_report(["ckpt-r0"], run_dir=tmp_path / "b", seeds=[1], conditions=CONDITIONS[:1], **common)

@@ -8,12 +8,13 @@ checkpoint and condition in `evaluation_report.json`.
 
 import argparse
 import json
+import math
 import statistics
 import time
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Literal
+from typing import Any, Literal
 
 from pydantic import BaseModel
 
@@ -24,9 +25,10 @@ from isaacs_mom.policy import Policy
 from isaacs_mom.seeds import heldout_seeds
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StubStudent, StudentPolicy
+from isaacs_mom.validator.recorder import write_atomically
+from isaacs_mom.validator.rules import RECORDING_ERROR
 
 DEFAULT_BUDGET_MS = 1000.0  # the stated edge-device budget: one decision a second
-RECORDING_ERROR = "recording error"
 
 ConditionName = Literal["training_distribution", "new_layout", "move_bin_after_lift"]
 Outcome = Literal["accepted", "rejected", "errored"]
@@ -36,13 +38,12 @@ Outcome = Literal["accepted", "rejected", "errored"]
 class Condition:
     name: ConditionName
     tasks: tuple[str, ...]
-    move_bin_after_lift: bool = False
 
 
 CONDITIONS = (
     Condition("training_distribution", ("across_room",)),
     Condition("new_layout", ("near_bin", "far_bin")),  # bin distances the training task never uses
-    Condition("move_bin_after_lift", ("across_room",), move_bin_after_lift=True),
+    Condition("move_bin_after_lift", ("across_room",)),
 )
 # The lift trigger belongs in `run_episode`, which lands after WS5's dashboard PR; until then the condition isn't run.
 NOT_RUN = {"move_bin_after_lift": "not run: needs the lift-triggered move_bin in run_episode"}
@@ -81,7 +82,7 @@ class ConditionReport(BaseModel):
         return f"{self.successes}/{self.scored}" if self.note is None else self.note
 
 
-def evaluate(
+def evaluation_report(
     checkpoints: Sequence[str],
     *,
     make_sim: Callable[[str], TruthSim],
@@ -93,12 +94,17 @@ def evaluate(
     conditions: Sequence[Condition] = CONDITIONS,
 ) -> list[ConditionReport]:
     """Run every checkpoint on every condition's tasks and seeds; write the records and the report."""
+    if not seeds:
+        raise ValueError("no seeds to evaluate on")
     if outside := sorted(set(seeds) - heldout_seeds()):
         raise ValueError(f"the report runs only on the sealed held-out seeds, not {outside}")
+    records_path, report_path = run_dir / "evaluation.jsonl", run_dir / "evaluation_report.json"
+    if records_path.exists() or report_path.exists():
+        raise FileExistsError(f"{run_dir} already holds an evaluation; each report gets its own run dir")
     events = EventLog(run_dir, run_dir.name)
-    records_path = run_dir / "evaluation.jsonl"
     sims: dict[str, TruthSim] = {}
-    reports = []
+    reports: list[ConditionReport] = []
+    every_record: list[EpisodeRecord] = []
     for checkpoint in checkpoints:
         student = make_student(checkpoint)
         for condition in conditions:
@@ -112,9 +118,9 @@ def evaluate(
                 sim = sims[task]
                 for seed in seeds:
                     record = _run_one(sim, student, checkpoint, condition, task, seed, run_dir, events, device)
-                    with records_path.open("a") as f:
-                        f.write(record.model_dump_json() + "\n")
                     records.append(record)
+                    every_record.append(record)
+                    write_atomically(records_path, "".join(r.model_dump_json() + "\n" for r in every_record))
             reports.append(summarise(checkpoint, condition.name, records, budget_ms))
     report = {
         "budget_ms": budget_ms,
@@ -122,7 +128,7 @@ def evaluate(
         "seeds": list(seeds),
         "conditions": [r.model_dump() for r in reports],
     }
-    (run_dir / "evaluation_report.json").write_text(json.dumps(report, indent=2))
+    write_atomically(report_path, json.dumps(report, indent=2))
     return reports
 
 
@@ -143,7 +149,11 @@ def _run_one(
             sim, student, run_dir=run_dir, events=events, seed=seed, split="heldout", round_=0, instruction=INSTRUCTION
         )
     except Exception as error:  # an errored episode is reported apart, not as the student's failure (§3.5)
-        episode_id, outcome, reason = None, "errored", f"{type(error).__name__}: {error}"
+        episode_id, outcome, reason = (
+            _started_episode(events.path, start),
+            "errored",
+            f"{type(error).__name__}: {error}",
+        )
     else:
         verdict = manifest.validation
         episode_id = manifest.episode_id
@@ -165,14 +175,23 @@ def _run_one(
     )
 
 
-def _latencies(events_path: Path, start: int) -> list[float]:
-    """The latency of every decision written since `start`: this episode's, all the student's (no takeover)."""
+def _events_since(events_path: Path, start: int) -> list[dict[str, Any]]:
     if not events_path.exists():  # the episode errored before anything was logged
         return []
     with events_path.open() as f:
         f.seek(start)
-        events = [json.loads(line) for line in f if line.strip()]
-    return [float(e["data"]["latency_ms"]) for e in events if e["type"] == "decision"]
+        return [json.loads(line) for line in f if line.strip()]
+
+
+def _latencies(events_path: Path, start: int) -> list[float]:
+    """The latency of every decision written since `start`: this episode's, all the student's (no takeover)."""
+    return [float(e["data"]["latency_ms"]) for e in _events_since(events_path, start) if e["type"] == "decision"]
+
+
+def _started_episode(events_path: Path, start: int) -> str | None:
+    """A crashed episode's id, so its partial manifest can be found; None if it crashed before it started."""
+    started = [e["data"]["episode_id"] for e in _events_since(events_path, start) if e["type"] == "episode_started"]
+    return started[0] if started else None
 
 
 def summarise(
@@ -187,7 +206,7 @@ def summarise(
         successes=sum(r.outcome == "accepted" for r in records),
         decisions=len(latencies),
         latency_median_ms=statistics.median(latencies) if latencies else None,
-        latency_p95_ms=latencies[min(len(latencies) - 1, int(0.95 * len(latencies)))] if latencies else None,
+        latency_p95_ms=latencies[math.ceil(0.95 * len(latencies)) - 1] if latencies else None,  # nearest rank
         over_budget=sum(ms > budget_ms for ms in latencies),
     )
 
@@ -210,7 +229,7 @@ def _not_run(checkpoint: str, condition: Condition) -> ConditionReport:
 def markdown(reports: Sequence[ConditionReport], budget_ms: float, device: str, seeds: Sequence[int]) -> str:
     """The summary table: successes out of (n - errored), with the errored count and the latency against budget."""
     lines = [
-        f"Student only, held-out seeds {min(seeds)}-{max(seeds)} (n={len(seeds)} per task), on {device}; "
+        f"Student only, held-out seeds {', '.join(map(str, seeds))} (n={len(seeds)} per task), on {device}; "
         f"budget {budget_ms:.0f} ms per decision.",
         "",
         "| Checkpoint | Condition | Successes / (n - errored) | Errored | Median ms | p95 ms | Over budget |",
@@ -220,7 +239,8 @@ def markdown(reports: Sequence[ConditionReport], budget_ms: float, device: str, 
         median = f"{r.latency_median_ms:.0f}" if r.latency_median_ms is not None else "-"
         p95 = f"{r.latency_p95_ms:.0f}" if r.latency_p95_ms is not None else "-"
         over = f"{r.over_budget}/{r.decisions}" if r.decisions else "-"
-        lines.append(f"| {r.checkpoint} | {r.condition} | {r.score()} | {r.errored} | {median} | {p95} | {over} |")
+        errored = "-" if r.note else str(r.errored)
+        lines.append(f"| {r.checkpoint} | {r.condition} | {r.score()} | {errored} | {median} | {p95} | {over} |")
     return "\n".join(lines)
 
 
@@ -231,6 +251,8 @@ def main() -> None:
     parser.add_argument("--seeds", type=int, default=None, help="only the first N held-out seeds")
     parser.add_argument("--budget-ms", type=float, default=DEFAULT_BUDGET_MS)
     args = parser.parse_args()
+    if args.seeds is not None and args.seeds < 1:
+        parser.error("--seeds must be at least 1")
     from isaacs_mom.sim.mujoco import MujocoSim
     from isaacs_mom.sim.mujoco.task import TASKS
 
@@ -242,7 +264,8 @@ def main() -> None:
         make_student, device = StudentPolicy, vlm.pick_device()
     seeds = sorted(heldout_seeds())[: args.seeds]
     run_dir = Path("runs") / time.strftime("eval-%Y%m%d-%H%M%S")
-    reports = evaluate(
+    run_dir.mkdir(parents=True)  # refuses a second run started in the same second
+    reports = evaluation_report(
         [BASE_CHECKPOINT, *args.ckpt],
         make_sim=lambda task: MujocoSim(TASKS[task]),
         make_student=make_student,
