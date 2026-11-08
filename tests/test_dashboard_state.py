@@ -1668,3 +1668,200 @@ def test_a_runs_instruction_and_why_it_did_not_start_are_read_from_its_events() 
     taught = fold(("instruction", {"text": "Put the box in the bin", "source": "cli"}), started("a"))["state"]
     assert taught["refused"] is None and taught["instruction"]["source"] == "cli"
     assert fold(started("a"))["state"]["instruction"] is None
+
+
+APP_JS = STATE_JS.parent / "app.js"
+# app.js under a minimal DOM: every element is a stub that records the HTML written to it, EventSource is a stub the
+# test drives, and frames run only when the test flushes them. `script` runs once app.js has loaded and asked for
+# its runs; it sees `sources`, `writes`, `frames`, `flush`, `settled`, `doc`, and app.js's own globals.
+APP_DRIVER = r"""
+const vm = require("vm");
+const fs = require("fs");
+const [statePath, appPath] = process.argv.slice(1);
+const { events, runs, script } = JSON.parse(fs.readFileSync(0, "utf8"));
+const writes = [];
+const elements = new Map();
+class FakeElement {
+  constructor(id = "", tagName = "DIV") {
+    Object.assign(this, { id, tagName, dataset: {}, hidden: false, disabled: false, textContent: "", value: "" });
+    Object.assign(this, { children: [], scrollTop: 0, scrollHeight: 0, clientHeight: 0, isConnected: true });
+    Object.assign(this, { open: false, listeners: {} });
+    this.style = { setProperty() {} };
+    this.classList = { add() {}, remove() {}, toggle() {}, contains: () => false };
+    this.lastElementChild = { textContent: "" };
+  }
+  get innerText() { return ""; }
+  setAttribute() {}
+  removeAttribute() {}
+  toggleAttribute() {}
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); }
+  querySelector() { return new FakeElement(); }
+  querySelectorAll() { return []; }
+  getBoundingClientRect() { return { top: 0 }; }
+  checkVisibility() { return true; }
+  contains() { return false; }
+  focus() {}
+}
+Object.defineProperty(FakeElement.prototype, "innerHTML", {
+  get() { return ""; },
+  set(html) { writes.push([this.id, html]); },
+  configurable: true,
+});
+const IDS = ["status", "run-meta", "announce", "control", "stage", "strip", "log", "chip-log", "p-rounds",
+  "p-diagnosis",
+  "p-training", "models", "side", "results", "main", "tabs", "runs", "run-name", "run-list", "teach", "instruction",
+  "teach-count", "teach-go", "teach-said", "teach-status", "b-prev", "b-next", "b-d", "b-t", "b-m", "b-pause"];
+for (const id of IDS) elements.set(id, new FakeElement(id, id === "instruction" ? "INPUT" : "DIV"));
+const body = new FakeElement("", "BODY");
+const doc = {
+  body,
+  activeElement: body,
+  listeners: {},
+  getElementById: (id) => elements.get(id) || null,
+  querySelectorAll: (selector) => (selector === "[id]" ? [...elements.values()] : []),
+  querySelector: () => new FakeElement(),
+  addEventListener(type, fn) { (this.listeners[type] ||= []).push(fn); },
+  getAnimations: () => [],
+};
+const sources = [];
+class EventSource {
+  constructor(url) { this.url = url; this.listeners = {}; sources.push(this); }
+  addEventListener(type, fn) { this.listeners[type] = fn; }
+}
+const frames = [];
+const context = vm.createContext({
+  document: doc, Element: FakeElement, EventSource, console, structuredClone, URLSearchParams,
+  location: { search: "?run=r", replace() {}, assign() {} },
+  history: { replaceState() {} },
+  fetch: async (url) => (url === "/runs" ? { ok: true, json: async () => runs } : { ok: false }),
+  requestAnimationFrame: (fn) => frames.push(fn),
+  setInterval: () => 0,
+  addEventListener() {},
+  innerWidth: 1280,
+  CSS: { escape: (s) => s },
+});
+vm.runInContext(fs.readFileSync(statePath, "utf8"), context);
+vm.runInContext(fs.readFileSync(appPath, "utf8"), context);
+const flush = () => { while (frames.length) frames.shift()(); };
+const settled = () => new Promise((resolve) => setImmediate(resolve));
+(async () => {
+  for (let i = 0; i < 5; i++) await settled();
+  const out = await new Function("vm", "context", "sources", "writes", "frames", "flush", "doc", "events", script)(
+    vm, context, sources, writes, frames, flush, doc, events);
+  console.log(JSON.stringify(out));
+})();
+"""
+
+HOSTILE = "<img src=x onerror=alert(1)>"
+
+
+def app(script: str, events: list[dict], runs: list[dict] | None = None) -> Any:
+    """Run `script` (an async JS function body) against app.js loaded under the DOM stub, and return its result."""
+    listed = (
+        runs
+        if runs is not None
+        else [{"run_id": "r", "instruction": None, "status": "recorded", "reason": None, "started_t": 0}]
+    )
+    stdin = json.dumps({"events": events, "runs": listed, "script": script})
+    command = ["node", "-e", APP_DRIVER, str(STATE_JS), str(APP_JS)]
+    out = subprocess.run(command, input=stdin, capture_output=True, text=True, check=True)
+    return json.loads(out.stdout)
+
+
+def hostile_run() -> list[dict]:
+    """A run whose every text an event carries is markup: instruction, ids, reasons, checkpoints, frames, errors."""
+    x = HOSTILE
+    say = {"hypothesis": x, "evidence": x, "lesson": x, "confidence": 0.5}
+    start = {"seed": 7, "split": "heldout", "sim_version": f"mujoco {x}", "robot_config": x}
+    events = [
+        ("instruction", {"text": x, "source": "teach"}),
+        ("episode_started", {**start, "episode_id": f"h0{x}", "round": 0}),
+        (
+            "decision",
+            {"controller": "student", "checkpoint": x, "step": 0, "skill": {"skill": x}, "reason": x, "latency_ms": 5},
+        ),
+        ("action_executed", {"step": 0, "ok": False, "error": x, "frame": x}),
+        ("validation", {"task_success": False, "physics_valid": True, "reason": x}),
+        (
+            "evaluation_result",
+            {
+                "checkpoint": x,
+                "round": 0,
+                "successes": 0,
+                "n": 1,
+                "errored": 0,
+                "from_run": {"run": x, "checkpoint": x, "carried": 2},
+            },
+        ),
+        ("episode_started", {**start, "split": "dev", "seed": 1000, "episode_id": f"t{x}", "round": 1}),
+        ("decision", {"controller": "student", "checkpoint": x, "step": 0, "skill": {"skill": x}, "reason": x}),
+        ("perturbation", {"kind": x, "step": 0, "before_frame": x}),
+        ("validation", {"task_success": False, "physics_valid": False, "reason": x}),
+        ("diagnosis", {"episode_id": f"t{x}", **say}),
+        ("episode_started", {**start, "split": "dev", "seed": 1000, "episode_id": f"d{x}", "acting_on": f"t{x}"}),
+        ("decision", {"controller": "teacher", "checkpoint": None, "step": 0, "skill": {"skill": x}, "reason": x}),
+        ("error", {"error": x}),
+        ("validation", {"task_success": True, "physics_valid": True, "reason": x}),
+        ("episode_started", {**start, "episode_id": f"h1{x}", "round": 1}),
+        ("decision", {"controller": "student", "checkpoint": x, "step": 0, "skill": {"skill": x}, "reason": x}),
+        ("validation", {"task_success": True, "physics_valid": True, "reason": x}),
+        ("evaluation_result", {"checkpoint": x, "round": 1, "successes": 1, "n": 1, "errored": 0}),
+    ]
+    return [{**e, "run_id": f"r{x}"} for e in stream(*events)]
+
+
+def test_no_value_from_an_event_or_the_runs_list_becomes_markup_in_any_view() -> None:
+    script = """
+    const [source] = sources;
+    source.onopen();
+    for (const e of events) source.onmessage({ data: JSON.stringify(e) });
+    source.listeners.replayed();
+    flush();
+    // Every place the page can show: Results' list, the seed, its episodes, Teaching with its Move, and Now.
+    vm.runInContext(`
+      MomState.visit(view, { seed: 7, focus: 7 }); render();
+      MomState.visit(view, { opened: MomState.results(MomState.shown(view)).seeds[0].episodes[0].id }); render();
+      MomState.visit(view, { tab: "teaching", selected: null }); render();
+      MomState.keydown(view, { key: "m" }, Date.now() / 1000); render();
+      MomState.keydown(view, { key: "d" }, Date.now() / 1000); render();
+      MomState.visit(view, { tab: "now" }); render();
+      const reasons = [${JSON.stringify(events[0].data.text)}];
+      teaching = MomState.teachAnswer(200, { run_id: "r", started: false, reasons });
+      renderTeach();
+    `, context);
+    // A tag's quoted values are escaped text, so only what lies outside them could be markup an event injected.
+    const tags = writes.flatMap(([, html]) => html.replace(/"[^"]*"/g, '""').match(/<[^>]+>/g) || []);
+    return {
+      injected: tags.filter((t) => /onerror|^<img src=x/i.test(t)),
+      escaped: writes.filter(([, html]) => html.includes("&lt;img src=x onerror=alert(1)&gt;")).map(([id]) => id),
+    };
+    """
+    runs = [{"run_id": "r", "instruction": HOSTILE, "status": "not_started", "reason": HOSTILE, "started_t": 0}]
+    out = app(script, hostile_run(), runs)
+    assert out["injected"] == []
+    # the markup reached every panel as text
+    assert {"run-list", "results", "control", "stage", "log", "p-rounds", "p-diagnosis", "teach-said"} <= set(
+        out["escaped"]
+    )
+
+
+def test_nothing_renders_or_announces_until_the_replay_of_the_written_events_settles() -> None:
+    script = """
+    const [source] = sources;
+    const before = writes.map(([id]) => id);
+    source.onopen();
+    for (const e of events) source.onmessage({ data: JSON.stringify(e) });
+    const replaying = { frames: frames.length, written: writes.map(([id]) => id).slice(before.length) };
+    const announced = doc.getElementById("announce").textContent;
+    source.listeners.replayed();
+    flush();
+    const heard = doc.getElementById("announce").textContent;
+    return { before, replaying, announced, after: new Set(writes.map(([id]) => id)).size, heard };
+    """
+    events = stream(started("a"), decision(0), executed(0), verdict(False), started("b"), decision(0))
+    out = app(script, events)
+    # only the runs list, which is not the event stream's, is written before the replay settles
+    assert set(out["before"]) <= {"run-list"}
+    assert out["replaying"] == {"frames": 0, "written": []}
+    assert out["announced"] == ""
+    assert out["after"] > 5 and out["heard"]
