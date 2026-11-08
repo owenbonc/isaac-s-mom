@@ -386,6 +386,16 @@ ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}
 .cited{position:relative;aspect-ratio:4/3;background:var(--well);border-radius:var(--r-sm);overflow:hidden;box-shadow:0 0 0 1px var(--edge)}
 .cited img{display:block;width:100%;height:100%;object-fit:cover}
 
+/* A run being opened shows its panels' shapes until its replay settles: quiet blocks, never empty frames or zeros. */
+.skel{display:block;position:relative;overflow:hidden;height:.85em;border-radius:4px;background:var(--raised)}
+.skel::after{content:"";position:absolute;inset:0;background:linear-gradient(90deg,transparent,rgb(255 255 255 / .05),transparent);transform:translateX(-100%)}
+@media (prefers-reduced-motion:no-preference){.skel::after{animation:shimmer 2.4s ease-in-out infinite}}
+@keyframes shimmer{to{transform:translateX(100%)}}
+.shot>.skel{height:100%;border-radius:0;background:var(--panel)}
+.skel-col{flex:1;display:grid;grid-template-rows:var(--top) var(--line) var(--line);place-items:center}
+.skel-col>.skel{width:.7rem;height:.7rem;border-radius:50%}
+.skel-col>.skel:first-child{width:1.1rem;height:1.1rem}
+
 /* Reduced motion keeps a log row's fade, which carries no movement, and drops every slide, scale and flash. */
 @media (prefers-reduced-motion:reduce){
   ol.log li.fresh{animation-name:fade}

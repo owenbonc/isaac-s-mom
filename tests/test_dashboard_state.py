@@ -4,6 +4,7 @@ import json
 import re
 import shutil
 import subprocess
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any
 
@@ -2456,3 +2457,58 @@ def test_the_finetune_stage_shows_a_progressbar_with_its_percentage_or_starting(
     assert re.search(r'role="progressbar"[^>]*aria-valuenow="30"', stage) and ">30%<" in stage
     stage = app(fresh + REPLAY + script, stream(started("a"), ("finetune_started", {"round": 1})))
     assert 'role="progressbar"' in stage and "aria-valuenow" not in stage and ">Starting<" in stage
+
+
+INDEX_HTML = STATE_JS.parent / "index.html"
+LOADING = ("control", "columns", "stage", "p-rounds", "p-diagnosis", "p-training", "log")
+
+
+class Skeleton(HTMLParser):
+    """index.html's skeleton blocks as (container id, hidden from assistive tech), and the text it speaks as Loading."""
+
+    VOID = {"meta", "link", "input", "br", "img"}
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.stack: list[tuple[str, str | None, bool]] = []
+        self.blocks: list[tuple[str | None, bool]] = []
+        self.loading = 0
+
+    def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
+        a = dict(attrs)
+        _, container, hidden = self.stack[-1] if self.stack else ("", None, False)
+        here = (a.get("id") if a.get("id") in LOADING else container, hidden or a.get("aria-hidden") == "true")
+        if "skel" in (a.get("class") or "").split():
+            self.blocks.append(here)
+        if tag not in self.VOID:
+            self.stack.append((tag, *here))
+
+    def handle_endtag(self, tag: str) -> None:
+        while self.stack and self.stack.pop()[0] != tag:
+            pass
+
+    def handle_data(self, data: str) -> None:
+        if data.strip() == "Loading" and not (self.stack and self.stack[-1][2]):
+            self.loading += 1
+
+
+def test_a_run_shows_hidden_skeletons_and_says_loading_once_until_its_replay_settles_then_its_content() -> None:
+    page = Skeleton()
+    page.feed(INDEX_HTML.read_text())
+    assert {container for container, _ in page.blocks} == set(LOADING)
+    assert all(hidden for _, hidden in page.blocks)
+    assert page.loading == 1
+    script = """
+    const [source] = sources;
+    source.onopen();
+    for (const e of events) source.onmessage({ data: JSON.stringify(e) });
+    const replaying = writes.map(([id]) => id);
+    source.listeners.replayed();
+    flush();
+    return { replaying, after: Object.fromEntries(writes) };
+    """
+    out = app(script, stream(started("a"), decision(0), executed(0)))
+    # the skeleton stays until the replay settles, then every container shows the run, no block left
+    assert not set(out["replaying"]) & set(LOADING)
+    for id_ in LOADING:
+        assert id_ in out["after"] and not re.search(r'class="[^"]*\bskel', out["after"][id_]), id_
