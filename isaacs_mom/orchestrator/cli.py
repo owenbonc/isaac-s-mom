@@ -1,4 +1,5 @@
 import argparse
+import json
 import time
 from pathlib import Path
 
@@ -158,7 +159,8 @@ def main() -> None:
         from_run=args.from_run,
     )
     if args.from_run is not None:
-        print(f"started from {(run_dir / 'carried_over.json').read_text()}")
+        record = json.loads((run_dir / "from_run.json").read_text())
+        print(f"round 0 started from {record['checkpoint']}, with {len(record['episodes'])} of its demonstrations")
     print(bin_moves(run_dir / "events.jsonl"))
     for r in results:
         scored = f"{r.successes}/{r.n - r.errored} held-out successes, {r.errored} errored"

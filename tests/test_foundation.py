@@ -9,11 +9,19 @@ import numpy as np
 import pytest
 from pydantic import ValidationError
 
-from isaacs_mom.contracts import Controller, EpisodeManifest, Observation, Perturbation, SkillCall, SkillTarget
+from isaacs_mom.contracts import (
+    Controller,
+    EpisodeManifest,
+    Observation,
+    Perturbation,
+    SkillCall,
+    SkillTarget,
+    TrainingExample,
+)
 from isaacs_mom.orchestrator import cli, loop
 from isaacs_mom.orchestrator.episode import run_episode
 from isaacs_mom.orchestrator.events import EventLog
-from isaacs_mom.orchestrator.loop import evaluate, run_loop
+from isaacs_mom.orchestrator.loop import carry_over, evaluate, run_loop
 from isaacs_mom.seeds import SealedSeedError, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.fake import BIN_OUTER_HALF, FLOOR_Z, HELD_Z, PLACE_X, FakeSim, _bin_pose
 from isaacs_mom.student import StubStudent, stub_finetune
@@ -658,57 +666,149 @@ def test_the_run_reports_the_bin_moves_that_happened_not_the_share_asked_for(tmp
     assert loop.bin_moves(tmp_path / "missing.jsonl").startswith("the bin moved right after the lift in 0 of 0")
 
 
-def _earlier_run(runs: Path) -> Path:
-    """A finished run: one accepted teacher demonstration, one held-out episode and its checkpoint."""
+class StopsAtOnce:
+    """A teacher whose demonstration leaves the box on the table: recorded, rejected."""
+
+    controller: Controller = "teacher"
+    checkpoint: str | None = None
+
+    def act(self, obs: Observation, instruction: str, feedback: str) -> SkillCall | None:
+        return SkillCall(skill="reobserve") if obs.step == 0 else None
+
+
+class SolvesAlone(ScriptedPolicy):
+    controller: Controller = "student"
+
+
+def _earlier_run(runs: Path, *policies: str) -> Path:
+    """A finished run beside the next one: a demonstration per named policy on its own dev seed, and its checkpoint."""
     prev = runs / "prev"
     sim, events = FakeSim(), EventLog(prev, "prev")
-    common: dict[str, Any] = {"run_dir": prev, "events": events, "round_": 1, "instruction": "hug"}
-    run_episode(sim, ScriptedPolicy(sim), seed=1500, split="dev", **common)
-    run_episode(sim, GiveUp(), seed=min(heldout_seeds()), split="heldout", **common)
+    make = {"taught": ScriptedPolicy, "rejected": lambda _sim: StopsAtOnce(), "alone": SolvesAlone}
+    for i, name in enumerate(policies):
+        run_episode(sim, make[name](sim), run_dir=prev, events=events, seed=1500 + i, split="dev", round_=1,
+                    instruction="hug")  # fmt: skip
     (prev / "checkpoints" / "ckpt-r1").mkdir(parents=True)
     return prev
 
 
-def test_a_run_can_start_where_an_earlier_run_left_off(tmp_path: Path) -> None:
-    prev = _earlier_run(tmp_path / "runs")
+def _manifests(run: Path) -> dict[str, EpisodeManifest]:
+    return {
+        p.parent.name: EpisodeManifest.model_validate_json(p.read_text()) for p in run.glob("episodes/*/manifest.json")
+    }
+
+
+def _from_run(tmp_path: Path, prev: Path) -> tuple[Path, list[str], list[tuple[str, list[str]]]]:
     evaluated: list[str] = []
-    trained: list[tuple[str, int]] = []
+    trained: list[tuple[str, list[str]]] = []
 
     def make_student(checkpoint: str) -> StubStudent:
         evaluated.append(checkpoint)
         return StubStudent(checkpoint)
 
     def train_student(training_set: Path, previous_checkpoint: str, round_: int) -> str:
-        trained.append((previous_checkpoint, len(training_set.read_text().splitlines())))
+        images = [TrainingExample.model_validate_json(line).image for line in training_set.read_text().splitlines()]
+        trained.append((previous_checkpoint, [Path(image).parents[1].name for image in images]))
         return previous_checkpoint
 
     run_dir = tmp_path / "runs" / "next"
-    run_loop(
-        FakeSim(),
-        run_dir,
-        "next",
-        max_rounds=1,
-        demos=1,
-        dev_trials=1,
-        argon=silent_argon(run_dir, "next"),
-        make_student=make_student,
-        train_student=train_student,
-        from_run=prev,
-    )
-    assert evaluated[0] == "prev/ckpt-r1"  # round 0 evaluates where the earlier run ended
-    carried = json.loads((run_dir / "carried_over.json").read_text())
-    assert carried == {"from_run": "prev", "checkpoint": "prev/ckpt-r1", "dev_episodes": 1}
-    before = {p.parent.name: EpisodeManifest.model_validate_json(p.read_text()) for p in prev.glob("episodes/*/*.json")}
-    now = {p.name for p in (run_dir / "episodes").iterdir()}
-    assert {i for i, m in before.items() if m.split == "dev"} <= now  # carried over
-    assert not {i for i, m in before.items() if m.split == "heldout"} & now  # the held-out one stays behind (rule 2)
-    demo_steps = len(next(m for m in before.values() if m.seed == 1500).steps)
-    assert trained and trained[0][0] == "prev/ckpt-r1" and trained[0][1] >= demo_steps  # the old demo still trains
+    run_loop(FakeSim(), run_dir, "next", max_rounds=1, demos=1, dev_trials=1, argon=silent_argon(run_dir, "next"),
+             make_student=make_student, train_student=train_student, from_run=prev)  # fmt: skip
+    return run_dir, evaluated, trained
+
+
+def test_round_0_is_the_earlier_runs_checkpoint_evaluated_afresh_with_its_demonstrations_still_training(
+    tmp_path: Path,
+) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    (demo,) = _manifests(prev)
+    run_dir, evaluated, trained = _from_run(tmp_path, prev)
+    assert evaluated[0] == "prev/ckpt-r1"
+    logged = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    (round_0,) = [e["data"] for e in logged if e["type"] == "evaluation_result" and e["data"]["round"] == 0]
+    assert round_0["checkpoint"] == "prev/ckpt-r1" and round_0["n"] == len(heldout_seeds())  # measured in this run
+    held_out = [m for m in _manifests(run_dir).values() if m.split == "heldout" and m.round == 0]
+    assert len(held_out) == len(heldout_seeds())
+    assert trained and trained[0][0] == "prev/ckpt-r1" and demo in trained[0][1]  # the old demonstration still trains
+    record = run_dir / "from_run.json"
+    assert record.exists()  # rule 6
+    assert json.loads(record.read_text()) == {"from_run": "prev", "checkpoint": "prev/ckpt-r1", "episodes": [demo]}
+
+
+def test_copied_demonstrations_stay_apart_from_this_runs_own(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    (demo,) = _manifests(prev)
+    run_dir, _, _ = _from_run(tmp_path, prev)
+    copied = _manifests(run_dir)[demo]
+    assert copied == _manifests(prev)[demo]  # byte for byte: its run id and controller labels are the earlier run's
+    assert copied.run_id == "prev" and {s.controller for s in copied.steps} == {"teacher"}
+    logged = [json.loads(line) for line in (run_dir / "events.jsonl").read_text().splitlines()]
+    assert demo not in {e["data"].get("episode_id") for e in logged}  # nothing in this run's events claims it
+
+
+def test_only_accepted_teacher_demonstrations_come_in(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught", "rejected", "alone")
+    by_seed = {m.seed: name for name, m in _manifests(prev).items()}
+    run_dir, _, trained = _from_run(tmp_path, prev)
+    assert set(json.loads((run_dir / "from_run.json").read_text())["episodes"]) == {by_seed[1500]}
+    assert not {by_seed[1501], by_seed[1502]} & set(_manifests(run_dir))  # rule 3: never reach the training set
+    assert not {by_seed[1501], by_seed[1502]} & set(trained[0][1])
+
+
+def test_a_held_out_episode_in_the_source_stops_the_run_and_copies_nothing(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    run_episode(FakeSim(), GiveUp(), run_dir=prev, events=EventLog(prev, "prev"), seed=min(heldout_seeds()),
+                split="heldout", round_=1, instruction="hug")  # fmt: skip
+    run_dir = tmp_path / "runs" / "next"
+    with pytest.raises(Exception) as refused:
+        run_loop(FakeSim(), run_dir, "next", argon=silent_argon(run_dir, "next"), make_student=StubStudent,
+                 train_student=stub_finetune, from_run=prev)  # fmt: skip
+    assert refused.type is SealedSeedError
+    assert not (run_dir / "episodes").exists() and not (run_dir / "from_run.json").exists()
+
+
+def test_a_held_out_take_on_an_unseen_seed_is_refused_too(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught", "taught")
+    path = sorted(prev.glob("episodes/*/manifest.json"))[1]
+    manifest = EpisodeManifest.model_validate_json(path.read_text())
+    path.write_text(manifest.model_copy(update={"split": "heldout", "seed": 900001}).model_dump_json())
+    run_dir = tmp_path / "runs" / "next"
+    with pytest.raises(Exception) as refused:
+        run_loop(FakeSim(), run_dir, "next", argon=silent_argon(run_dir, "next"), make_student=StubStudent,
+                 train_student=stub_finetune, from_run=prev)  # fmt: skip
+    assert "not a development episode" in str(refused.value) and not (run_dir / "episodes").exists()
+
+
+def test_a_source_on_another_task_is_refused_and_copies_nothing(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught", "taught")
+    path = sorted(prev.glob("episodes/*/manifest.json"))[1]
+    manifest = EpisodeManifest.model_validate_json(path.read_text())
+    path.write_text(manifest.model_copy(update={"sim_version": "mujoco-4.0.0 task=across_room"}).model_dump_json())
+    run_dir = tmp_path / "runs" / "next"
+    with pytest.raises(ValueError, match="was recorded on"):
+        run_loop(FakeSim(), run_dir, "next", argon=silent_argon(run_dir, "next"), make_student=StubStudent,
+                 train_student=stub_finetune, from_run=prev)  # fmt: skip
+    assert not (run_dir / "episodes").exists()
+
+
+def test_starting_twice_or_from_a_run_that_carried_over_copies_each_demonstration_once(tmp_path: Path) -> None:
+    prev = _earlier_run(tmp_path / "runs", "taught")
+    run_dir = tmp_path / "runs" / "next"
+    run_dir.mkdir(parents=True)
+    assert carry_over(prev, run_dir, FakeSim().sim_version) == "prev/ckpt-r1"
+    with pytest.raises(Exception) as refused:
+        carry_over(prev, run_dir, FakeSim().sim_version)
+    assert "already holds episodes" in str(refused.value)
+    (run_dir / "checkpoints" / "ckpt-r1").mkdir(parents=True)
+    then = tmp_path / "runs" / "then"
+    then.mkdir()
+    carry_over(run_dir, then, FakeSim().sim_version)  # a source that itself started from another
+    assert sorted(p.name for p in (then / "episodes").iterdir()) == sorted(_manifests(prev))
 
 
 @pytest.mark.parametrize("where", ["elsewhere", "no checkpoint"])
 def test_a_run_refuses_to_start_from_a_run_it_cannot_continue(where: str, tmp_path: Path) -> None:
-    prev = _earlier_run(tmp_path / "runs" if where == "no checkpoint" else tmp_path / "other")
+    prev = _earlier_run(tmp_path / ("runs" if where == "no checkpoint" else "other"), "taught")
     if where == "no checkpoint":
         (prev / "checkpoints" / "ckpt-r1").rmdir()
     run_dir = tmp_path / "runs" / "next"
@@ -720,6 +820,6 @@ def test_a_run_refuses_to_start_from_a_run_it_cannot_continue(where: str, tmp_pa
 def test_the_cli_refuses_a_from_run_with_no_checkpoints(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(sys, "argv", ["mom", "run", "--sim", "fake", "--student", "stub", "--from-run", "runs/none"])
-    with pytest.raises(SystemExit) as exit_:
+    with pytest.raises(BaseException) as stopped:
         cli.main()
-    assert exit_.value.code == 2
+    assert isinstance(stopped.value, SystemExit) and stopped.value.code == 2 and not (tmp_path / "runs").exists()

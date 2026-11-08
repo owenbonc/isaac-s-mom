@@ -12,11 +12,12 @@ from isaacs_mom.contracts import Diagnosis, EpisodeManifest, EvaluationResult
 from isaacs_mom.orchestrator.episode import HEARTBEAT_SECONDS, heartbeat, run_episode
 from isaacs_mom.orchestrator.events import EventLog
 from isaacs_mom.policy import Policy
-from isaacs_mom.seeds import DEV_SEED_START, heldout_seeds
+from isaacs_mom.seeds import DEV_SEED_START, assert_not_heldout, heldout_seeds
 from isaacs_mom.sim.base import TruthSim
 from isaacs_mom.student import BASE_CHECKPOINT, StudentPolicy, adapter_dir, finetune
 from isaacs_mom.teacher import ArgonPolicy, choose_scenes, diagnose
 from isaacs_mom.teacher.argon import Argon
+from isaacs_mom.validator.recorder import write_atomically
 from isaacs_mom.validator.rules import RECORDING_ERROR
 from isaacs_mom.validator.training import build_training_set
 
@@ -92,23 +93,33 @@ def bin_moves(events_path: Path) -> str:
     )
 
 
-def carry_over(from_run: Path, run_dir: Path) -> str:
-    """Start where an earlier run beside this one left off: its development episodes join this run, so every round's
-    cumulative training set still holds them, and its last checkpoint is the one round 0 evaluates."""
+def carry_over(from_run: Path, run_dir: Path, sim_version: str) -> str:
+    """Round 0 starts where an earlier run beside this one ended: the demonstrations it accepted join this run's
+    cumulative training set, and its last checkpoint is evaluated afresh. Returns that checkpoint."""
     if from_run.resolve().parent != run_dir.resolve().parent:
         raise ValueError(f"{from_run} must sit beside {run_dir}, where the student finds its checkpoints")
+    if any((run_dir / "episodes").glob("*")):
+        raise ValueError(f"{run_dir} already holds episodes: only a new run starts from another")
     names = [p.name.removeprefix("ckpt-r") for p in (from_run / "checkpoints").glob("ckpt-r*")]
     rounds = sorted(int(n) for n in names if n.isdigit())
     if not rounds:
         raise ValueError(f"{from_run} has no checkpoint to start from")
-    carried = 0
+    taught = []
     for path in sorted((from_run / "episodes").glob("*/manifest.json")):
-        if EpisodeManifest.model_validate_json(path.read_text()).split == "dev":  # held-out episodes never train
-            shutil.copytree(path.parent, run_dir / "episodes" / path.parent.name)
-            carried += 1
+        manifest = EpisodeManifest.model_validate_json(path.read_text())
+        assert_not_heldout(manifest.seed)  # rule 2: a held-out episode stops the run here rather than being skipped
+        if manifest.split != "dev":
+            raise ValueError(f"{path.parent.name} is not a development episode")
+        if manifest.sim_version != sim_version:
+            raise ValueError(f"{path.parent.name} was recorded on {manifest.sim_version!r}, not {sim_version!r}")
+        accepted = manifest.validation is not None and manifest.validation.accepted
+        if accepted and any(step.controller == "teacher" for step in manifest.steps):  # rule 3
+            taught.append(path.parent)
+    for episode in taught:  # only once every episode has passed, so a refused source copies nothing
+        shutil.copytree(episode, run_dir / "episodes" / episode.name)
     checkpoint = f"{from_run.name}/ckpt-r{rounds[-1]}"
-    record = {"from_run": from_run.name, "checkpoint": checkpoint, "dev_episodes": carried}
-    (run_dir / "carried_over.json").write_text(json.dumps(record, indent=2))
+    record = {"from_run": from_run.name, "checkpoint": checkpoint, "episodes": [e.name for e in taught]}
+    write_atomically(run_dir / "from_run.json", json.dumps(record, indent=2))
     return checkpoint
 
 
@@ -131,7 +142,7 @@ def run_loop(
     # finetune writes checkpoints beside the run dir, so the default student looks there too.
     make_student = make_student or partial(StudentPolicy, runs_dir=run_dir.parent)
     events = EventLog(run_dir, run_id)
-    checkpoint = carry_over(from_run, run_dir) if from_run is not None else BASE_CHECKPOINT
+    checkpoint = carry_over(from_run, run_dir, sim.sim_version) if from_run is not None else BASE_CHECKPOINT
     results: list[EvaluationResult] = []
     for round_ in range(max_rounds + 1):
         results.append(evaluate(sim, checkpoint, round_, run_dir, events, make_student))
