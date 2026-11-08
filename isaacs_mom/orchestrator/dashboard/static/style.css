@@ -123,8 +123,8 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 @media (hover:hover){:is(.presenter,.teach,.filters,.tabs) button:hover::after{opacity:1;translate:var(--tx) 0;transition-delay:.3s}}
 :is(.presenter,.teach,.filters,.tabs) button:focus-visible::after{opacity:1;translate:var(--tx) 0}
 
-/* A label is a mark and a word, never a capsule: a filled dot while live, a ring once recorded, the word alone for a
-   placeholder or a configured value. */
+/* A label is a mark and a word, never a capsule: a filled dot while live, a ring once recorded, a dashed ring for a
+   placeholder, the word alone for a configured value. A panel's label is its mark alone unless it differs from the run's. */
 .chip{display:inline-flex;align-items:center;gap:.35rem;font-size:var(--t-label);font-weight:600;line-height:1.35;color:var(--ink);white-space:nowrap}
 .chip.recorded::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px solid currentColor}
 .chip.live::before{content:"";width:.5rem;height:.5rem;border-radius:50%;background:currentColor}
@@ -133,6 +133,12 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 .chip.lost{color:var(--bad)}
 .chip.lost::before{content:"";width:.6rem;height:1.5px;background:currentColor;transform:rotate(-45deg)}
 .chip.placeholder{color:var(--muted)}
+.chip.placeholder::before{content:"";width:.45rem;height:.45rem;border-radius:50%;border:1.5px dashed currentColor}
+.dot{display:inline-block;flex:none;width:.5rem;height:.5rem;border-radius:50%}
+.dot.live{background:currentColor}
+/* The live dot breathes slowly wherever it shows (one pulse every 1.8 s, opacity only); recorded and placeholder hold still. */
+@media (prefers-reduced-motion:no-preference){.chip.live::before,.dot.live{animation:pulse 1.8s ease-in-out infinite}}
+@keyframes pulse{50%{opacity:.3}}
 .chip.paused::before{content:"";width:.4rem;height:.55rem;border-inline:2px solid currentColor}
 /* Nothing ran: an empty ring crossed out. */
 .chip.refused{color:var(--muted)}
@@ -391,7 +397,6 @@ ol.log .after{grid-column:2;font-size:var(--t-label);font-weight:600;color:var(-
 /* The one large number: size alone sets it apart, so it stays at a medium weight. */
 .fig{white-space:nowrap;font-size:var(--t-fig);font-weight:500;line-height:1.05;letter-spacing:-.025em}
 .rates{display:flex;flex-direction:column;white-space:nowrap}
-.rates b{font-weight:600}
 ol.log li.fresh{animation:in .16s var(--ease-out)}
 @keyframes in{from{opacity:0;transform:translateY(4px)}}
 ol.log .err{grid-column:2;color:var(--bad);overflow-wrap:anywhere}

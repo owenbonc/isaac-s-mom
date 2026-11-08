@@ -227,6 +227,12 @@
     return v.frozen ? "paused" : "live";
   }
 
+  // A panel's provenance (SPEC §3.5): its dot, with the word spelled out only where it differs from the run's label.
+  function panelLabel(v, now, ep = null) {
+    const kind = provenance(v, now, ep);
+    return { kind, spelled: kind !== provenance(v, now) };
+  }
+
   // Median latency with its sample size; null when there is no data.
   const stat = (values) => (values.length ? { median: median(values), n: values.length } : null);
 
@@ -370,9 +376,9 @@
     return { checkpoints, seeds: only === null ? seeds : seeds.filter((r) => r.mark === only), counts };
   }
 
-  // The held-out claim (SPEC §3.5): the change in percentage points between the first and the latest evaluation, and
-  // each one's rate and successes out of the episodes that didn't error, with its n and errored count, named in words,
-  // with the checkpoint ids as a note. Null before the first evaluation.
+  // The held-out claim (SPEC §3.5): the change in percentage points between the first and the latest evaluation, the
+  // two counts of successes out of the episodes that didn't error, the errored counts when any errored, and the
+  // evaluations named in words with their checkpoint ids. Null before the first evaluation.
   function claim(s) {
     if (!s.rounds.length) return null;
     const first = s.rounds[0];
@@ -391,15 +397,18 @@
           ? `all ${r.n} held-out episodes errored ${name(r)}`
           : `${rate(r)}%, ${r.successes} of ${scored(r)}, ${name(r)}${r.errored ? `, ${r.errored} errored` : ""}`;
     const change = points === null ? "" : points === 0 ? "No change: " : `${points > 0 ? "Up" : "Down"} ${Math.abs(points)} percentage points: `;
-    const same = pair.every((r) => r.n === first.n) && first.n;
+    // One denominator is said once ("4 → 15 of 20"); two that differ go with their counts ("9/18 → 15/20").
+    const of = scored(first);
+    const counts =
+      of > 0 && pair.every((r) => scored(r) === of)
+        ? `${pair.map((r) => r.successes).join(" → ")} of ${of}`
+        : pair.map((r) => (scored(r) > 0 ? `${r.successes}/${scored(r)}` : "none")).join(" → ");
     return {
       // The change in points, never a relative percentage; with one evaluation, its rate; with nothing scored, none.
       figure: rates.includes(null) ? null : points === null ? `${rates[0]}%` : `${points < 0 ? "\u2212" : "+"}${Math.abs(points)} pts`,
-      rates: pair.length > 1 ? rates.map((r) => (r === null ? "none" : `${r}%`)).join(" → ") : null,
-      counts: pair.map((r) => (scored(r) > 0 ? `${r.successes}/${scored(r)}` : "none")).join(" → "),
+      counts,
       spoken: change + pair.map(said).join(", then "),
-      sample: same ? `n=${first.n}${pair.length > 1 ? " each" : ""}` : pair.map((r) => (r.n ? `n=${r.n}` : "no held-out episode ran")).join(" and "),
-      errored: `${pair.map((r) => r.errored).join(" → ")} errored`,
+      errored: pair.some((r) => r.errored) ? `${pair.map((r) => r.errored).join(" → ")} errored` : null,
       names: pair.map(name).join(" → "),
       ids: pair.map((r) => r.checkpoint).join(" → "),
     };
@@ -628,7 +637,7 @@
     return { state: "failed", message };
   }
 
-  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
+  const api = { esc, initial, view, reconnect, settle, disconnect, reduce, receive, current, provenance, panelLabel, summary, filmstrip, move, actedOn, median, shown, buffered, pauseLabel, following, accepted, kind, verdictWords, simulator, claim, testing, results, MARKS, lessons, argon, trainingSummary, replayReport, runsOf, runToOpen, instructionProblem, teachCount, teachAnswer, teacherDrove, episode, where, teaches, finetuning, target, visit, stageStep, inControl, finished, keydown };
   if (typeof module !== "undefined") module.exports = api;
   else root.MomState = api;
 })(this);

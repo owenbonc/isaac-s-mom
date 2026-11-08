@@ -46,11 +46,13 @@ const MOVE = '<svg class="i" aria-hidden="true"><use href="#i-move"/></svg>';
 const now = () => Date.now() / 1000;
 const label = (kind) => kind[0].toUpperCase() + kind.slice(1);
 const chip = (kind, text = label(kind)) => `<span class="chip ${kind}">${text}</span>`;
-// A panel's label, quiet beside the header's: what the view shows of the run or of the panel's episode. A panel with
-// nothing to show says so in words, so placeholder means only a run that is not on a real simulator.
+// A panel's label, quiet beside the header's (SPEC §3.5): its dot, the word in its tooltip and accessible name, spelled
+// out only where it differs from the run's. A panel with nothing to show says so in words, so placeholder means only a
+// run that is not on a real simulator.
 const panelChip = (ep = null) => {
-  const kind = MomState.provenance(view, now(), ep);
-  return `<span class="chip quiet ${kind}">${label(kind)}</span>`;
+  const { kind, spelled } = MomState.panelLabel(view, now(), ep);
+  const word = label(kind);
+  return spelled ? `<span class="chip quiet ${kind}" title="${word}">${word}</span>` : `<span class="chip quiet ${kind}" role="img" aria-label="${word}" title="${word}"></span>`;
 };
 const WHO = { student: "Student", teacher: "Teacher (Argon)" };
 const tag = (controller, checkpoint) => {
@@ -395,13 +397,14 @@ function heldOut() {
   // A run that stopped arriving mid-evaluation can't say the test still runs.
   const live = MomState.following(view, now()) && !view.lost;
   const progress = test && `Testing ${test.checkpoint ? `<span class="mono">${esc(test.checkpoint)}</span>` : "the student"}: ${test.run}${test.of === null ? " run so far" : ` of ${test.of} run`}${live ? "" : " when its events stopped"}.`;
-  // First and latest only: the change is the claim, the page's one large number, with the rates and their counts
-  // beside it; with nothing scored to compare, it says so in words.
-  const errored = c && c.errored ? ` · ${esc(c.errored)}` : "";
+  // First and latest only: the change is the claim, the page's one large number, with the two counts beside it at
+  // body size and the errored counts under them when any errored; with nothing scored to compare, it says so in words.
+  const errored = c && c.errored ? `<span class="note">${esc(c.errored)}</span>` : "";
   const lead = c && (c.figure
-    ? `<span class="fig" role="img" aria-label="Held-out success: ${esc(c.spoken)}">${esc(c.figure)}</span><span class="rates">${c.rates ? `<b>${esc(c.rates)}</b>` : ""}<span>${esc(c.counts)}</span></span>`
-    : `<span>${esc(cap(c.spoken))}.</span>`);
-  const gain = c && `<div class="gain">${lead}</div><div class="note">${esc(c.sample)}${errored}</div><div>${esc(c.names)}</div><div class="note mono">${esc(c.ids)}</div>`;
+    ? `<span class="fig" role="img" aria-label="Held-out success: ${esc(c.spoken)}">${esc(c.figure)}</span><span class="rates"><span>${esc(c.counts)}</span>${errored}</span>`
+    : `<span>${esc(cap(c.spoken))}.</span>${errored}`);
+  // The checkpoint ids are the names' tooltip.
+  const gain = c && `<div class="gain">${lead}</div><div class="names" title="${esc(c.ids)}">${esc(c.names)}</div>`;
   const body = gain ? gain + (progress ? `<div class="note">${progress}</div>` : "") : `<div class="ph-text">${progress || "No held-out evaluation in the events yet."}</div>`;
   // A run is taught and tested on its own instruction, so its rates carry it (SPEC §3.5).
   const said = s.instruction && s.instruction.text;
@@ -585,6 +588,8 @@ function render() {
   fadeSide();
   keepFocus(focused);
   placeFocus();
+  // Every live dot pulses in step, a rewritten one included, from the timeline's start.
+  for (const a of document.getAnimations()) if (a.animationName === "pulse") a.startTime = 0;
 }
 
 // A key that moved Results' focus, or a move to another place, takes the keyboard there: the focused seed in the list.
