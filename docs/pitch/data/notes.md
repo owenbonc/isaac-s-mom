@@ -59,7 +59,7 @@ Path shorthands used in the CSVs:
 
 **Untrained baseline and re-exam, 757 s.** This was a separate run, `showcase-compare`, on the same laptop.
 - `SP/job2/job2.out` prints "start 06:31:26 … end 06:44:03", plus per-exam durations of 77, 69, 305 and 305 s. `SP/job2/compare_results.json` gives trained 18/20 and 17/20 (adapted 17/20), and base 0/20 and 0/20 (`trigger_not_reached: 20`).
-- The code was 41daaee. The same failing seeds as the original exam are reported in PR #34, https://github.com/owenbonc/isaac-s-mom/pull/34#issuecomment-6718403706.
+- The code was 41daaee. The same failing seeds as the original exam are reported in PR #34, https://github.com/owenbonc/scaffld/pull/34#issuecomment-6718403706.
 
 **Totals.**
 - **Pipeline work:** 2,383.8 s (39.7 min), the sum of the four stage rows above.
@@ -80,7 +80,7 @@ Path shorthands used in the CSVs:
 - **Already-measured figures,** as given:
   - Argon over all batches: 8.1 s median, 19.5 s p95, n=3,551 (teacher latency analysis, technical summary data.json; `<workspace>/technical-summary/data.json` `latency.rows[2]`: 8066 ms, 19473 ms).
   - Student: about 0.48 s median in short runs (n=277).
-  - Student: about 1.08 s median over 35-minute exams (https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6718403477: 1075–1081 ms).
+  - Student: about 1.08 s median over 35-minute exams (https://github.com/owenbonc/scaffld/pull/22#issuecomment-6718403477: 1075–1081 ms).
 
 **Network.**
 - **Teacher:** `SP/ws1-learn/isaacs_mom/teacher/argon.py` lines 91–98 need `GEMINI_API_KEY` and build a `google.genai` client for `gemini-4-argon` (line 19), so every teacher decision needs the network. 3 of the 587 calls in this batch timed out (see above).
@@ -89,7 +89,7 @@ Path shorthands used in the CSVs:
 
 **Training cost.** 1255.3 s, i.e. 20.9 GPU-minutes on one RTX 5070 Ti laptop GPU (1265.6 s for the whole fine-tune call), a 2.0 GiB peak, and 605 examples. The sources are as in the timeline.
 
-**Learning curve.** https://github.com/owenbonc/isaac-s-mom/pull/22#issuecomment-6719281987, with the raw JSON at TR line 10420 (08:29:01Z):
+**Learning curve.** https://github.com/owenbonc/scaffld/pull/22#issuecomment-6719281987, with the raw JSON at TR line 10420 (08:29:01Z):
 - 14 demos: 404.1 s, 152 examples, 0/20 and 0/20.
 - 28 demos: 672.4 s, 293 examples, 0/20 and 0/20.
 - 14 and 28 were trained by `SP/curve.py` (runs `curve-k14` at 07:56:40Z and `curve-k28` at 08:10:47Z) on the same laptop with code 41daaee. `git diff 65a6e97 41daaee -- isaacs_mom/student isaacs_mom/validator/training.py` is empty, so the fine-tune code is the same as the showcase's.
