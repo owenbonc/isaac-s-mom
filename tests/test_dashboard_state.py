@@ -1725,7 +1725,9 @@ const doc = {
   activeElement: body,
   listeners: {},
   getElementById: (id) => elements.get(id) || null,
-  querySelectorAll: (selector) => (selector === "[id]" ? [...elements.values()] : []),
+  // The run picker stands for the page's popovers.
+  querySelectorAll: (selector) =>
+    selector === "[id]" ? [...elements.values()] : selector.includes("details.runs") ? [elements.get("runs")] : [],
   // One element per selector, so a listener app.js adds to it can be driven.
   found: new Map(),
   querySelector(selector) {
@@ -2012,3 +2014,20 @@ def test_past_200_characters_the_count_says_so_and_teach_stays_off_until_the_tex
     """
     status = "At most 200 characters." if n > 200 else ""
     assert app(REPLAY + script, stream(started("a"))) == [f"{n}/200", n > 200, status]
+
+
+def test_the_run_picker_closes_when_the_focus_moves_past_it_or_on_escape_and_not_for_a_click_on_its_own_text() -> None:
+    script = """
+    const picker = doc.getElementById("runs");
+    const link = {};
+    picker.contains = (el) => el === link;
+    const left = (relatedTarget) => {
+      picker.open = true;
+      picker.listeners.focusout[0]({ relatedTarget });
+      return picker.open;
+    };
+    picker.open = true;
+    doc.listeners.keydown[0]({ key: "Escape", target: doc.body, preventDefault() {} });
+    return { escape: picker.open, link: left(link), text: left(null), past: left(doc.getElementById("tabs")) };
+    """
+    assert app(REPLAY + script, stream(started("a"))) == {"escape": False, "link": True, "text": True, "past": False}

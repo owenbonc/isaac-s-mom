@@ -801,7 +801,8 @@ FIELD.addEventListener("input", () => {
   renderTeach();
 });
 
-// Labels and the run picker close on Escape or a click outside them, as popovers do; so does the Teach answer.
+// The legend and the run picker close on Escape, a click outside them or the focus moving on past them, as popovers do;
+// the Teach answer closes on Escape or a click outside it.
 const POPOVERS = [...document.querySelectorAll("details.legend, details.runs")];
 const dismissTeach = () => {
   if (teaching.state === "checking" || teaching.state === "idle") return;
@@ -820,6 +821,11 @@ document.addEventListener("click", (e) => {
   for (const d of POPOVERS) if (d.open && !d.contains(e.target)) d.open = false;
   if (!TEACH.contains(e.target)) dismissTeach();
 });
+// A click on a popover's own text moves the focus to no element, so only a move to another element closes it.
+for (const d of POPOVERS)
+  d.addEventListener("focusout", (e) => {
+    if (e.relatedTarget && !d.contains(e.relatedTarget)) d.open = false;
+  });
 
 $("side").addEventListener("scroll", fadeSide);
 $("log").addEventListener("scroll", (e) => {

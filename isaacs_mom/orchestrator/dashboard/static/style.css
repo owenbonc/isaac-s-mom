@@ -66,7 +66,8 @@ kbd{font:600 var(--t-label)/1.35 var(--sans);color:var(--ink);padding:0 .3rem;mi
 
 /* The run picker: the shown run's id and a chevron; its popover lists every run. */
 .runs{position:relative;min-width:0;flex:0 1 auto}
-.runs summary{max-width:17rem;list-style:none;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:.15rem .35rem;border-radius:var(--r-sm);font:450 var(--t-label)/1.35 var(--mono)}
+/* As tall as the keys beside it, so the presenter's run switch is as easy a target. */
+.runs summary{max-width:17rem;min-height:2.3rem;list-style:none;cursor:pointer;display:flex;align-items:center;gap:.3rem;padding:0 .5rem;border-radius:var(--r-sm);font:450 var(--t-label)/1.35 var(--mono)}
 .runs summary::-webkit-details-marker{display:none}
 .runs[open] summary{background:var(--raised)}
 @media (hover:hover){.runs summary:hover{background:var(--raised)}}
