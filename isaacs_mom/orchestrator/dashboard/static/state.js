@@ -335,6 +335,8 @@
   const BASE_CHECKPOINT = "ckpt-r0";
   // A `mom eval` block on another condition still closes a segment but is no evaluation of the training task (SPEC §6.10).
   const counted = (r) => r.condition === null || r.condition === "training_distribution";
+  // An episode carries no condition, so in a `mom eval` run a block's condition is known only once its result closes it.
+  const conditioned = (s) => s.rounds.some((r) => r.condition !== null);
 
   function outcome(cell, done) {
     if (cell.crashed) return "errored";
@@ -354,17 +356,17 @@
     // An evaluation's held-out episodes follow the previous evaluation's result, as testing() reads them.
     const ends = s.rounds.map((r) => r.after);
     const tail = s.episodes.slice(ends.length ? ends[ends.length - 1] : 0).find((e) => e.split === "heldout");
-    // shortcut: during a live mom eval, a non-training block reads as the evaluation under way until its result closes it; upgrade by recording the condition on episode_started.
+    const underway = !conditioned(s) && Boolean(tail || s.crashes.some((c) => c.evaluation === ends.length));
     const kept = s.rounds.flatMap((r, k) => (counted(r) ? [k] : []));
     const checkpoints = kept.map((k) => ({ round: s.rounds[k].round, checkpoint: s.rounds[k].checkpoint, name: roundName(s.rounds[k]), done: true }));
-    if (tail || s.crashes.some((c) => c.evaluation === ends.length)) {
+    if (underway) {
       const test = testing(s);
       const checkpoint = test ? test.checkpoint : null;
       // Until its result says where it came from, a round 0 not yet seen on the base checkpoint is only under way.
       const round = tail && !(tail.round === 0 && checkpoint !== BASE_CHECKPOINT) ? tail.round : null;
       checkpoints.push({ round, checkpoint, name: roundName({ round, from: null }), done: false });
     }
-    const slot = (segment) => (segment === ends.length ? kept.length : kept.indexOf(segment));
+    const slot = (segment) => (segment === ends.length ? (underway ? kept.length : -1) : kept.indexOf(segment));
     const rows = new Map();
     const cell = (seed, k) => {
       if (!rows.has(seed)) rows.set(seed, checkpoints.map(() => ({ ep: null, crashed: false })));
@@ -453,6 +455,7 @@
   // The held-out evaluation under way: its checkpoint, how many of its seeds have run (to a verdict or a crash), and out
   // of how many, which only an earlier evaluation of the same sealed seeds tells. Null while none runs.
   function testing(s) {
+    if (conditioned(s)) return null;
     const last = s.rounds[s.rounds.length - 1];
     const tests = s.episodes.slice(last ? last.after : 0).filter((e) => e.split === "heldout");
     const crashed = s.crashes.filter((c) => c.evaluation === s.rounds.length).map((c) => c.seed);

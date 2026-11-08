@@ -1525,6 +1525,26 @@ def test_an_eval_run_compares_the_first_and_last_checkpoint_on_the_training_task
     assert len(loop["checkpoints"]) == 2 and loop["claim"]["counts"] == "1 → 1 of 3"
 
 
+def test_a_live_eval_run_shows_no_block_under_way_once_a_closed_result_names_its_condition() -> None:
+    # the base's training block closes with seed 1 failed, then new_layout runs seed 1 on the base and it succeeds
+    layout = held_out(0, 1, "succeeded")
+    layout[0][1]["episode_id"] = "layout-1"
+    live = [*conditioned(0, "training_distribution", (1, "failed"), (2, "succeeded")), *layout]
+    out = results(*live)
+    assert len(out["checkpoints"]) == 1
+    assert out["rows"] == [[1, "pending", ["failed"]], [2, "pending", ["succeeded"]]]
+    assert run(CLAIM, stream(*live))[1] is None
+    script = """
+    const columns = writes.filter(([id]) => id === "columns").pop()[1];
+    vm.runInContext(`
+      chosen = true; MomState.choose(view, "both"); MomState.visit(view, { seed: 1 }); render();
+    `, context);
+    const seed = writes.filter(([id]) => id === "results").pop()[1];
+    return { up: columns.includes("#m-up"), cards: seed.match(/class="card"/g).length };
+    """
+    assert app(REPLAY + script, stream(*live)) == {"up": False, "cards": 1}
+
+
 def test_an_episode_is_finished_once_judged_moved_past_or_its_run_has_stopped() -> None:
     out = presenter(
         """
